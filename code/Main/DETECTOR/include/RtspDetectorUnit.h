@@ -24,7 +24,7 @@
 #include "IOStreamManager.h"
 #include "NetworkManager.h"
 #include "EngineLoadBalancer.h"
-#include "rtsp_proxy.h"
+#include "GstRtspClient.h"      // Phase 1: GStreamer-based RTSP receiver (replaces happytimesoft CRtspProxy)
 
 // STL
 #include <mutex>
@@ -126,7 +126,7 @@ namespace MGEN
         const MGEN::Type::UnitID id_ = UNIT_ID_NOT_SET;
 
         // RTSP Proxy ptr for link video_decoder
-        CRtspProxy* proxy_ptr_ = nullptr;
+        GstRtspClient* proxy_ptr_ = nullptr;  // weak ref — owner: RtspHandler::clients_
 
         // Thread for detection & attribute inference -- Main Thread
         SafeThread inference_thread_;
