@@ -334,11 +334,21 @@ namespace MGEN
         const size_t v_sz = u_sz;
         const uint8_t* src = map.data;
 
-        if( map.size >= y_sz + u_sz + v_sz ) {
-            std::memcpy( frame->data[ 0 ], src,                y_sz );
-            std::memcpy( frame->data[ 1 ], src + y_sz,         u_sz );
-            std::memcpy( frame->data[ 2 ], src + y_sz + u_sz,  v_sz );
+        // Q1 fix (심층 review 2026-05-15): 이전 코드는 buffer size 부족 시 memcpy 만
+        // skip 하고 frame 은 그대로 반환했음. 결과적으로 0-initialised garbage data 가
+        // Unit → NPU 까지 흘러가 noise / 잘못된 inference / 최악의 경우 segfault 유발.
+        // 이제는 buffer size 부족이 검출되면 frame 을 회수하고 nullptr 을 반환한다.
+        if( map.size < y_sz + u_sz + v_sz ) {
+            MLOG_ERROR( "ConvertSampleToAVFrame: buffer size 부족 (map.size=%zu, expected=%zu) — frame drop",
+                        static_cast<size_t>( map.size ), y_sz + u_sz + v_sz );
+            gst_buffer_unmap( buf, &map );
+            av_frame_free( &frame );
+            return nullptr;
         }
+
+        std::memcpy( frame->data[ 0 ], src,                y_sz );
+        std::memcpy( frame->data[ 1 ], src + y_sz,         u_sz );
+        std::memcpy( frame->data[ 2 ], src + y_sz + u_sz,  v_sz );
         gst_buffer_unmap( buf, &map );
 
         if( GST_BUFFER_PTS_IS_VALID( buf ) ) {
