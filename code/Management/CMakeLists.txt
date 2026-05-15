@@ -49,7 +49,7 @@ PRIVATE
     BasicLibs
     GRPC
     REST
-    RTSP
+    RTSP_GST          # Phase 1: GStreamer replaces happytimesoft RTSP
     Threads::Threads  # pthread
 
     # GCC < 9.0 filesystem support
