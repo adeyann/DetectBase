@@ -14,7 +14,7 @@ description: Must read before any git/gh operation. Defines AI's allowed git usa
 |---|---|
 | **Branch-only work** | Always `git checkout -b <branch>` before any modification. Create as many branches as needed. |
 | **PR for master merge** | Use `gh pr create --base master --head <branch>` to propose changes. Never `git checkout master && git merge` directly. |
-| **User-explicit approval for master merge** | `gh pr merge` only runs when the user says so ("머지해라", "merge it" 등). Do not infer or anticipate approval. |
+| **User-explicit approval for master merge** | `gh pr merge` only runs when the user says so ("머지해라", "merge it" 등). Do not infer or anticipate approval. See [Master Merge Execution](#master-merge-execution-user-instructed) for the exact command. |
 | **Inter-branch merge is free** | Merging between non-master branches (e.g., feature → integration) is fine without asking. |
 | **No force push** | `git push --force` / `git push -f` are denied by settings. Never bypass. |
 | **No hard reset** | `git reset --hard` is denied. Use `git reset` (mixed) or `git restore` instead. |
@@ -79,6 +79,38 @@ gh pr create --base master --head <prefix>/<topic> \
 EOF
 )"
 ```
+
+## Master Merge Execution (user-instructed)
+
+When the user explicitly says to merge a PR, use this default:
+
+```bash
+gh pr merge <PR#> --squash --delete-branch
+```
+
+**Defaults explained**:
+- **`--squash`** — condenses the branch's commits into one on master. Keeps master history linear and easy to revert. Default for this project.
+- **`--delete-branch`** — removes the source branch on the remote and (if checked out locally) locally. Always include — keeps branch list clean.
+
+**Alternative strategies** (use only if user specifies):
+- `--merge` — preserves all branch commits + adds a merge commit. Use when individual commit history matters for audit/bisection.
+- `--rebase` — replays commits onto master without a merge commit. Linear history, but loses branch grouping context.
+
+**After merge, sync local**:
+```bash
+git checkout master
+git pull
+# Source branch was auto-deleted on remote. If still present locally:
+git branch -D <branch-name>
+```
+
+**Quick verify**:
+```bash
+gh pr view <PR#> --json state,mergedAt,mergeCommit
+git log --oneline -3       # confirm squash commit on master
+```
+
+If the merge command fails (CI required, conflicts, branch protection), report the error and ask — do not retry with `--force` or `--admin` flags.
 
 ## Commit Message Style
 
