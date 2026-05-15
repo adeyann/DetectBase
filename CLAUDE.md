@@ -11,7 +11,7 @@ Pipeline: RTSP input → YOLOv5 NPU inference → SORT tracking → boundary int
 
 ## Work Rules
 - Think and reason in English. Always respond in Korean.
-- Always read and follow relevant skills in `.claude/skills/` before writing or modifying code
+- Always read and follow relevant skills in `.claude/skills/` before each task. Current skills: `coding-guidelines` (code changes), `git-workflow` (any git/gh operation), `monitoring` (long-running observation / sanity / RSS tracking).
 - Report plan and wait for approval before making changes
 - **`sed` is on the deny list** — use `awk`/`cut`/`tr` for read-style queries, and provide complete files for edits. Never invoke `sed` directly.
 - **No `rm`/`unlink`/`rmdir` direct deletion** — use `mv` to `.deleted_backup/` instead. Actual `rm` only by user.
