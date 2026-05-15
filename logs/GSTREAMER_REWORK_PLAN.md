@@ -95,11 +95,13 @@ happytimesoft baseline (~528 MB) 와 GStreamer 시도 (~600~700 MB 추정) 의 d
 
 ### 2.4 MPP decoder buffer pool (mppvideodec 사용 시, ~30~80 MB)
 
-- MPP NPU decoder 가 internal frame pool 보유 (DRM/ION buffer)
+- **MPP = Rockchip Media Processing Platform**. NPU 가 아니라 **VPU (별도 video codec 하드웨어 block)**. RK3588 의 NPU 와는 별도 모듈이며 동시 작동.
+- MPP (VPU) decoder 가 internal frame pool 보유 (DRM/ION buffer)
 - 1080p NV12 frame ~3 MB × 8~16 reference frames + decode buffer × N cam
 - 4 cam × 8 buffer × 3 MB = ~96 MB (worst case)
 
 → 이게 MPP 통합 시 RSS 가 가장 크게 늘어나는 항목.
+→ NPU (YOLOv5 inference) 부하에는 영향 없음 — chip 안 별도 block.
 
 ### 2.5 새 thread stack (~5~15 MB)
 
