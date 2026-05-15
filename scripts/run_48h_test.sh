@@ -1,15 +1,17 @@
 #!/bin/bash
 # =============================================================================
-# 48시간 운영 안정성 테스트
-# - 1시간 간격으로 snapshot 수집 (총 48 snapshot + summary)
+# 장시간 운영 안정성 테스트 (default 48h, 환경변수로 조정 가능)
+# - 1시간 간격으로 snapshot 수집 (총 DURATION_HOURS snapshot + summary)
 # - 검증 대상: 메모리/FD/Thread leak, ERROR/WARN drift, 디스크 cleanup, DFPS 안정성
 # - nohup 백그라운드 실행 권장 (SSH 끊겨도 지속)
 #
-# 사용:
+# 사용 (default 48h):
 #   nohup ./scripts/run_48h_test.sh > /dev/null 2>&1 &
-#   echo $! > /tmp/48h_test.pid
 #
-# 결과: logs/test_48h_<timestamp>/
+# 사용 (24h baseline 등):
+#   DURATION_HOURS=24 nohup ./scripts/run_48h_test.sh > /dev/null 2>&1 &
+#
+# 결과: logs/test_<duration>h_<timestamp>/
 # =============================================================================
 
 set -u
@@ -20,14 +22,15 @@ LOG_FILE="${DETECTBASE_ROOT}/logs/DetectBase.log"
 METRICS_URL="http://localhost:9090/metrics"
 
 STAMP="$(date +%Y%m%d_%H%M%S)"
-TEST_DIR="${DETECTBASE_ROOT}/logs/test_48h_${STAMP}"
+DURATION_HOURS="${DURATION_HOURS:-48}"  # 환경변수로 override 가능 (예: DURATION_HOURS=24)
+TEST_DIR="${DETECTBASE_ROOT}/logs/test_${DURATION_HOURS}h_${STAMP}"
 mkdir -p "${TEST_DIR}"
 
 START_TS=$(date +%s)
-DURATION_SEC=$((48 * 3600))  # 48시간
+DURATION_SEC=$((DURATION_HOURS * 3600))
 END_TS=$((START_TS + DURATION_SEC))
 INTERVAL_SEC=3600  # 1시간 간격
-TOTAL_SNAPS=48
+TOTAL_SNAPS=$DURATION_HOURS
 
 PID_FILE="${TEST_DIR}/.pid"
 echo "$$" > "${PID_FILE}"
@@ -36,7 +39,7 @@ echo "$$" > "${PID_FILE}"
 # 시작 마커 + baseline
 # -----------------------------------------------------------------------------
 {
-    echo "===== 48시간 운영 테스트 시작 ====="
+    echo "===== ${DURATION_HOURS}시간 운영 테스트 시작 ====="
     echo "시작: $(date '+%Y-%m-%d %H:%M:%S KST')"
     echo "종료 예정: $(date -d @$END_TS '+%Y-%m-%d %H:%M:%S KST')"
     echo "snapshot 간격: 1시간 (총 ${TOTAL_SNAPS} 회)"
@@ -81,6 +84,26 @@ take_snapshot() {
         echo "----- 디스크 사용량 -----"
         df -h /hdd_ext 2>/dev/null | tail -1
         df -h / 2>/dev/null | tail -1
+        echo
+        echo "----- docker stats (외부 view) -----"
+        docker stats --no-stream --format "name={{.Name}} cpu={{.CPUPerc}} mem={{.MemUsage}} mem%={{.MemPerc}} net={{.NetIO}} blk={{.BlockIO}}" detectbase_service 2>&1 || echo "N/A"
+        echo
+        echo "----- network sockets (host view, network_mode=host) -----"
+        # 컨테이너 PID 의 모든 TCP socket (해당 process 가 연 것만)
+        local proc_pid
+        proc_pid=$(docker inspect -f '{{.State.Pid}}' detectbase_service 2>/dev/null)
+        if [ -n "$proc_pid" ] && [ "$proc_pid" != "0" ]; then
+            local listening established
+            listening=$(ss -tnp 2>/dev/null | awk -v pid="pid=${proc_pid}," '$0 ~ pid && /LISTEN/' | wc -l)
+            established=$(ss -tnp 2>/dev/null | awk -v pid="pid=${proc_pid}," '$0 ~ pid && /ESTAB/' | wc -l)
+            echo "listening: ${listening}"
+            echo "established: ${established}"
+        else
+            echo "container down (no PID)"
+        fi
+        echo
+        echo "----- log 크기 (회전 정상 동작 확인) -----"
+        du -sh "${DETECTBASE_ROOT}/logs/DetectBase.log"* 2>/dev/null | head -10
     } > "${snap_file}" 2>&1
 }
 
@@ -100,7 +123,7 @@ done
 # 종합 summary 생성
 # -----------------------------------------------------------------------------
 {
-    echo "# 48시간 운영 안정성 테스트 — 종합 보고"
+    echo "# ${DURATION_HOURS}시간 운영 안정성 테스트 — 종합 보고"
     echo
     echo "**기간**: $(date -d @$START_TS '+%Y-%m-%d %H:%M:%S') ~ $(date '+%Y-%m-%d %H:%M:%S') KST"
     echo "**snapshot**: ${iter} 개 (1시간 간격)"
@@ -189,4 +212,4 @@ done
 } > "${TEST_DIR}/SUMMARY.md"
 
 rm -f "${PID_FILE}"
-echo "===== 48h test 완료 $(date '+%Y-%m-%d %H:%M:%S KST') =====" >> "${TEST_DIR}/INFO.txt"
+echo "===== ${DURATION_HOURS}h test 완료 $(date '+%Y-%m-%d %H:%M:%S KST') =====" >> "${TEST_DIR}/INFO.txt"
