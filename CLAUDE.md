@@ -11,10 +11,11 @@ Pipeline: RTSP input → YOLOv5 NPU inference → SORT tracking → boundary int
 
 ## Work Rules
 - Think and reason in English. Always respond in Korean.
-- Always read and follow relevant skills in `.claude/skills/` before writing or modifying code
+- Always read and follow relevant skills in `.claude/skills/` before each task. Current skills: `coding-guidelines` (code changes), `git-workflow` (any git/gh operation), `monitoring` (long-running observation / sanity / RSS tracking).
 - Report plan and wait for approval before making changes
 - **`sed` is on the deny list** — use `awk`/`cut`/`tr` for read-style queries, and provide complete files for edits. Never invoke `sed` directly.
-- **AI has NO permission to delete files or use git.** To delete files or perform git operations, request the user. Never execute rm, unlink, git, or any delete operation directly.
+- **No `rm`/`unlink`/`rmdir` direct deletion** — use `mv` to `.deleted_backup/` instead. Actual `rm` only by user.
+- **Git workflow** — AI may use git/gh, but **never on `master` directly**. Always work on a separate branch (create as many as needed). Merge to `master` must go through a Pull Request and is executed only when the user explicitly instructs. Merges between non-`master` branches are free. Force push (`--force`/`-f`) and `git reset --hard` are denied. (Defined 2026-05-15)
 
 ## Coding Standard
 - C++17, enforce RAII, guarantee exception safety

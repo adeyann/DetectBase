@@ -2,7 +2,7 @@
 
 > **NOTE (2026-05-15)**: 파일명의 "LEAK_FOUND" 는 oversimplified — 실제 본 테스트의 결론은 **leak 없음 (ERROR 0, FD/Thread 안정)**.
 > 다만 후반 10시간에 RSS +47 MB 증가 (glibc ptmalloc fragmentation 으로 추정) 관측 → 후속 W-14 patch (`malloc_trim(0)` in `RtspDetectorUnit.cpp:231`) 와 jemalloc 도입 (2026-05-14) 의 trigger 가 됨.
-> AI 는 파일 rename 권한 없음 — 사용자가 git mv 로 정리 권장 (`TEST_48H_20260509_RESULT.md` 등). 파일명만 오해 소지, 내용은 유효.
+> AI 가 별도 branch 에서 `git mv` 로 정리 가능 (예: `TEST_48H_20260509_RESULT.md` 로 rename). 단 `master` 머지는 PR + 사용자 명시 승인. 파일명만 오해 소지, 내용은 유효.
 
 ---
 

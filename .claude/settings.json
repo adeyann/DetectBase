@@ -93,13 +93,17 @@
       "Bash([[ *)",
       "Bash(true)",
       "Bash(false)",
-      "Bash(mv *)"
+      "Bash(mv *)",
+      "Bash(git *)",
+      "Bash(gh *)"
     ],
     "deny": [
       "Bash(rm *)",
       "Bash(unlink *)",
       "Bash(rmdir *)",
-      "Bash(git *)",
+      "Bash(git push * --force*)",
+      "Bash(git push * -f *)",
+      "Bash(git reset --hard*)",
       "Bash(sudo *)",
       "Bash(docker rm *)",
       "Bash(sed *)"

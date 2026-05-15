@@ -1,7 +1,7 @@
 # NEXT_SESSION — happytimesoft baseline 완전 복원 + git push 진행
 
-**최종 갱신**: 2026-05-15 16:10 KST
-**상황**: happytimesoft 복원/빌드/운영/sanity 모두 PASS → 사용자가 git push 진행 단계
+**최종 갱신**: 2026-05-15 16:30 KST
+**상황**: ✅ git push 완료 (master branch, 452 objects, https://github.com/adeyann/DetectBase) → STEP 5 (GStreamer 재작업 branch) 진행 단계
 
 ---
 
@@ -184,8 +184,8 @@ code/BasicLibs/core/parser/yaml-cpp/lib/, image_root/, frame/, crop/, ...
 
 ## 사용자 메모리 규칙 (재확인)
 
-- **AI 는 git/rm 권한 없음** — 사용자가 직접 git 명령 실행. AI 는 코드만 정리.
+- **Git 워크플로우** (2026-05-15 도입): AI 는 git/gh 사용 가능, 단 `master` 직접 작업 금지. 본인 branch 만 사용 (자유 생성). `master` 머지는 PR + 사용자 명시 승인. 비-master branch 간 머지는 자유. force push / `git reset --hard` 금지.
+- **삭제 규칙**: `rm`/`unlink`/`rmdir` 직접 금지. `.deleted_backup/` 으로 mv. 실제 `rm` 은 사용자만.
 - 모든 임시 로그는 `DetectBase/logs/` 안에 (절대 /tmp 아님)
-- 삭제는 `.deleted_backup/` 으로 mv (rm 금지)
 - read 용 명령 (find/grep/awk) 즉시 실행, **sed 금지** (deny 등록)
 - destructive 명령 (docker kill, rm -f 등) 단독 호출
