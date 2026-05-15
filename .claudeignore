@@ -1,0 +1,45 @@
+# Build artifacts
+bin/
+code/build/
+*.o
+*.so
+*.a
+*.la
+*.pc
+
+# Archive files
+*.tar.gz
+
+# Engine binaries (not editable) — only binaries, NOT the directory itself
+# (engines/ contains *.yaml/*.json config files that must be indexed)
+*.rknn
+*.engine
+
+# Runtime logs (binary/rotated logs only — .md analyses under logs/ are indexed)
+logs/*.log
+logs/*.log.*
+logs/*.gz
+logs/test_48h_*/
+logs/audit_*/
+*.log
+
+# Trash (mv destination for deprecated artifacts)
+.deleted_backup/
+
+# Bundled static libraries (ABI incompatible, must source-build in docker)
+code/Protocol/REST/lib/
+code/Protocol/SocketIO/lib/
+code/BasicLibs/core/parser/yaml-cpp/lib/
+
+# Generated proto files (must regenerate in docker)
+code/Protocol/GRPC/protos/*.pb.cc
+code/Protocol/GRPC/protos/*.pb.h
+
+# CUDA sources (MAIA legacy, removal target — no need to index)
+*.cu
+
+# NPU runtime binaries (not editable)
+code/Engine/NPU/librknn_api/aarch64/
+
+# Test data
+.test/

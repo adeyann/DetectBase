@@ -1,0 +1,172 @@
+# =============================================================================
+# Dockerfile.build
+# DetectBase aarch64 빌드 컨테이너 (Odroid M2 NPU)
+#
+# 목적: x86/CUDA 기반의 기존 빌드 환경을 aarch64/NPU 환경으로 이식.
+# 구조는 기존을 따르고, ABI 비호환되는 라이브러리만 컨테이너 내에서 소스 빌드.
+# =============================================================================
+
+FROM arm64v8/ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Seoul
+
+# -----------------------------------------------------------------------------
+# 시스템 의존성 (apt - aarch64 native packages)
+#  - libcurl: ubuntu aarch64 패키지가 정상 호환되므로 apt 사용 (소스 빌드 불필요)
+#  - OpenCV / FFmpeg / nlohmann-json / yaml-cpp 도 apt
+# -----------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        git \
+        pkg-config \
+        autoconf \
+        libtool \
+        ca-certificates \
+        wget \
+        rsync \
+        libssl-dev \
+        libcurl4-openssl-dev \
+        libopencv-dev \
+        libavformat-dev \
+        libavcodec-dev \
+        libavutil-dev \
+        libswscale-dev \
+        nlohmann-json3-dev \
+    && rm -rf /var/lib/apt/lists/*
+# P1 (2026-05-14): libyaml-cpp-dev 제거 — vendored prebuilt .a (BasicLibs/core/parser/yaml-cpp/lib/NPU/libyaml-cpp.a) 사용 중. apt 패키지는 중복.
+
+# -----------------------------------------------------------------------------
+# jemalloc (long-running 서버의 RSS 단편화 회피)
+#  - docker-compose.yml 의 LD_PRELOAD 로 활성화. 코드 변경 0.
+#  - W-14 (malloc_trim) 와 함께 적용. W-14 가 강제 회수, jemalloc 이 단편화 자체 감소.
+# -----------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libjemalloc-dev libjemalloc2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# -----------------------------------------------------------------------------
+# protobuf + grpc (소스 빌드 — 원본 MAIA 버전 정확 일치)
+#  - 원본 MAIA: protoc 3.12.2 + libprotobuf.so.3.12.2.0 + libgrpc.so.10 (1.30.x)
+#  - grpc v1.30.2 의 third_party/protobuf submodule = protobuf 3.12.x → 일치
+#  - SONAME (libprotobuf.so.23) 가 OpenCV apt 의 libgdal 이 끌고오는 protobuf 와 동일
+#    → 동적 로더가 하나만 로드, ABI 충돌 없음
+#  - /usr/local 에 설치 → 기존 BuildScript.sh의 LD_LIBRARY_PATH=/usr/local/lib 와 일치
+# -----------------------------------------------------------------------------
+WORKDIR /tmp/build
+
+RUN git clone --depth 1 -b v1.30.2 https://github.com/grpc/grpc.git \
+    && cd grpc \
+    && git submodule update --init --recursive --depth 1 \
+    && echo "[Patch] abseil graphcycles.cc: missing <limits> include (GCC 11 strict)" \
+    && sed -i '/^#include <algorithm>$/a #include <limits>' \
+        third_party/abseil-cpp/absl/synchronization/internal/graphcycles.cc \
+    && echo "[Patch] abseil failure_signal_handler.cc: std::max type mismatch (long int vs int)" \
+    && sed -i '/std::max.*SIGSTKSZ/s/std::max(/std::max<size_t>(/' \
+        third_party/abseil-cpp/absl/debugging/failure_signal_handler.cc \
+    && mkdir -p cmake/build \
+    && cd cmake/build \
+    && cmake ../.. \
+        -DgRPC_INSTALL=ON \
+        -DgRPC_BUILD_TESTS=OFF \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=ON \
+        -DCMAKE_INSTALL_PREFIX=/usr/local \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    && make -j$(nproc) \
+    && make install \
+    && cd /tmp/build \
+    && rm -rf grpc
+
+# -----------------------------------------------------------------------------
+# restclient-cpp (소스 빌드)
+# -----------------------------------------------------------------------------
+RUN git clone --depth 1 -b 0.5.3 https://github.com/mrtazz/restclient-cpp.git \
+    && cd restclient-cpp \
+    && mkdir build && cd build \
+    && cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    && make -j$(nproc) \
+    && make install \
+    && cd /tmp/build \
+    && rm -rf restclient-cpp
+
+# -----------------------------------------------------------------------------
+# socket.io-client-cpp (소스 빌드)
+# -----------------------------------------------------------------------------
+RUN git clone --depth 1 --recurse-submodules -b 3.1.0 https://github.com/socketio/socket.io-client-cpp.git \
+    && cd socket.io-client-cpp \
+    && mkdir build && cd build \
+    && cmake .. \
+        -DBUILD_SHARED_LIBS=ON \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    && make -j$(nproc) \
+    && make install \
+    && cd /tmp/build \
+    && rm -rf socket.io-client-cpp
+
+# -----------------------------------------------------------------------------
+# prometheus-cpp (소스 빌드, P54: HTTP /metrics endpoint)
+#  - exposer 모드: civetweb 기반 HTTP 서버 (prometheus 가 pull)
+#  - submodule (civetweb) 자동 fetch 를 위해 --recurse-submodules
+#  - push / compression / testing 비활성 (의존성 최소화)
+# -----------------------------------------------------------------------------
+RUN git clone --depth 1 --recurse-submodules -b v1.3.0 https://github.com/jupp0r/prometheus-cpp.git \
+    && cd prometheus-cpp \
+    && mkdir build && cd build \
+    && cmake .. \
+        -DBUILD_SHARED_LIBS=ON \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DENABLE_PUSH=OFF \
+        -DENABLE_COMPRESSION=OFF \
+        -DENABLE_TESTING=OFF \
+    && make -j$(nproc) \
+    && make install \
+    && cd /tmp/build \
+    && rm -rf prometheus-cpp
+
+# -----------------------------------------------------------------------------
+# librknnrt (Rockchip NPU runtime)
+#  - 헤더 (rknn_api.h) 는 컨테이너에 포함 → 빌드 시 컴파일 가능
+#  - 실행시 호스트의 /usr/lib/librknnrt.so 를 docker-compose 볼륨으로 마운트
+#  - 빌드 시점 링크용 .so 도 함께 설치 (런타임에는 호스트본이 우선)
+# -----------------------------------------------------------------------------
+# 호스트의 librknnrt.so 버전과 일치 (현재: 1.5.2). 헤더-라이브러리 ABI 미스매치 차단.
+# repo: rockchip-linux/rknpu2 (v1.5.2 시점 runtime 공식 repo). target SoC: RK3588 aarch64 (Odroid M2)
+RUN git clone --depth 1 -b v1.5.2 https://github.com/rockchip-linux/rknpu2.git /tmp/rknpu2 \
+    && cp /tmp/rknpu2/runtime/RK3588/Linux/librknn_api/include/rknn_api.h /usr/local/include/ \
+    && cp /tmp/rknpu2/runtime/RK3588/Linux/librknn_api/aarch64/librknnrt.so /usr/local/lib/ \
+    && rm -rf /tmp/rknpu2 \
+    && ldconfig
+
+# -----------------------------------------------------------------------------
+# 추가 런타임 의존성 (별도 layer — 빠른 반복 빌드를 위해 분리)
+#  - libasound2-dev : RTSP audio_capture_linux.h 가 alsa/asoundlib.h 요구
+#  - libx264-dev    : RTSP 모듈 링크 (-lx264)
+#  - libx265-dev    : RTSP 모듈 링크 (-lx265)
+#  - libopus-dev    : RTSP 모듈 링크 (-lopus)
+# -----------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libasound2-dev \
+        libx264-dev \
+        libx265-dev \
+        libopus-dev \
+        libswresample-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# -----------------------------------------------------------------------------
+# 라이브러리 캐시 갱신 + LD_LIBRARY_PATH 설정 (기존 BuildScript.sh 가정 일치)
+# -----------------------------------------------------------------------------
+RUN ldconfig
+ENV LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
+
+# -----------------------------------------------------------------------------
+# 작업 디렉토리 (기존 구조 유지)
+# -----------------------------------------------------------------------------
+WORKDIR /DetectBase
+
+# 빌드 컨테이너이므로 ENTRYPOINT 미설정 (docker-compose 또는 docker run 시 명령 지정)

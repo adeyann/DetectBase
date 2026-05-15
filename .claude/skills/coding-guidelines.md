@@ -1,0 +1,62 @@
+---
+name: coding-guidelines
+description: Must read before writing or modifying any code. Covers code style, error handling, thread synchronization, and prohibited patterns. Triggered on all code-related tasks including writing, review, debugging, and refactoring.
+---
+
+# Project Coding Guidelines
+
+## First Principle — KISS (Keep It Simple, Stupid)
+Avoid unnecessary or excessive code. This is the absolute standard for all code work.
+
+## Pre-work Checklist
+- Re-read the instructions
+- Working from actual code, not assumptions
+
+## Approval Required Before Work
+Report and wait for approval if any of these apply:
+- File structure or class design changes needed
+- Modification scope spans 3+ files
+- Existing interface (function signature) changes needed
+
+## Code Style
+
+| Item | Rule | Example |
+|------|------|---------|
+| Class | PascalCase | `DataManager` |
+| Function | camelCase | `getData` |
+| Variable | snake_case | `data_count` |
+| Member | m_ prefix | `m_data_count` |
+| Indent | tab | — |
+| Comments | Korean | `// 데이터 초기화` |
+
+## Error Handling
+- Handle errors via return values
+- Log before returning on error
+- Log format: `[ERROR] function_name : message`
+- C++ exceptions are prohibited
+
+## Prohibited Patterns
+- Minimize global variables
+- No recursion
+- No raw new/delete
+- No C-style casts
+- No using namespace std (in headers)
+- Always guard against memory leaks
+
+## Pre-work Scope
+- Check both interface definition and implementation of target file
+- Check upstream callers of the modification target
+- Understand related data structures/class definitions first
+
+## Thread/Synchronization Rules
+- Shared resources must be protected with synchronization
+- No external function calls while holding a lock
+- No nested locks
+- Minimize lock scope — lock only where needed
+- Thread creation: pthread only
+
+## Pre-submit Checklist
+- No omitted or missing code?
+- No undeclared variables used?
+- No duplicate declarations of existing symbols?
+- Compliant with KISS principle?

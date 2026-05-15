@@ -1,0 +1,38 @@
+# =============================================================================
+# Dockerfile.analysis
+# DetectBase 정적 분석 / sanitizer 빌드 전용 컨테이너
+#
+# 목적: 운영 이미지(detectbase:1.0)를 베이스로 clang-tidy / cppcheck 등 분석 도구
+#       추가. 운영 이미지를 오염시키지 않고 일회성 분석에만 사용한다.
+#
+# 사용:
+#   docker build -f Dockerfile.analysis -t detectbase:analysis .
+#   docker run --rm -v $(pwd):/DetectBase detectbase:analysis bash
+#
+# 포함 도구:
+#   - clang-tidy : C++ 정적 분석 (RAII, dangling, naming 등)
+#   - cppcheck   : C++ 정적 분석 (null deref, uninit, oob 등)
+#   - clang      : ASan / TSan 빌드용 (g++ 도 지원하지만 clang 권장)
+# =============================================================================
+
+FROM detectbase:1.0
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Seoul
+
+# -----------------------------------------------------------------------------
+# 분석 도구 설치
+#  - clang-tidy / cppcheck : 정적 분석
+#  - clang                 : ASan / TSan 빌드 (g++ 도 가능하지만 clang 이 더 정확)
+# -----------------------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        clang-tidy \
+        cppcheck \
+        clang \
+        llvm \
+    && rm -rf /var/lib/apt/lists/*
+
+# 작업 디렉토리는 베이스 그대로 /DetectBase
+WORKDIR /DetectBase
+
+# 분석 컨테이너이므로 ENTRYPOINT 미설정

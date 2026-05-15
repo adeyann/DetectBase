@@ -1,0 +1,19 @@
+{
+    "ProfileName": "YoloV5s_Airockchip_RKNN",
+    "ModelMajorType": "Detection",
+    "ModelMinorType": "YoloV5",
+    "ModelMagicType": "DetectionEngine",
+    "Priority": 1,
+    "InferenceBatchSize": 1,
+    "InferenceWeight": 1,
+    "InputSizeMutable": false,
+    "InputImageWidth": 640,
+    "InputImageHeight": 640,
+    "GpuAllocType": "All",
+    "ModelOptimizeType": "Torch_Onnx_RKNN",
+    "OptimizeGpuArchType": "RK3588",
+    "InputLayerBindingName": "images",
+    "OutputLayerBindingName": "output0",
+    "ConfidenceThreshold": 0.45,
+    "NmsThreshold": 0.45
+}

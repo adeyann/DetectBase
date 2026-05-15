@@ -1,0 +1,17 @@
+{
+    "DETECTBASE_ENGINE_FILES_ROOT_PATH": "/DetectBase/engines",
+
+    "COMMENT_1": "~/DetectBase 경로는 도커 내부에 /DetectBase로 마운트 되어 있음",
+    "COMMENT_2": "도커 내부에서 실행되는 서비스 경로로 설정되어야 함",
+    "COMMENT_3": "engines/ 디렉토리에 .rknn / .profile.json / .classes.json 평탄 배치 (P3 2026-05-14: .classes.yaml → .json)",
+
+    "Engines": [
+        {
+            "TagName":        "YoloV5s_Airockchip_RKNN",
+            "EngineFilePath": "/DetectBase/engines/yolov5s_airockchip.rknn",
+            "ProfilePath":    "/DetectBase/engines/engine.profile.json",
+            "ClassesPath":    "/DetectBase/engines/engine.classes.json",
+            "Enable": true
+        }
+    ]
+}

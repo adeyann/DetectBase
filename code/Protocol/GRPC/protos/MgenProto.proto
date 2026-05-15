@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+// GRPC 서비스 정의
+//
+// [기존] 이벤트 송수신 — 다음 프로젝트가 그대로 또는 변형해서 사용 가능.
+// [Phase 4 샘플] Counter / Heartbeat — 두 노드 간 정보 동기화 / 상태 체크의 reference 구현.
+//                실제 프로덕트는 필요한 메시지 형식으로 변형해서 활용.
+service DETECTBASE_GRPC {
+    // [기존] 단방향 fire-and-forget — 이벤트 알림.
+    rpc SendEventWithImages(EventDataWithRawImages) returns (Empty) {}
+    rpc SendEventOnlyJson(EventDataOnlyJson) returns (Empty) {}
+
+    // [기존] 양방향 request-response — 데이터 query 등.
+    rpc RequestEventWithImages(EventDataWithRawImages) returns (EventDataOnlyJson) {}
+    rpc RequestEventOnlyJson(EventDataOnlyJson) returns (EventDataOnlyJson) {}
+
+    // [Phase 4 샘플] 단방향 — counter delta push (예: "이벤트 발생 +1", "사용자 카운트 +5").
+    rpc SendCounterDelta(CounterDelta) returns (Empty) {}
+
+    // [Phase 4 샘플] 양방향 — counter snapshot 요청 (예: "현재 누적 이벤트 수 알려줘").
+    rpc RequestCounterSnapshot(CounterRequest) returns (CounterSnapshot) {}
+
+    // [Phase 4 샘플] 단방향 — heartbeat ping (peer 살아있음 확인).
+    rpc SendHeartbeat(HeartbeatPing) returns (Empty) {}
+}
+
+// ============== 기존 이벤트 메시지 ==============
+
+// 이미지와 함께 전송하는 요청 메시지
+message EventDataWithRawImages {
+    string uuid = 1;
+    string json_data = 2;
+    repeated RawImageData images = 3;
+}
+
+// 이미지 개별 항목 정의
+message RawImageData {
+    bytes data   = 1;
+    int32 size   = 2;
+    int32 width  = 3;
+    int32 height = 4;
+}
+
+// JSON 전용 요청 및 응답 메시지
+message EventDataOnlyJson {
+    string uuid = 1;
+    string json_data = 2;
+}
+
+// 응답이 없는 경우 사용
+message Empty {
+}
+
+// ============== Phase 4 샘플 메시지 ==============
+
+// counter delta — counter 의 변화량 push.
+// 예: { counter_name: "intrusion_total", delta: 1, source_id: "odroid-A" }
+message CounterDelta {
+    string counter_name = 1;
+    int64  delta        = 2;
+    string source_id    = 3;  // 보낸 노드의 식별자 (예: LocalIP / hostname)
+    int64  ts_ms        = 4;  // 송신 시각 (unix ms)
+}
+
+// counter snapshot 요청.
+// counter_names 비어있으면 모든 counter 응답.
+message CounterRequest {
+    repeated string counter_names = 1;
+    string          source_id     = 2;
+}
+
+// counter snapshot 응답.
+message CounterSnapshot {
+    map<string, int64> counters  = 1;
+    int64              ts_ms     = 2;
+    string             source_id = 3;
+}
+
+// heartbeat ping.
+message HeartbeatPing {
+    string source_id = 1;  // 보낸 노드 식별자
+    int64  ts_ms     = 2;  // 송신 시각 (unix ms)
+    uint32 seq       = 3;  // 단조 증가 순서 번호
+}

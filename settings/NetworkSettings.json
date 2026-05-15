@@ -1,0 +1,32 @@
+{
+    "MVAS_IP": "192.168.1.102",
+    "MVAS_IP_INFO": "MVAS의 ip 주소",
+
+    "SocketIO_Port": 3333,
+    "SocketIO_Port_INFO": "MVAS 서비스 중 SocketIO 의 포트 번호",
+
+    "REST_API_Port": 8000,
+    "REST_API_Port_INFO": "MVAS 서비스 중 REST API 의 포트 번호",
+
+    "LocalIP": "192.168.1.72",
+    "LocalIP_INFO_1": "현재 서버의 로컬 IP. 해당 IP를 기준으로 내 서비스 ID 등 MVAS 쿼리 요청함.",
+    "LocalIP_INFO_2": "만약 위의 IP값을 할당하지 않을 시 자동 탐색은 시행하지만, 다른 IP 할당 가능성 있음",
+
+    "GRPC_Client_Enabled": false,
+    "GRPC_Client_Enabled_INFO_1": "GRPC client 활성화 여부. true 면 GRPC_Peers 의 각 endpoint 로 이벤트 / counter 등을 push.",
+    "GRPC_Client_Enabled_INFO_2": "false (default) 면 GRPC client 인스턴스 생성 안 함 (영향 0). 비활성 시 GRPC_Peers 무시.",
+
+    "GRPC_Peers": [],
+    "GRPC_Peers_INFO_1": "GRPC client 가 push 할 대상 endpoint list. 활성화 시 각 항목은 { name, ip, port } 형식.",
+    "GRPC_Peers_INFO_2": "예: [ { \"name\": \"odroid-B\", \"ip\": \"192.168.1.73\", \"port\": 17019 } ]",
+
+    "GRPC_Server_Enabled": false,
+    "GRPC_Server_Enabled_INFO_1": "GRPC server 활성화 여부. true 면 외부 client (다른 노드) 로부터 이벤트 / counter / query 수신.",
+    "GRPC_Server_Enabled_INFO_2": "false (default) 면 server 인스턴스 생성 안 함. Client 와 독립적으로 ON/OFF 가능.",
+
+    "GRPC_Server_BindAddress": "0.0.0.0",
+    "GRPC_Server_BindAddress_INFO": "GRPC server bind 주소. 0.0.0.0 = 모든 인터페이스 허용 (default).",
+
+    "GRPC_Server_Port": 17019,
+    "GRPC_Server_Port_INFO": "GRPC server listen 포트. 다른 인스턴스의 GRPC_Peers 의 port 와 일치해야 함."
+}

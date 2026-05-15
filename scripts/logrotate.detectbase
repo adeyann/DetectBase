@@ -1,0 +1,30 @@
+# DetectBase log rotation 설정
+#
+# 호스트에 적용:
+#   sudo cp scripts/logrotate.detectbase /etc/logrotate.d/detectbase
+#   sudo chown root:root /etc/logrotate.d/detectbase
+#   sudo chmod 644 /etc/logrotate.d/detectbase
+#
+# 동작 검증:
+#   sudo logrotate -d /etc/logrotate.d/detectbase    # debug (실제 회전 안 함)
+#   sudo logrotate -f /etc/logrotate.d/detectbase    # 강제 1회 실행
+#
+# 일정:
+#   /etc/cron.daily/logrotate 가 매일 새벽 호출 → 자동 회전.
+#
+# 보관 정책:
+#   - 매일 회전 (daily)
+#   - 14일치 보관 (rotate 14)
+#   - 오래된 로그 압축 (.gz)
+#   - copytruncate: 원본 파일 핸들 유지 (DetectBase 가 reopen 안 해도 됨)
+
+/home/claudedev/DetectBase/logs/DetectBase.log {
+    su claudedev claudedev
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}

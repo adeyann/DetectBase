@@ -1,0 +1,79 @@
+# Build artifacts (cmake/ninja 생성물)
+bin/
+code/build/
+*.o
+*.so
+*.a
+*.la
+*.pc
+
+# Archive files
+*.tar.gz
+*.zip
+
+# NPU engine binaries (large, not editable — source 만 추적)
+*.rknn
+*.engine
+code/Engine/NPU/librknn_api/aarch64/librknnrt.so
+
+# Runtime logs (binary/rotated — .md 분석 문서만 추적)
+logs/*.log
+logs/*.out
+logs/*.log.*
+logs/*.gz
+logs/test_*/
+logs/audit_*/
+logs/gst_*/
+logs/asan_*
+logs/massif*
+logs/bisect*
+*.log
+
+# logs/ 임시 파일 (확장자 .log 외 — AI 작업 중 생성)
+logs/.current_*
+logs/.backup_*
+logs/sanity_*
+
+# Trash (mv destination for deprecated artifacts)
+.deleted_backup/
+
+# Bundled static libraries (ABI incompatible — source build in docker)
+code/Protocol/REST/lib/
+code/Protocol/SocketIO/lib/
+code/BasicLibs/core/parser/yaml-cpp/lib/
+
+# Generated proto files (regenerate in docker matching grpc/protobuf version)
+code/Protocol/GRPC/protos/*.pb.cc
+code/Protocol/GRPC/protos/*.pb.h
+
+# CUDA legacy (MAIA, removal target)
+*.cu
+
+# Image_root / event recordings (runtime data)
+image_root/
+frame/
+crop/
+
+# IDE / editor temp
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Settings overrides (runtime-tunable, NOT source)
+settings/EngineSettings.local.json
+settings/NetworkSettings.local.json
+.env.local
+
+# Claude Code 개인 / runtime
+.claude/*.lock
+.claude/*.local.json
+
+# Test data
+.test/
+
+# 그 외 임시 파일
+/tmp/
+*.tmp
+*.bak
