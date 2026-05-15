@@ -36,7 +36,6 @@ extern "C" {
 
 #include <sys/statvfs.h>       // P54 Layer 1: /frame disk usage 체크용 (statvfs)
 #include <filesystem>          // P54 Layer 2: 자동 청소 — 7일 이전 디렉토리 삭제용
-#include <malloc.h>            // glibc malloc_trim: emergency cleanup 후 heap 강제 반환 (W-14)
 
 namespace MGEN
 {
@@ -223,12 +222,6 @@ namespace MGEN
                 }
                 if( fs::is_empty( yr.path(), ec ) ) fs::remove( yr.path(), ec );
             }
-
-            // W-14: glibc malloc 의 heap arena 를 OS 로 강제 반환.
-            //   cleanup 안의 std::filesystem path string 할당/해제 burst 로 인한
-            //   fragmentation 누적 회피. 48h 테스트 시 후반 10h 에서 RssAnon
-            //   +47 MB 증가 관측 → malloc_trim 으로 해소 시도.
-            malloc_trim( 0 );
 
             return res;
         }
