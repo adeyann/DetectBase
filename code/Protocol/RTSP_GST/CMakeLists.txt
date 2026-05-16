@@ -15,6 +15,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(GST REQUIRED IMPORTED_TARGET
     gstreamer-1.0
     gstreamer-app-1.0
+    gstreamer-video-1.0    # GstRtspReceiver.cpp 의 gst_video_info_from_caps / GST_VIDEO_INFO_FORMAT 등 (#include <gst/video/video.h>)
 )
 
 # ---------------------------------------------------------------------------
