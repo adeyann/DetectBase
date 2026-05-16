@@ -126,6 +126,13 @@
       "Bash(curl --max-time * http://localhost:*)",
       "Bash(curl -s --max-time * http://localhost:*)",
 
+      "Bash(bash /home/claudedev/DetectBase/detectbase.sh *)",
+      "Bash(bash /home/claudedev/DetectBase/scripts/*)",
+      "Bash(/home/claudedev/DetectBase/scripts/*)",
+      "Bash(DURATION_HOURS=* nohup *)",
+      "Bash(DURATION_HOURS=* bash *)",
+      "Bash(GST_DEBUG=* docker *)",
+
       "Bash(git *)",
       "Bash(gh *)"
     ],
