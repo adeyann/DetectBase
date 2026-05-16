@@ -95,6 +95,7 @@
       "Bash(realpath *)",
       "Bash(basename *)",
       "Bash(dirname *)",
+      "Bash(cd *)",
       "Bash(tr *)",
       "Bash(nl *)",
       "Bash(tac *)",
