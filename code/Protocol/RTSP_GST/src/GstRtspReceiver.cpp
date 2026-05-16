@@ -94,15 +94,10 @@ namespace MGEN
                 cfg_.user_pw.c_str(),
                 cfg_.appsink_max_buffers );
         } else {
-            // Phase 1.1 (2026-05-16): protocols=tcp 강제. UDP RTP/RTCP socket 의 매
-            //   reconnect 마다 누수 (~2 socket/reconnect) 회피 목적. TCP 단일 stream 으로
-            //   socket 수 자체 줄임 (RTP+RTCP 가 같은 TCP 위 로 다중화).
-            //   do-retransmission 은 TCP 에선 의미 없음 — false 강제.
             desc = g_strdup_printf(
                 "rtspsrc name=src location=%s latency=%d "
-                "    protocols=tcp "
-                "    timeout=%d tcp-timeout=%d do-retransmission=false "
-                "    keepalive=true "
+                "    timeout=%d tcp-timeout=%d do-retransmission=%s "
+                "    keepalive=true udp-buffer-size=2097152 "
                 "    user-id=%s user-pw=%s "
                 "  ! rtph264depay ! h264parse "
                 "  ! avdec_h264 ! videoconvert ! video/x-raw,format=I420 "
@@ -111,10 +106,10 @@ namespace MGEN
                 cfg_.latency_ms,
                 cfg_.timeout_us,
                 cfg_.tcp_timeout_us,
+                cfg_.do_retransmission ? "true" : "false",
                 cfg_.user_id.c_str(),
                 cfg_.user_pw.c_str(),
                 cfg_.appsink_max_buffers );
-            (void) cfg_.do_retransmission;  // protocols=tcp 면 의미 없음 (warning 회피)
         }
 
         GError* err = nullptr;
@@ -163,51 +158,25 @@ namespace MGEN
 
     void GstRtspReceiver::TeardownPipeline()
     {
-        if( !pipeline_ ) return;
-
-        // Phase 1.1 (2026-05-16): rtspsrc 의 UDP RTP/RTCP socket close 보장 위해 강화.
-        //   (1) bus watch 먼저 해제 — set_state 도중 callback 차단
-        //   (2) appsink callback 도 명시적 clear — frame 처리 중 NULL state 진입 회피
-        //   (3) state NULL wait 늘림 (5s → 30s) — rtspsrc TEARDOWN response 대기 충분
-        //   (4) appsink/raw_appsink unref 는 pipeline 의 ref 와 별개 (gst_bin_get_by_name +1)
-        //   (5) pipeline unref 가 마지막 — child element 모두 destroy → socket close
-
-        if( bus_watch_id_ ) {
-            g_source_remove( bus_watch_id_ );
-            bus_watch_id_ = 0;
+        if( pipeline_ ) {
+            if( bus_watch_id_ ) {
+                g_source_remove( bus_watch_id_ );
+                bus_watch_id_ = 0;
+            }
+            gst_element_set_state( pipeline_, GST_STATE_NULL );
+            GstState st;
+            gst_element_get_state( pipeline_, &st, nullptr, 5 * GST_SECOND );
+            if( appsink_ ) {
+                gst_object_unref( appsink_ );
+                appsink_ = nullptr;
+            }
+            if( raw_appsink_ ) {
+                gst_object_unref( raw_appsink_ );
+                raw_appsink_ = nullptr;
+            }
+            gst_object_unref( pipeline_ );
+            pipeline_ = nullptr;
         }
-
-        // appsink callback 명시적 clear (frame 처리 race 회피)
-        if( appsink_ ) {
-            GstAppSinkCallbacks empty {};
-            gst_app_sink_set_callbacks( appsink_, &empty, nullptr, nullptr );
-        }
-        if( raw_appsink_ ) {
-            GstAppSinkCallbacks empty {};
-            gst_app_sink_set_callbacks( raw_appsink_, &empty, nullptr, nullptr );
-        }
-
-        gst_element_set_state( pipeline_, GST_STATE_NULL );
-
-        // NULL state 도달 대기 — rtspsrc 의 TEARDOWN command 송신 + response 시간 충분.
-        // 30s 가 너무 길게 느껴지면 운영 시 reconnect latency 가 증가 (운영 정상 시 1s 이내 도달).
-        GstState st;
-        const GstStateChangeReturn ret = gst_element_get_state( pipeline_, &st, nullptr, 30 * GST_SECOND );
-        if( ret != GST_STATE_CHANGE_SUCCESS || st != GST_STATE_NULL ) {
-            MLOG_WARN( "TeardownPipeline: NULL state 도달 실패 (ret=%d, st=%d) — 강제 unref 진행 (socket leak 위험)",
-                       static_cast<int>( ret ), static_cast<int>( st ) );
-        }
-
-        if( appsink_ ) {
-            gst_object_unref( appsink_ );
-            appsink_ = nullptr;
-        }
-        if( raw_appsink_ ) {
-            gst_object_unref( raw_appsink_ );
-            raw_appsink_ = nullptr;
-        }
-        gst_object_unref( pipeline_ );
-        pipeline_ = nullptr;
     }
 
     void GstRtspReceiver::MainLoopThreadFunc()
