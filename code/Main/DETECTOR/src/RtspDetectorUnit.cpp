@@ -36,6 +36,10 @@ extern "C" {
 
 #include <sys/statvfs.h>       // P54 Layer 1: /frame disk usage 체크용 (statvfs)
 #include <filesystem>          // P54 Layer 2: 자동 청소 — 7일 이전 디렉토리 삭제용
+// W-14 (DEPRECATED 2026-05-16): jemalloc 도입 후 malloc_trim(0) 이 사실상 no-op
+//   라 활성 코드에서 제거했다. 호출이 다시 필요해지면 아래 헤더와 §emergency
+//   cleanup 의 주석 처리된 한 줄을 함께 복구할 것.
+// #include <malloc.h>          // glibc malloc_trim: emergency cleanup 후 heap 강제 반환
 
 namespace MGEN
 {
@@ -222,6 +226,17 @@ namespace MGEN
                 }
                 if( fs::is_empty( yr.path(), ec ) ) fs::remove( yr.path(), ec );
             }
+
+            // W-14 (DEPRECATED 2026-05-16): glibc malloc 의 heap arena 를 OS 로 강제 반환.
+            //   cleanup 안의 std::filesystem path string 할당/해제 burst 로 인한
+            //   fragmentation 누적 회피용. 48h 테스트 시 후반 10h 에서 RssAnon
+            //   +47 MB 증가 관측되어 도입했음.
+            //   jemalloc (LD_PRELOAD, 2026-05-14 도입) 환경에서는 사실상 no-op:
+            //   - malloc_trim 은 glibc 전용 — jemalloc 이 wrap export 안 함
+            //   - application 의 모든 malloc 이 jemalloc 으로 → glibc heap 거의 비어있음
+            //   - 실제 page 회수는 jemalloc background_thread (MADV_DONTNEED) 가 담당
+            //   다시 활성화하려면 위 #include <malloc.h> 도 함께 복구할 것.
+            // malloc_trim( 0 );
 
             return res;
         }
