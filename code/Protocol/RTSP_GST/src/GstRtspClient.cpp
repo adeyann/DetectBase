@@ -171,34 +171,19 @@ namespace MGEN
 
             reconnect_pending_.store( false );
 
-            // EOS 인 경우 — 카메라 mp4 5분 cycle 등 정상 stream 종료.
-            //   → in-place reset 시도 (rtspsrc 만 NULL→PLAYING, mppvideodec 보존)
-            //   → mpp internal hardware DMA buffer leak (~12MB/reconn) 회피
-            // error/timeout 인 경우 — full restart + exponential backoff.
+            // Phase 1.1 (Q18 fix, 2026-05-16): EOS / error / timeout 모두 full restart 로 통합.
+            // 이전엔 EOS 시 ResetSourceOnly (TeardownPipeline + BuildPipeline) 호출했으나,
+            //   (a) Phase 1 = avdec_h264 (mppvideodec 없음) — in-place reset motivation 없음
+            //   (b) ResetSourceOnly 가 호출될 때마다 rtspsrc UDP RTP/RTCP socket 누수
+            //   (c) 1h 측정 결과 ~2 socket/reconnect leak
+            // full restart 도 같은 TeardownPipeline 호출하므로 leak path 자체 동일하지만,
+            // wait_sec 만큼 reconnect 빈도 줄여서 절대 leak rate 감소. + rtspsrc 의
+            // protocols=tcp 와 결합되어 UDP socket 자체 0.
             const bool is_eos = eos_reconnect_pending_.exchange( false );
-
-            if( is_eos ) {
-                // In-place reset 시도 (receiver_ 보존)
-                bool inplace_ok = false;
-                {
-                    std::lock_guard<std::mutex> lk( receiver_mtx_ );
-                    if( receiver_ ) {
-                        inplace_ok = receiver_->ResetSourceOnly();
-                    }
-                }
-                if( inplace_ok ) {
-                    reconnect_count_.fetch_add( 1 );
-                    MetricsRegistry::Instance().IncrementCounter( METRIC_RECONNECT_TOTAL, NO_LABELS, 1.0 );
-                    MLOG_INFO( "GstRtspClient[%d] EOS in-place reset OK — mppvideodec 보존", cfg_.cam_id );
-                    backoff_sec_ = cfg_.reconnect_initial_sec;
-                    continue;  // 다음 cycle 으로 (다시 wait)
-                }
-                MLOG_WARN( "GstRtspClient[%d] EOS in-place reset 실패 — full restart 로 fallback", cfg_.cam_id );
-                // fallback: 아래 full restart path 로 (wait_sec=0)
-            }
-
             const int wait_sec = is_eos ? 0 : backoff_sec_;
-            if( !is_eos ) {
+            if( is_eos ) {
+                MLOG_INFO( "GstRtspClient[%d] EOS — full restart (in-place reset deprecated)", cfg_.cam_id );
+            } else {
                 MLOG_WARN( "GstRtspClient[%d] reconnect 트리거 — %ds 후 재시도", cfg_.cam_id, wait_sec );
             }
 
