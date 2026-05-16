@@ -54,6 +54,10 @@ namespace MGEN
             int reconnect_initial_sec = 1;       ///< 첫 reconnect 대기 (초)
             int reconnect_max_sec     = 60;      ///< exponential backoff 상한 (초)
             size_t queue_max_size     = 10;      ///< AVFrame 큐 capacity
+            // happytimesoft 호환 backpressure 정책 — frame_cb 에서 skip 판정.
+            //   "큐에 이미 frame 있으면 새 frame drop" + "fps_limit 기반 interval drop"
+            //   참조: master:Protocol/RTSP/rtsp/src/rtsp_proxy.cpp avframeTossCallback
+            int fps_limit             = 30;      ///< 초당 enqueue 허용 frame 수 (interval = 1000/fps_limit ms)
             bool enable_raw_passthrough = false; ///< true 면 raw RTP H.264 packet callback 도 받음 (video forward)
         };
 
@@ -116,6 +120,8 @@ namespace MGEN
         std::atomic<bool>     eos_reconnect_pending_{ false };  ///< true=EOS cause (immediate restart, no backoff)
         std::atomic<uint64_t> reconnect_count_      { 0 };
         std::atomic<uint64_t> enqueue_drop_count_   { 0 };
+        // 마지막 enqueue 시각 (ns since steady_clock epoch). frame_cb interval skip 판정용.
+        std::atomic<int64_t>  last_enqueue_ns_      { 0 };
 
         std::mutex              cv_mtx_;
         std::condition_variable cv_;

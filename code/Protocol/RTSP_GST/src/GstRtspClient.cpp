@@ -114,14 +114,31 @@ namespace MGEN
 
         auto frame_cb = [this]( std::shared_ptr<AVFrame> frame ) {
             if( !frame || !queue_ ) return;
-            // SafeQueue 의 max_size + drop_oldest 정책 활용 (자체 drop_count 없으니 size 사전 체크)
-            const size_t before = queue_->size();
-            queue_->enqueue_move( std::move( frame ) );
-            // enqueue 후에도 size 변동 없으면 drop 발생한 것 (capacity 가득)
-            if( before >= cfg_.queue_max_size ) {
+            // happytimesoft 호환 backpressure 정책 (master:rtsp_proxy.cpp avframeTossCallback).
+            //   reason: GStreamer pipeline 은 멀티스레드 push 라 NPU consumer 와 무관하게 30 FPS 펌프.
+            //           큐를 즉시 만수위 만들어 ~720 MB anon 메모리 누적 (decoded I420 frame × 60 × 4 cam).
+            //   policy: ① 큐에 frame 이 1개라도 있으면 새 frame drop
+            //           ② 직전 enqueue 후 (1000/fps_limit) ms 안 지났으면 drop
+            //   결과: 큐 평균 0~1 frame, anon 메모리 ~10 MB 수준 (happytimesoft baseline 와 동등).
+            if( queue_->size() > 0 ) {
                 enqueue_drop_count_.fetch_add( 1 );
                 MetricsRegistry::Instance().IncrementCounter( METRIC_ENQUEUE_DROP_TOTAL, NO_LABELS, 1.0 );
+                return;
             }
+            const int fps_limit = cfg_.fps_limit > 0 ? cfg_.fps_limit : 30;
+            if( fps_limit < 60 ) {
+                const int64_t now_ns       = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                std::chrono::steady_clock::now().time_since_epoch() ).count();
+                const int64_t interval_ns  = static_cast<int64_t>( 1'000'000'000LL / fps_limit );
+                const int64_t last_ns      = last_enqueue_ns_.load( std::memory_order_relaxed );
+                if( last_ns != 0 && (now_ns - last_ns) < interval_ns ) {
+                    enqueue_drop_count_.fetch_add( 1 );
+                    MetricsRegistry::Instance().IncrementCounter( METRIC_ENQUEUE_DROP_TOTAL, NO_LABELS, 1.0 );
+                    return;
+                }
+                last_enqueue_ns_.store( now_ns, std::memory_order_relaxed );
+            }
+            queue_->enqueue_move( std::move( frame ) );
         };
 
         receiver_ = std::make_unique<GstRtspReceiver>( rcfg, frame_cb );
