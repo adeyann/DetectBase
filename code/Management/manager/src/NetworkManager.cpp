@@ -157,18 +157,13 @@ namespace MGEN
 
     std::optional<RtspSetting> NetworkManager::BuildRtspSetting( bool camera_xml_is_static_in_service )
     {
+        // Phase 1 (GStreamer 기반): happytimesoft 의 XML config (RtspProxyConfigXmlMaker)
+        // 는 더 이상 필요 없음 — GStreamer 가 SettingManager 의 카메라 정보를
+        // 직접 사용하여 pipeline URL 을 구성. camera_xml_is_static_in_service 는
+        // is_rtsp_proxy_static_with_init 으로만 전달 (IOStreamManager 분기용).
+
         RtspSetting rtsp_setting;
-
-        std::string rtsp_config_xml_path = "/ProxyCam.xml";
-        if( camera_xml_is_static_in_service ) {
-            if( RtspProxyConfigXmlMaker::Make( rtsp_config_xml_path ) == false ) {
-                MLOG_ERROR("%s(), RtspProxyConfigXmlMaker::Make failed", __FUNCTION__ );
-                return std::nullopt;
-            }
-        }
-
         rtsp_setting.my_local_ip                    = this->init_profile_.local_ip;
-        rtsp_setting.rtsp_xml_path                  = rtsp_config_xml_path;
         rtsp_setting.is_rtsp_proxy_static_with_init = camera_xml_is_static_in_service;
 
         return rtsp_setting;

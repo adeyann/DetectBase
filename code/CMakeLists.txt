@@ -115,7 +115,7 @@ add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/VisionCommon )
 add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/Protocol/REST )
 add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/Protocol/GRPC )
 add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/Protocol/SocketIO )
-add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/Protocol/RTSP )
+add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/Protocol/RTSP_GST )    # Phase 1: GStreamer replaces happytimesoft RTSP module
 
 # 4. 매니지먼트 및 알고리즘
 add_subdirectory( ${CMAKE_CURRENT_SOURCE_DIR}/Management )

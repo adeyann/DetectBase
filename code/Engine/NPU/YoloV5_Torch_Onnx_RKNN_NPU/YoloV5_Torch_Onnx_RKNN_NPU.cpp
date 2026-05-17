@@ -378,6 +378,18 @@ namespace MGEN
 		}
 		MLOG_INFO("[SET] SDK version: %s, Driver version: %s", version.api_version, version.drv_version);
 
+		// Multi-core NPU 활성화 (RK3588 — 3 core × 2 TOPS = 6 TOPS).
+		//   RKNN_NPU_CORE_AUTO (default rknn_init flag=0) = single core only → 천장 1/3.
+		//   RKNN_NPU_CORE_0_1_2 = 3 core 동시 활용 → inference throughput 2~3x.
+		//   참조: librknn_api/include/rknn_api.h:212-221.
+		// 실패 시 치명 아님 — single core 로 정상 동작 가능, 경고만 남기고 계속.
+		ret = rknn_set_core_mask( rknn_ctx_, RKNN_NPU_CORE_0_1_2 );
+		if( ret < 0 ) {
+			MLOG_WARN("rknn_set_core_mask(RKNN_NPU_CORE_0_1_2) failed ret=%d — fallback to AUTO single core", ret);
+		} else {
+			MLOG_INFO("[SET] NPU core mask = 0_1_2 (multi-core)");
+		}
+
 		ret = rknn_query( rknn_ctx_, RKNN_QUERY_IN_OUT_NUM, &rknn_app_ctx_.io_num, sizeof(rknn_input_output_num) );
 		if(ret < 0) {
 			MLOG_ERROR("rknn_query RKNN_QUERY_IN_OUT_NUM error ret=%d", ret);

@@ -555,13 +555,14 @@ namespace MGEN
         return metadata_string.size() + 1;
     }
 
-    void RtspDetectorUnit::SendDetectResultToMetaData( const vector<InferObject>& detect_results )
+    void RtspDetectorUnit::SendDetectResultToMetaData( const vector<InferObject>& /*detect_results*/ )
     {
-        string meta_data = "";
-        size_t meta_size = ConvertTrackingBoxesToMetaData( detect_results, meta_data );
-        proxy_ptr_->runCallBacks( reinterpret_cast<uint8*>( const_cast<char*>( meta_data.c_str() ) ),
-                                  static_cast<int>( meta_size ),
-                                  DATA_TYPE_METADATA );
+        // Phase 1: ONVIF metadata 송신 보류.
+        // happytimesoft 의 CRtspProxy::runCallBacks 에서 직접 RTP 송신했던 경로가
+        // Protocol/RTSP 제거와 함께 사라짐. Phase 3 에서 GstRtspProxyServer +
+        // OnvifMetadataPayloader (.deleted_backup/gst_attempt_20260515/RTSP_GST/
+        // 의 198 LOC 페이로더) 로 재구현 예정. 그때까지 외부 viewer 는 ONVIF
+        // metadata 를 받지 않음 (이벤트는 SocketIO emit 으로 정상 송출됨).
     }
 
     std::string RtspDetectorUnit::GetFrameImageCurrentProxyRootPath( void ) const
@@ -794,22 +795,49 @@ namespace MGEN
         // ---------------------------------------------------------------------
         // 2. Loop
         // ---------------------------------------------------------------------
-        // Warm up
-        // Main 쓰레드 진입 전 RTSP Proxy 최초 정보 수신 부분
+        // Warm up — Phase 1 (GStreamer): SettingManager 에서 cam URL/auth 를 가져와
+        // 자체 GstRtspClient 를 생성하고 avframe_q_ 를 producer 로 등록.
+        // ownership 은 rtsp_handler_ 가 보유, 여기서는 weak raw ptr 만 보존.
         auto& running = this->inference_thread_.GetRunningFlag();
-        do
+
         {
-            proxy_ptr_ = rtsp_handler_->GetProxyPtr( id_ );
-            std::this_thread::sleep_for( 100ms );
+            auto setting_manager  = MGEN::GetSettingManager();
+            auto cam_settings_mgr = setting_manager ? setting_manager->GetCameraSettingsManager() : nullptr;
+            std::optional<CameraSettingData> cam_setting_opt;
+            if( cam_settings_mgr ) {
+                cam_setting_opt = cam_settings_mgr->GetSetting( id_ );
+            }
+
+            if( cam_setting_opt.has_value() == false ) {
+                MLOG_ERROR("CAM[%d]::InferenceThread: SettingManager 에 카메라 설정 없음. Unit 종료.", id_ );
+                return;
+            }
+
+            GstRtspClient::Config cfg;
+            cfg.cam_id          = id_;
+            cfg.rtsp_url        = cam_setting_opt->url;
+            cfg.user_id         = cam_setting_opt->access_id;
+            cfg.user_pw         = cam_setting_opt->access_pw;
+            cfg.queue_max_size  = static_cast<size_t>( 2 * detect_fps_limit_ );
+            cfg.fps_limit       = detect_fps_limit_;  // happytimesoft 호환 frame skip (큐 size>0 drop + interval drop)
+
+            auto gst_client = std::make_unique<GstRtspClient>( cfg, avframe_q_ );
+            if( !gst_client->Start() ) {
+                MLOG_ERROR("CAM[%d]::InferenceThread: GstRtspClient Start 실패", id_ );
+                return;
+            }
+
+            proxy_ptr_ = gst_client.get();  // weak ref — RtspHandler 가 ownership
+            rtsp_handler_->RegisterClient( id_, std::move( gst_client ) );
+            MLOG_INFO("CAM[%d]::InferenceThread: GstRtspClient registered (url=%s)", id_, cfg.rtsp_url.c_str() );
         }
-        while( running.load() == true && proxy_ptr_ == nullptr );
 
         // exit early
         if( running.load() == false )
             return;
 
-        // Link queue ( RTSP - DetectImpl(here) )
-        proxy_ptr_->setDecodedFrameSafeQueue( avframe_q_, true, detect_fps_limit_ );
+        // queue 는 GstRtspClient 의 ctor 에서 이미 producer 로 연결됨.
+        // happytimesoft 의 setDecodedFrameSafeQueue 호출은 불필요.
 
         // const
         const auto dequeue_timeout                = 100ms;
@@ -828,7 +856,7 @@ namespace MGEN
         // Main
         while( running.load() == true )
         {
-            // Read AVFrame from rtsp_proxy(CRtspProxy)
+            // Read AVFrame from GStreamer pipeline (avframe_q_ 의 producer 는 GstRtspClient)
             // dequeue_wait_for 는 종료/타임아웃 시 std::nullopt 반환 (throw 없음)
             std::optional<std::shared_ptr<AVFrame>> opt_frame = avframe_q_->dequeue_wait_for( dequeue_timeout );
 
@@ -920,8 +948,11 @@ namespace MGEN
 
             if( IsOverTime( last_interval_update_fps_time, avframe_current_recv_time, fps_update_interval ) )
             {
-                if( proxy_ptr_ ){
-                    auto opt_fps = proxy_ptr_->getRealtimeFps();
+                // Phase 1: GstRtspClient 에 instantaneous fps 메소드 없음 (GetFrameCount
+                // 만 있어서 별도 sample window 계산이 필요). Phase 2 에서 추가 예정 —
+                // 그때까지 realtime_fps 업데이트는 skip.
+                if( false /* proxy_ptr_ && proxy_ptr_->getRealtimeFps().has_value() */ ){
+                    auto opt_fps = std::optional<float> { std::nullopt };  // placeholder
                     if( opt_fps.has_value() )
                     {
                         int curr_realtime_fps = static_cast<int>( std::round( *opt_fps ) );

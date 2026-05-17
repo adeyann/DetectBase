@@ -44,7 +44,7 @@ target_link_libraries(${EXECUTABLE_NAME}
         AbnormalActions
         REST
         GRPC
-        RTSP
+        RTSP_GST          # Phase 1: GStreamer replaces happytimesoft RTSP
         SocketIO
         Management
         Tracker
