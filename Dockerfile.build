@@ -159,20 +159,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # -----------------------------------------------------------------------------
-# GStreamer (Phase 1: rtspsrc + h264parse + avdec_h264 + videoconvert + appsink)
+# GStreamer (Phase 1 receiver: rtspsrc + h264parse + avdec_h264 + videoconvert + appsink)
+#                (Phase 2 server:   gst-rtsp-server + appsrc per-cam mount + ONVIF metadata)
 #  - 별도 layer — RTSP_GST 만 의존, 빠른 반복 빌드 가능
-#  - dev 헤더: libgstreamer1.0-dev + libgstreamer-plugins-base1.0-dev 가
-#    gst/gst.h + gst/app/gstappsink.h 등 제공
+#  - dev 헤더:
+#    * libgstreamer1.0-dev + libgstreamer-plugins-base1.0-dev — gst/gst.h, gst/app/gstapp{sink,src}.h
+#    * libgstrtspserver-1.0-dev — gst/rtsp-server/rtsp-server.h (Phase 2 proxy server)
 #  - 런타임 plugins:
 #    * plugins-base : videoconvert / queue / capsfilter / fakesink
-#    * plugins-good : rtspsrc / rtph264depay / udpsrc
+#    * plugins-good : rtspsrc / rtph264depay / udpsrc / rtph264pay
 #    * plugins-bad  : h264parse
 #    * libav        : avdec_h264 (FFmpeg-backed decoder)
-#  - Phase 3 (RTSP proxy 출력) 추가 시 libgstrtspserver-1.0-dev 추가
+#    * rtsp-server  : libgstrtspserver-1.0-0 (런타임은 dev 설치 시 자동 포함)
 # -----------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libgstreamer1.0-dev \
         libgstreamer-plugins-base1.0-dev \
+        libgstrtspserver-1.0-dev \
         gstreamer1.0-plugins-base \
         gstreamer1.0-plugins-good \
         gstreamer1.0-plugins-bad \

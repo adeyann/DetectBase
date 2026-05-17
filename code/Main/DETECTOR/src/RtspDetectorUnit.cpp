@@ -555,14 +555,19 @@ namespace MGEN
         return metadata_string.size() + 1;
     }
 
-    void RtspDetectorUnit::SendDetectResultToMetaData( const vector<InferObject>& /*detect_results*/ )
+    void RtspDetectorUnit::SendDetectResultToMetaData( const vector<InferObject>& detect_results )
     {
-        // Phase 1: ONVIF metadata 송신 보류.
-        // happytimesoft 의 CRtspProxy::runCallBacks 에서 직접 RTP 송신했던 경로가
-        // Protocol/RTSP 제거와 함께 사라짐. Phase 3 에서 GstRtspProxyServer +
-        // OnvifMetadataPayloader (.deleted_backup/gst_attempt_20260515/RTSP_GST/
-        // 의 198 LOC 페이로더) 로 재구현 예정. 그때까지 외부 viewer 는 ONVIF
-        // metadata 를 받지 않음 (이벤트는 SocketIO emit 으로 정상 송출됨).
+        // Phase 2: ONVIF metadata 송신 — GstRtspProxyServer + OnvifMetadataPayloader 경로.
+        //   1) detect_results → ONVIF Streaming v25.12 XML (ConvertTrackingBoxesToMetaData)
+        //   2) RtspHandler 의 per-cam payloader 가 RTP 헤더 작성 후 pay1 appsrc 로 push.
+        //   클라이언트 미접속 시 payloader 가 미생성 — SendOnvifMetadata 가 false 반환 (정상).
+        if( !rtsp_handler_ ) return;
+
+        std::string metadata_xml;
+        ConvertTrackingBoxesToMetaData( detect_results, metadata_xml );
+        if( metadata_xml.empty() ) return;
+
+        rtsp_handler_->SendOnvifMetadata( id_, metadata_xml );
     }
 
     std::string RtspDetectorUnit::GetFrameImageCurrentProxyRootPath( void ) const
@@ -820,8 +825,19 @@ namespace MGEN
             cfg.user_pw         = cam_setting_opt->access_pw;
             cfg.queue_max_size  = static_cast<size_t>( 2 * detect_fps_limit_ );
             cfg.fps_limit       = detect_fps_limit_;  // happytimesoft 호환 frame skip (큐 size>0 drop + interval drop)
+            cfg.enable_raw_passthrough = true;        // Phase 2: raw H.264 byte-stream → RtspHandler → proxy server video forward
 
             auto gst_client = std::make_unique<GstRtspClient>( cfg, avframe_q_ );
+
+            // Phase 2: receiver 의 raw H.264 byte-stream 을 proxy server 로 forward.
+            //   shared_ptr capture — handler lifetime 이 callback 보다 길도록 보장.
+            auto handler_sp       = rtsp_handler_;
+            const int cam_id_capt = id_;
+            gst_client->SetRawPacketCallback(
+                [handler_sp, cam_id_capt]( const uint8_t* data, size_t size ) {
+                    if( handler_sp ) handler_sp->ForwardVideoRtp( cam_id_capt, data, size );
+                } );
+
             if( !gst_client->Start() ) {
                 MLOG_ERROR("CAM[%d]::InferenceThread: GstRtspClient Start 실패", id_ );
                 return;

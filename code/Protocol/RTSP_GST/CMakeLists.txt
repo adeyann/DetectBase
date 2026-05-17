@@ -1,6 +1,6 @@
 # /Protocol/RTSP_GST/CMakeLists.txt
 #
-# GStreamer 기반 RTSP receiver/client (Phase 1: rtspsrc + avdec_h264 + appsink).
+# GStreamer 기반 RTSP receiver/client + Phase 2 proxy server + ONVIF metadata payloader.
 # happytimesoft 외부 RTSP 라이브러리 (Protocol/RTSP/) 의 대체.
 
 cmake_minimum_required(VERSION 3.17)
@@ -15,7 +15,8 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(GST REQUIRED IMPORTED_TARGET
     gstreamer-1.0
     gstreamer-app-1.0
-    gstreamer-video-1.0    # GstRtspReceiver.cpp 의 gst_video_info_from_caps / GST_VIDEO_INFO_FORMAT 등 (#include <gst/video/video.h>)
+    gstreamer-video-1.0       # GstRtspReceiver: gst_video_info_from_caps / GST_VIDEO_INFO_FORMAT
+    gstreamer-rtsp-server-1.0 # GstRtspProxyServer: gst_rtsp_server_new / mount_points / auth (Phase 2)
 )
 
 # ---------------------------------------------------------------------------
