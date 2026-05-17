@@ -69,9 +69,12 @@ namespace MGEN
     {
     public:
         /**
-         * @param profile 엔진 프로필 (const 참조).
+         * @param profile   엔진 프로필 (const 참조).
+         * @param device_id NPU 코어 ID (0/1/2). LoadEngine 시 rknn_set_core_mask(CORE_<id>) 호출.
+         *                  Multi-handler 환경 (3 handler × 3 NPU core) 에서 각 handler 가
+         *                  서로 다른 core 를 고정 사용 → 3-way parallel inference.
          */
-        explicit YoloV5_Torch_Onnx_RKNN_NPU( const EngineProfile& profile ) noexcept;
+        explicit YoloV5_Torch_Onnx_RKNN_NPU( const EngineProfile& profile, const InferDeviceID device_id ) noexcept;
 
         /**
          * @brief 소멸자 (자원 해제는 TerminateEngine -> ReleaseDeviceResources 에서 처리)

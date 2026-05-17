@@ -6,7 +6,9 @@
 #include "InferenceCounter.h"
 
 #include <atomic>
+#include <map>
 #include <unordered_map>
+#include <vector>
 #include <SafeQueue.h>
 #include <SafeThread.h>
 #include <optional>
@@ -24,11 +26,11 @@ namespace MGEN
 
     /**
      * @class EngineLoadBalancer
-     * @brief 단일 NPU 엔진 환경에서 추론 요청 분배 및 응답 디스패처를 담당하는 클래스.
+     * @brief Multi-handler NPU 엔진 환경에서 추론 요청 분배 및 응답 디스패처를 담당하는 클래스.
      *
-     * Odroid M2 NPU 1개 + YoloV5 단일 엔진 구성:
-     *   - Linker 가 1회 호출되어 단일 엔진 핸들러를 등록
-     *   - RequestAsync 가 단일 큐로 요청 enqueue (backpressure 체크)
+     * Odroid M2 NPU (RK3588, 3 core) + YoloV5 구성:
+     *   - Linker 가 N 회 호출되어 handler N 개 등록 (3 handler = 3 NPU core 분산)
+     *   - RequestAsync 가 round-robin 으로 handler 선택 + 해당 input_q enqueue (backpressure 체크)
      *   - 응답은 단일 응답 큐 → ReplyDispatcher 통해 unit_id 별 분배
      */
     class EngineLoadBalancer
@@ -125,10 +127,10 @@ namespace MGEN
         // 로드 가능한 엔진 프로필 정보 (불변, 락 불필요)
         const std::unordered_map<InferEngineID, EngineProfile> engine_profiles_;
 
-        // 단일 엔진 정보 (Linker 가 1회 호출되어 등록)
-        EngineHandleUUID                  engine_uuid_     { INFER_ENGINE_ID_NOT_SET, 0 };
-        sptrSafeQueue<InputLayerWrapper>  engine_input_q_  = nullptr;
-        bool                              engine_linked_   = false;
+        // Multi-handler — Linker 가 N 회 호출되어 누적. RequestAsync 가 round-robin 선택.
+        std::vector<EngineHandleUUID>                                       engine_handles_;
+        std::map<EngineHandleUUID, sptrSafeQueue<InputLayerWrapper>>        engine_input_qs_;
+        std::atomic<size_t>                                                 round_robin_idx_ { 0 };
 
         // 응답 수신 큐 (모든 응답이 모이는 단일 큐)
         sptrSafeQueue<OutputLayerWrapper> infer_respond_receiver_;
@@ -144,7 +146,7 @@ namespace MGEN
 
         // 뮤텍스
         mutable std::mutex unit_regist_mutex_; // subscribers_ 보호
-        mutable std::mutex engine_mutex_;      // engine_uuid_, engine_input_q_, engine_linked_ 보호
+        mutable std::mutex engine_mutex_;      // engine_handles_ / engine_input_qs_ / round_robin_idx_ 보호
 
         // 추론 카운터 + 종료 플래그
         InferenceCounter  inference_counter_;
