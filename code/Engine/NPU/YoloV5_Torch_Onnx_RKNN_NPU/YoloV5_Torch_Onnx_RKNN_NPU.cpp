@@ -22,8 +22,8 @@ const int anchor_2[6] = { 116, 90, 156, 198, 373, 326 }; // stride 32
 
 namespace MGEN
 {
-    YoloV5_Torch_Onnx_RKNN_NPU::YoloV5_Torch_Onnx_RKNN_NPU( const EngineProfile& profile ) noexcept
-        : EngineHandlerBase( profile, 0 )
+    YoloV5_Torch_Onnx_RKNN_NPU::YoloV5_Torch_Onnx_RKNN_NPU( const EngineProfile& profile, const InferDeviceID device_id ) noexcept
+        : EngineHandlerBase( profile, device_id )
         , handler_name_                  ( std::string{ "YoloV5_Torch_Onnx_RKNN_NPU" } )
         , confidence_threshold_          ( profile.GetConfidenceThreshold() )
         , nms_threshold_                 ( profile.GetNmsThreshold() )
@@ -378,16 +378,23 @@ namespace MGEN
 		}
 		MLOG_INFO("[SET] SDK version: %s, Driver version: %s", version.api_version, version.drv_version);
 
-		// Multi-core NPU 활성화 (RK3588 — 3 core × 2 TOPS = 6 TOPS).
-		//   RKNN_NPU_CORE_AUTO (default rknn_init flag=0) = single core only → 천장 1/3.
-		//   RKNN_NPU_CORE_0_1_2 = 3 core 동시 활용 → inference throughput 2~3x.
+		// Multi-handler 환경 — handler 별 core 고정.
+		//   handler N (device_id=N) 가 CORE_N 만 사용 → librknnrt 내부 mutex 회피.
+		//   3 handler × 3 NPU core = 진정한 3-way parallel inference.
 		//   참조: librknn_api/include/rknn_api.h:212-221.
-		// 실패 시 치명 아님 — single core 로 정상 동작 가능, 경고만 남기고 계속.
-		ret = rknn_set_core_mask( rknn_ctx_, RKNN_NPU_CORE_0_1_2 );
+		// 실패 시 치명 아님 — single core (AUTO) 로 정상 동작 가능, 경고만 남기고 계속.
+		rknn_core_mask core_mask = RKNN_NPU_CORE_AUTO;
+		switch( device_id_ ) {
+			case 0: core_mask = RKNN_NPU_CORE_0; break;
+			case 1: core_mask = RKNN_NPU_CORE_1; break;
+			case 2: core_mask = RKNN_NPU_CORE_2; break;
+			default: core_mask = RKNN_NPU_CORE_AUTO; break;
+		}
+		ret = rknn_set_core_mask( rknn_ctx_, core_mask );
 		if( ret < 0 ) {
-			MLOG_WARN("rknn_set_core_mask(RKNN_NPU_CORE_0_1_2) failed ret=%d — fallback to AUTO single core", ret);
+			MLOG_WARN("rknn_set_core_mask(device=%d, mask=%d) failed ret=%d — fallback to AUTO", device_id_, (int)core_mask, ret);
 		} else {
-			MLOG_INFO("[SET] NPU core mask = 0_1_2 (multi-core)");
+			MLOG_INFO("[SET] NPU device=%d core_mask=%d (fixed per-handler)", device_id_, (int)core_mask);
 		}
 
 		ret = rknn_query( rknn_ctx_, RKNN_QUERY_IN_OUT_NUM, &rknn_app_ctx_.io_num, sizeof(rknn_input_output_num) );

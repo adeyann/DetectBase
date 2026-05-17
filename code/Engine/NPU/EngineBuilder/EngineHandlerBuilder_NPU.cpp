@@ -10,9 +10,13 @@ namespace MGEN
 {
     std::vector<InferDeviceID> EngineHandlerBuilder_NPU::GetAvailableDeviceIDs() const
     {
-        // always set 0 only
+        // RK3588 NPU = 3 physical cores (Core 0/1/2). 각 core 를 가상 device 1개로 노출.
+        //   handler N 이 device N 으로 만들어지면 rknn_set_core_mask(CORE_N) 으로 고정 →
+        //   librknnrt 의 단일 ctx serialize 제약 회피, 3-way parallel inference.
         std::vector<InferDeviceID> npu_ids;
-        npu_ids.push_back(static_cast<InferDeviceID>(0));
+        npu_ids.push_back( static_cast<InferDeviceID>( 0 ) );
+        npu_ids.push_back( static_cast<InferDeviceID>( 1 ) );
+        npu_ids.push_back( static_cast<InferDeviceID>( 2 ) );
         return npu_ids;
     }
 
@@ -33,8 +37,8 @@ namespace MGEN
     {
         std::vector<std::unique_ptr<EngineHandlerBase>> created_handlers;
 
-        // 단일 NPU 환경 (RK3588) — device id 0 고정
-        constexpr InferDeviceID npu_id = 0;
+        // RK3588 NPU 3 코어 = handler 3개 (각 코어 fix). profile 마다 N 코어 만큼 생성.
+        const auto npu_ids = GetAvailableDeviceIDs();
 
         for( const auto& profile : profiles_to_build )
         {
@@ -43,15 +47,17 @@ namespace MGEN
                 continue;
             }
 
-            MLOG_INFO(" -> Assigning profile '%s' to NPU device %d",
-                profile.GetProfileName().c_str(), npu_id);
-
-            auto handler = CreateAndLinkHandler( profile, npu_id, linker );
-            if( handler ){
-                created_handlers.push_back( std::move( handler ) );
-            } else {
-                MLOG_ERROR(" -> Failed to create handler for profile '%s' on NPU %d.",
+            for( const InferDeviceID npu_id : npu_ids ) {
+                MLOG_INFO(" -> Assigning profile '%s' to NPU device %d",
                     profile.GetProfileName().c_str(), npu_id);
+
+                auto handler = CreateAndLinkHandler( profile, npu_id, linker );
+                if( handler ){
+                    created_handlers.push_back( std::move( handler ) );
+                } else {
+                    MLOG_ERROR(" -> Failed to create handler for profile '%s' on NPU %d.",
+                        profile.GetProfileName().c_str(), npu_id);
+                }
             }
         }
 
@@ -99,7 +105,7 @@ namespace MGEN
                 MLOG_INFO("Instantiating RKNN for profile '%s' on device %d.",
                     profile.GetProfileName().c_str(), assigned_device_id);
 
-                return std::make_unique<YoloV5_Torch_Onnx_RKNN_NPU>( profile );
+                return std::make_unique<YoloV5_Torch_Onnx_RKNN_NPU>( profile, assigned_device_id );
             }
             // else if ...
             else {

@@ -62,12 +62,13 @@ namespace MGEN
             this->inference_counter_.Stop();
             MLOG_INFO( "   - Inference Counter Stopped" );
 
-            // engine_input_q_ shared_ptr 명시 release.
+            // input queue shared_ptr 명시 release (handler 별 큐 모두 정리).
             // EngineHandlerBase 가 동일 큐를 보유하므로 메모리는 자연 정리되지만,
             // Terminate 시점에 반환을 명확히 해서 정리 시점 모호성 제거.
             {
                 std::lock_guard<std::mutex> lck { this->engine_mutex_ };
-                this->engine_input_q_.reset();
+                this->engine_input_qs_.clear();
+                this->engine_handles_.clear();
             }
 
             return true;
@@ -81,7 +82,7 @@ namespace MGEN
             return false;
 
         std::lock_guard<std::mutex> lck { this->engine_mutex_ };
-        return this->engine_linked_;
+        return !this->engine_input_qs_.empty();
     }
 
     InferEngineID EngineLoadBalancer::GetAvailableInferEngineID( const InferRequestRequireOneType& require ) const noexcept
@@ -142,8 +143,9 @@ namespace MGEN
         if ( is_terminate_instance_.load() == true )
             return nullptr;
 
-        if ( this->engine_linked_ == true ){
-            MLOG_WARN("Engine already linked. Single-engine environment, only one engine handler is supported.");
+        if ( this->engine_input_qs_.count( handle_uuid ) ){
+            MLOG_WARN("Engine handler (%d, %d) already linked — duplicate Link rejected.",
+                target_engine_id, target_device_id);
             return nullptr;
         }
 
@@ -152,11 +154,11 @@ namespace MGEN
             return nullptr;
         }
 
-        this->engine_uuid_    = handle_uuid;
-        this->engine_input_q_ = input_q;
-        this->engine_linked_  = true;
+        this->engine_input_qs_[ handle_uuid ] = input_q;
+        this->engine_handles_.push_back( handle_uuid );
 
-        MLOG_DEBUG("Engine handler (%d, %d) linked successfully.", target_engine_id, target_device_id);
+        MLOG_INFO("Engine handler (%d, %d) linked successfully. Total handlers: %zu",
+            target_engine_id, target_device_id, this->engine_handles_.size());
         return this->infer_respond_receiver_;
     }
 
@@ -182,25 +184,29 @@ namespace MGEN
         {
             std::lock_guard<std::mutex> lck { this->engine_mutex_ };
 
-            if ( this->engine_linked_ == false ){
+            if ( this->engine_handles_.empty() ){
                 MLOG_WARN("Unit (%d) Request Inference, but AI engine isn't loaded yet.", requester_unit_id);
                 return false;
             }
-            target_queue  = this->engine_input_q_;
-            target_handle = this->engine_uuid_;
+
+            // Round-robin handler selection — atomic counter % N. 균등 분산 (least-loaded 보다 단순,
+            // response-side usage tracking 불필요. NPU bottleneck 환경에서 큐 길이는 비슷하게 유지됨).
+            const size_t idx = this->round_robin_idx_.fetch_add( 1, std::memory_order_relaxed )
+                               % this->engine_handles_.size();
+            target_handle = this->engine_handles_[ idx ];
+            target_queue  = this->engine_input_qs_[ target_handle ];
         }
 
         // [Backpressure] 큐가 꽉 찼으면 즉시 drop (RTSP 실시간성 보호)
         if ( target_queue->size() >= MAX_ENGINE_INFER_INPUT_QUEUE_SIZE ){
             MLOG_WARN("Engine Input Queue Full (%zu/%d). Dropping request to prevent lag.",
                 target_queue->size(), MAX_ENGINE_INFER_INPUT_QUEUE_SIZE);
-            // 운영 가시성: drop 메트릭 (NPU bottleneck 외부 관측 가능)
             MGEN::MetricsRegistry::Instance().IncrementCounter(
                 "detectbase_errors_total", { { "type", "engine_input_q_drop" } } );
             return false;
         }
 
-        // 단일 엔진 환경 — 요청의 target engine id 를 등록된 엔진으로 정렬
+        // 선택된 handler 의 engine id 로 정렬
         request.meta_data.requestee_engine_uuid = target_handle.first;
 
         target_queue->enqueue_move( std::move( request ) );
