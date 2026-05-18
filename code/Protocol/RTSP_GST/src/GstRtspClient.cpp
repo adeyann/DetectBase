@@ -114,29 +114,28 @@ namespace MGEN
 
         auto frame_cb = [this]( std::shared_ptr<AVFrame> frame ) {
             if( !frame || !queue_ ) return;
-            // happytimesoft 호환 backpressure 정책 (master:rtsp_proxy.cpp avframeTossCallback).
-            //   reason: GStreamer pipeline 은 멀티스레드 push 라 NPU consumer 와 무관하게 30 FPS 펌프.
-            //           큐를 즉시 만수위 만들어 ~720 MB anon 메모리 누적 (decoded I420 frame × 60 × 4 cam).
-            //   policy: ① 큐에 frame 이 1개라도 있으면 새 frame drop
-            //           ② 직전 enqueue 후 (1000/fps_limit) ms 안 지났으면 drop
-            //   결과: 큐 평균 0~1 frame, anon 메모리 ~10 MB 수준 (happytimesoft baseline 와 동등).
+
+            // Frame interval 실측 (drop 여부 무관 — 매 호출 = camera 자체 FPS).
+            const int64_t now_cb_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                          std::chrono::steady_clock::now().time_since_epoch() ).count();
+            const int64_t last_cb   = last_cb_ns_.exchange( now_cb_ns );
+            if( last_cb != 0 ) {
+                const int64_t interval = now_cb_ns - last_cb;
+                if( interval > 0 && interval < 1'000'000'000LL ) {  // 1 sec 미만만 (reconnect 등 outlier 배제)
+                    frame_interval_sum_ns_.fetch_add( static_cast<uint64_t>( interval ) );
+                    frame_interval_count_.fetch_add( 1 );
+                }
+            }
+
+            // backpressure 정책: 큐 size>0 drop 만 유지 (decoded I420 frame 메모리 폭탄 방지, 큐 평균 0~1 frame).
+            //   이전: interval (1000/fps_limit) ms drop 도 적용 — "NPU 가 30 FPS 천장" 가정의 over-cap.
+            //   A-plan multi-handler 후 NPU 천장 ~140 FPS 라 interval 정책은 무효한 가정. camera jitter
+            //   + interval floating 정밀도로 매 2번째 frame drop → dfps 70 (천장 120 의 58%) 으로 묶임.
+            //   제거 결과: camera 30 FPS 모든 frame 통과, dfps 이론 천장 120 도달 (cam thread cycle 11ms < 33ms).
             if( queue_->size() > 0 ) {
                 enqueue_drop_count_.fetch_add( 1 );
                 MetricsRegistry::Instance().IncrementCounter( METRIC_ENQUEUE_DROP_TOTAL, NO_LABELS, 1.0 );
                 return;
-            }
-            const int fps_limit = cfg_.fps_limit > 0 ? cfg_.fps_limit : 30;
-            if( fps_limit < 60 ) {
-                const int64_t now_ns       = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                                std::chrono::steady_clock::now().time_since_epoch() ).count();
-                const int64_t interval_ns  = static_cast<int64_t>( 1'000'000'000LL / fps_limit );
-                const int64_t last_ns      = last_enqueue_ns_.load( std::memory_order_relaxed );
-                if( last_ns != 0 && (now_ns - last_ns) < interval_ns ) {
-                    enqueue_drop_count_.fetch_add( 1 );
-                    MetricsRegistry::Instance().IncrementCounter( METRIC_ENQUEUE_DROP_TOTAL, NO_LABELS, 1.0 );
-                    return;
-                }
-                last_enqueue_ns_.store( now_ns, std::memory_order_relaxed );
             }
             queue_->enqueue_move( std::move( frame ) );
         };
@@ -247,6 +246,12 @@ namespace MGEN
     {
         std::lock_guard<std::mutex> lk( const_cast<std::mutex&>( receiver_mtx_ ) );
         return receiver_ ? receiver_->GetFrameCount() : 0;
+    }
+
+    uint32_t GstRtspClient::GetAppSinkQueuedBuffers() const noexcept
+    {
+        std::lock_guard<std::mutex> lk( const_cast<std::mutex&>( receiver_mtx_ ) );
+        return receiver_ ? receiver_->GetAppSinkQueuedBuffers() : 0;
     }
 
 } // namespace MGEN

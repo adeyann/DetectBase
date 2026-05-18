@@ -119,6 +119,26 @@ namespace MGEN
         void StartInferenceCounter( void );
         void StopInferenceCounter ( void );
 
+        /**
+         * @brief Inspection: 응답 receiver queue 의 현재 size (leak hunt 용).
+         */
+        size_t GetRespondReceiverSize() const noexcept {
+            return infer_respond_receiver_ ? infer_respond_receiver_->size() : 0;
+        }
+
+        /**
+         * @brief Inspection: 등록된 handler 의 input queue 의 합산 size (leak hunt 용).
+         */
+        size_t GetTotalInputQueueSize() const noexcept {
+            std::lock_guard<std::mutex> lck { this->engine_mutex_ };
+            size_t total = 0;
+            for( const auto& [uuid, q] : this->engine_input_qs_ ) {
+                (void) uuid;
+                if( q ) total += q->size();
+            }
+            return total;
+        }
+
     private:
         void ReplyDispatcherThreadRunner( void );
         void ReplyDispatcherThreadCloser( void );

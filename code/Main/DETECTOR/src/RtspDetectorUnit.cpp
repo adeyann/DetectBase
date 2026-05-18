@@ -21,6 +21,7 @@
 // External Libraries
 #include "json/json.hpp"       // JSON 파싱 및 생성을 위해 포함
 #include <chrono>              // 시간 측정 및 대기를 위해 포함
+#include <dlfcn.h>             // jemalloc mallctl symbol dlsym 동적 로딩
 #include <future>              // 비동기 처리를 위해 포함
 #include <vector>              // 컨테이너 사용을 위해 포함
 #include <algorithm>           // 정렬 및 데이터 처리를 위해 포함
@@ -391,6 +392,20 @@ namespace MGEN
             std::bind( &RtspDetectorUnit::IOWorkerThreadCloser, this )
         );
 
+        // B2 async pipeline — InferenceThread (producer) 와 ResponseThread (consumer) 사이의 inflight queue.
+        // cam thread 가 RequestAsync 후 inflight push, response thread 가 dequeue 후 RespondAsync + post.
+        // max_size = 2 * detect_fps_limit_ (대략 cam-thread 1초 분량). 초과 시 oldest drop.
+        this->inflight_q_ = std::make_shared<SafeQueue<InflightItem>>();
+        // inflight_q max_size — RspThread 가 InfThread 보다 평균 4% 느려 매 cycle 미세 frame 누적.
+        //   60 (2 × fps_limit) 으로 두면 5h 만에 ~700 MB anon 메모리 누적 (frame 3MB × 60).
+        //   4 로 줄임: drop_oldest 가 oldest frame 만 버리고 NPU 가 항상 latest 처리 → dfps 영향 없음.
+        //   메모리 영향: 4 × 3MB × 4 cam = 48 MB 만.
+        this->inflight_q_->SetMaxSize( 4 );
+        this->response_thread_.SetThreadFunctions(
+            std::bind( &RtspDetectorUnit::ResponseThreadRunner, this ),
+            std::bind( &RtspDetectorUnit::ResponseThreadCloser, this )
+        );
+
         // Setting Manager Get Check =====================================================================
         auto sm = MGEN::GetSettingManager();
         if( !sm ){
@@ -470,6 +485,10 @@ namespace MGEN
         if( this->io_worker_thread_.Start() == false )
             return false;
 
+        // B2 — Response thread 도 inference 시작 전에 start (inflight push 시 consumer 준비).
+        if( this->response_thread_.Start() == false )
+            return false;
+
         if( this->inference_thread_.Start() == false )
             return false;
 
@@ -478,9 +497,13 @@ namespace MGEN
 
     bool RtspDetectorUnit::Stop( void )
     {
-        // 순서: inference (producer) 먼저 stop → io worker (consumer) 그 다음.
-        // inference stop 후엔 enqueue 안 들어옴 → io_work_queue terminate 시 누락 없음.
+        // !!! DO NOT REORDER !!! Shutdown 순서 (B2 async pipeline):
+        //   1) inference_thread Stop  — producer 정지 → inflight push 없음
+        //      InferenceThreadCloser 가 inflight_q_->terminate() 호출 (response_thread 가 dequeue 종료 가능)
+        //   2) response_thread Stop  — consumer 정지 → 남은 inflight 자연 cleanup
+        //   3) io_worker_thread Stop  — response 가 io_work_queue 에 push 안 함 후 정지
         this->inference_thread_.Stop();
+        this->response_thread_.Stop();
         this->io_worker_thread_.Stop();
         return true;
     }
@@ -782,6 +805,10 @@ namespace MGEN
                 class_id_person = client.GetClassID( "Person" );
                 class_id_car    = client.GetClassID( "Car" );
 
+                // B2 — ResponseThread 가 tracker 분기 시 사용. cam thread 초기화 시 한 번 set, read-only.
+                this->class_id_person_ = class_id_person;
+                this->class_id_car_    = class_id_car;
+
                 detection_engines.push_back( std::move(client) );
             }
             else { MLOG_ERROR("CAM[%d] Failed to init DetectionEngine", id_); }
@@ -869,12 +896,37 @@ namespace MGEN
         // reset members
         this->consecutive_mismatch_count_ = 0;
 
+        // InferenceThread (cam side) stage profile — 모든 단계 us 단위 평균, 100 cycle 마다 1줄 로그.
+        struct InfProf {
+            uint64_t dq_us = 0;             // avframe_q dequeue
+            uint64_t pre_us = 0;            // preprocess (sws_scale 포함)
+            uint64_t req_us = 0;            // RequestAsync per engine
+            uint64_t push_us = 0;           // inflight_q->enqueue_move
+            uint64_t avframe_size_sum = 0;  // avframe_q size 누적 (dq 직후 잔여)
+            uint64_t avframe_size_max = 0;
+            uint64_t inflight_size_sum = 0; // inflight_q size 누적 (push 직전 — 누적 leak 검증용)
+            uint64_t inflight_size_max = 0;
+            uint64_t count = 0;
+        };
+        InfProf inf_prof;
+        auto inf_us = []( const std::chrono::steady_clock::time_point& a,
+                          const std::chrono::steady_clock::time_point& b ) -> uint64_t {
+            return static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>( b - a ).count() );
+        };
+
         // Main
         while( running.load() == true )
         {
+            const auto t_inf_top = std::chrono::steady_clock::now();
+            std::chrono::steady_clock::time_point t_after_dq, t_after_pre, t_after_req, t_after_push;
+            bool t_dq_set = false, t_pre_set = false, t_req_set = false, t_push_set = false;
             // Read AVFrame from GStreamer pipeline (avframe_q_ 의 producer 는 GstRtspClient)
             // dequeue_wait_for 는 종료/타임아웃 시 std::nullopt 반환 (throw 없음)
             std::optional<std::shared_ptr<AVFrame>> opt_frame = avframe_q_->dequeue_wait_for( dequeue_timeout );
+            t_after_dq = std::chrono::steady_clock::now();
+            t_dq_set = true;
+            const size_t cyc_avframe_size = avframe_q_ ? avframe_q_->size() : 0;  // dq 직후 잔여 (큐 누적 검증)
 
             if( opt_frame.has_value() == false )
             {
@@ -1087,6 +1139,8 @@ namespace MGEN
 
             if( !preprocessing_success )
                 continue;
+            t_after_pre = std::chrono::steady_clock::now();
+            t_pre_set = true;
 
             uint64_t current_correlation_id = this->frame_count_.fetch_add(1);
 
@@ -1115,219 +1169,71 @@ namespace MGEN
                 // 모두 요청이 드랍된 경우
                 continue;
             }
+            t_after_req = std::chrono::steady_clock::now();
+            t_req_set = true;
 
-            // Wait & Merge
-            std::vector<InferObject> merged_results;
-
-            // Budget 관리용 시작 시간 기록
-            auto wait_start_time = std::chrono::steady_clock::now();
-
-            // 불필요한 std::future/async 벡터 제거. 바로 루프를 돌며 수거합니다.
-            for( auto* engine : requested_engines )
-            {
-                // 1. 현재 소모된 시간을 계산하여 남은 Budget(ms) 산출
-                auto now              = std::chrono::steady_clock::now();
-                auto elapsed_ms       = std::chrono::duration_cast<std::chrono::milliseconds>(now - wait_start_time).count();
-                int  remaining_budget = inference_wait_ms - static_cast<int>(elapsed_ms);
-
-                // 2. 만약 이미 5초를 다 썼다면 더 이상 기다리지 않고 다음 엔진으로 skip (로그는 남김)
-                if( remaining_budget <= 0 )
-                {
-                    MLOG_WARN("CAM[%d] Engine %s skipped (Total budget %dms exhausted)",
-                        id_, engine->magic_name.c_str(), inference_wait_ms );
-                    continue;
+            // B2 async pipeline — RespondAsync + tracking + metadata + event/emit 를 ResponseThread 에 위임.
+            //   cam thread 의 cycle 에서 NPU resp(22ms) + post(12ms) = 34ms 빠짐. dfps +52% 기대.
+            //   InflightItem 안에 ResponseThread 가 필요한 데이터 self-contained 으로 복사.
+            InflightItem item;
+            item.frame             = frame;
+            item.correlation_id    = current_correlation_id;
+            item.request_time      = std::chrono::steady_clock::now();
+            item.inference_wait_ms = inference_wait_ms;
+            item.engines.reserve( requested_engines.size() );
+            for( auto* engine : requested_engines ) {
+                EngineInflight ei;
+                ei.subscribe_id     = engine->subscribe_id;
+                ei.input_width      = engine->input_width;
+                ei.input_height     = engine->input_height;
+                ei.target_class_ids = engine->target_class_ids;
+                ei.magic_name       = engine->magic_name;
+                if( auto* ctx = context_manager.GetContext( engine->input_width, engine->input_height, frame ) ) {
+                    ei.inference_style = ctx->inference_style;
+                    ei.original_style  = ctx->original_style;
                 }
-
-                // 3. 남은 시간만큼만 RespondAsync 대기 (스레드 생성 없이 직접 호출)
-                // 이미 결과가 도착해 있다면 지연 없이 즉시 반환됩니다.
-                auto result_opt = load_balancer_->RespondAsync( engine->subscribe_id, remaining_budget );
-
-                if( result_opt.has_value() )
-                {
-                    // for DFPS check
-                    load_balancer_->AddInferCount( engine->subscribe_id );
-
-                    // Context 가져오기
-                    auto* ctx = context_manager.GetContext( engine->input_width, engine->input_height, frame );
-
-                    for( const auto& obj : result_opt->infer_objects )
-                    {
-                        bool target_found = false;
-                        for( auto const& [ name, id ] : engine->target_class_ids )
-                        {
-                            if( id == obj.class_id ){
-                                target_found = true;
-                                break;
-                            }
-                        }
-
-                        if( target_found )
-                        {
-                            InferObject target = obj;
-                            ConvertInferObjectCoordinate( target, ctx->inference_style, ctx->original_style );
-                            merged_results.push_back( target );
-                        }
-                    }
-                }
-                else
-                {
-                    // RespondAsync 내부에서 타임아웃 발생 시
-                    MLOG_WARN("CAM[%d] Engine %s timeout (Waited max %d ms)",
-                        id_, engine->magic_name.c_str(), remaining_budget);
-                }
+                item.engines.push_back( std::move( ei ) );
             }
 
-            // Tracking
-            std::vector<InferObject> entire_track_results;
-            std::map<InferClassID, std::vector<InferObject>> classified_objects;
-
-            // split
-            for( const auto& obj : merged_results ){
-                classified_objects[obj.class_id].push_back( obj );
+            size_t cyc_inflight_size = 0;
+            if( inflight_q_ ) {
+                cyc_inflight_size = inflight_q_->size();  // push 직전 size (누적 leak 검증)
+                // SafeQueue::enqueue_move 는 max_size 도달 시 oldest drop. response thread 가 느리면 자연 backpressure.
+                inflight_q_->enqueue_move( std::move( item ) );
             }
+            t_after_push = std::chrono::steady_clock::now();
+            t_push_set = true;
 
-            for( auto& [ class_id, objects ] : classified_objects )
-            {
-                const bool need_tracking
-                    = ( class_id == class_id_person ) || ( class_id == class_id_car );
-
-                if( need_tracking )
-                {
-                    if( trackers_.find( class_id ) == trackers_.end() )
-                    {
-                        // original size tracker
-                        ImageExpressStyle tracker_style( frame->width, frame->height );
-
-                        // create tracker
-                        trackers_[class_id]     = std::make_unique<SORTTracker>( tracker_style, tracker_style );
-                        tracker_seqs_[class_id] = 1;
-                    }
-
-                    auto& seq = tracker_seqs_[class_id];
-                    auto  res = trackers_[class_id]->TrackObjects( objects, seq++ );
-
-                    if( res ){
-                        entire_track_results.insert( entire_track_results.end(), res->begin(), res->end() );
-                    }
-                }
-                else
-                {
-                    entire_track_results.insert( entire_track_results.end(), objects.begin(), objects.end() );
-                }
-            }
-
-            SendDetectResultToMetaData( entire_track_results );
-
-            if( entire_track_results.size() == 0 )
-                continue;
-
-            if( scheduler_.empty() ){
-                if( IsOverTime( avframe_current_recv_time, last_interval_log_print_time, long_timelapse_log_interval ) ){
-                    MLOG_INFO("CAM[%d] AI inference detected ( %4d ojbect ), but target camera has not exist EVENT schedule.", id_, entire_track_results.size() );
-                    last_interval_log_print_time = avframe_current_recv_time;
-                }
-                continue;
-            }
-
-            // Set
-            std::vector<ScheduleEventDTO> event_list {};
-            std::string frame_path {};
-
-            // Reserve
-            event_list.reserve( scheduler_.size() );
-            frame_path.reserve( 128 );
-
-            if( auto opt = MakeImageSavePath( GetFrameImageCurrentProxyRootPath() ); opt.has_value() ){
-                frame_path = *opt;
-            }
-            else {
-                MLOG_ERROR( "%s() => CAM[%d] make frame image save directory failed", __func__, id_ );
-                continue;
-            }
-
-            // time get for socket.io emit
-            struct tm tstruct;
-            auto      curr_time = std::time( nullptr );
-            auto*     time_info = localtime_r( &curr_time, &tstruct );
-
-            // Loop schedules
-            for( const auto& each_schedule : scheduler_ )
-            {
-                // calculate abnormal action algorithm here
-                const std::vector<InferObject> on_event_results = each_schedule->Check( entire_track_results );
-
-                if( on_event_results.empty() ){
-                    continue;
-                }
-
-                // P54: 이벤트 감지 누적 (Prometheus exporter) + 로그 한 줄.
-                {
-                    const std::string ev_name = Abnormal::Schedule::GetEventName( each_schedule->sch_info.event_code );
-                    MGEN::MetricsRegistry::Instance().IncrementCounter(
-                        "detectbase_events_total",
-                        { { "type", ev_name }, { "cam", std::to_string( id_ ) } },
-                        static_cast<double>( on_event_results.size() ) );
-
-                    // correlation_id 는 sys-detector-{cam} 자동 첨부.
-                    MLOG_INFO( "event_detected type=%s cam=%d count=%zu",
-                        ev_name.c_str(), id_, on_event_results.size() );
-                }
-
-                // Build socket.io message
-                auto event_msg_json = this->BuildNotifyJsonImpl_Analysis( each_schedule, on_event_results, time_info, frame_path );
-
-                // cache
-                event_list.push_back( ScheduleEventDTO{ std::move( event_msg_json ), on_event_results } );
-            }
-
-            if( event_list.empty() ){
-                continue;
-            }
-
-            // origin size cv::Mat
-            if( origin_ctx.Convert( frame, true, false ) == false ){
-                MLOG_ERROR("CAM[%d] Postprocess | Origin Image Convert failed", id_);
-                continue;
-            }
-
-            // cv::imwrite 는 IO Worker thread 에 위임 (main loop 의 frame drop 차단).
-            // origin_ctx.save_snapshot_mat 는 다음 frame 의 Convert() 에서 재사용되므로 deep copy (clone) 필수.
-            if( io_work_queue_ ){
-                IOWorkItem item;
-                item.frame_path = frame_path;
-                item.image_mat  = origin_ctx.save_snapshot_mat.clone();
-                // 운영 가시성: 큐 가득 시 drop oldest (max=30). 통계 메트릭 race 영향 미미.
-                if( io_work_queue_->size() >= 30 ) {
-                    MGEN::MetricsRegistry::Instance().IncrementCounter(
-                        "detectbase_errors_total", { { "type", "io_work_drop" } } );
-                }
-                io_work_queue_->enqueue_move( std::move( item ) );
-            }
-
-            // Emit 은 main 즉시 호출 — sio emit_queue 가 이미 비동기 (~1ms enqueue).
-            // 이벤트 알림 latency 짧음 + cv::imwrite 분리와 무관.
-            if( sio_handler_ )
-            {
-                for( auto& target_event : event_list )
-                {
-                    sio_handler_->Emit( std::string { SocketIO::EventName::DETECTOR_MESSAGE }, target_event.event_message );
-                }
-            }
-
-            // GRPC client (Phase 1) — 활성 peer 모두에게 fire-and-forget push.
-            // 비활성 시 BroadcastEventOnlyJsonToGrpcPeers 가 즉시 0 반환 (no-op).
-            if( network_manager_ && network_manager_->IsGrpcClientEnabled() )
-            {
-                for( auto& target_event : event_list )
-                {
-                    const size_t sent = network_manager_->BroadcastEventOnlyJsonToGrpcPeers(
-                        target_event.event_message.dump() );
-                    if( sent > 0 ) {
-                        MGEN::MetricsRegistry::Instance().IncrementCounter(
-                            "detectbase_grpc_send_total",
-                            { { "rpc", "SendEventOnlyJson" } },
-                            static_cast<double>( sent ) );
-                    }
+            // InferenceThread stage profile — 정상 완주 cycle 만 누적, 100 cycle 마다 1줄 로그.
+            if( t_dq_set && t_pre_set && t_req_set && t_push_set ) {
+                inf_prof.dq_us             += inf_us( t_inf_top, t_after_dq );
+                inf_prof.pre_us            += inf_us( t_after_dq, t_after_pre );
+                inf_prof.req_us            += inf_us( t_after_pre, t_after_req );
+                inf_prof.push_us           += inf_us( t_after_req, t_after_push );
+                inf_prof.avframe_size_sum  += cyc_avframe_size;
+                if( cyc_avframe_size > inf_prof.avframe_size_max ) inf_prof.avframe_size_max = cyc_avframe_size;
+                inf_prof.inflight_size_sum += cyc_inflight_size;
+                if( cyc_inflight_size > inf_prof.inflight_size_max ) inf_prof.inflight_size_max = cyc_inflight_size;
+                inf_prof.count             += 1;
+                if( inf_prof.count >= 100 ) {
+                    // GStreamer pipeline 내부 buffer + camera frame interval 실측 — leak hunt
+                    const uint32_t gst_buf  = proxy_ptr_ ? proxy_ptr_->GetAppSinkQueuedBuffers() : 0;
+                    const uint64_t cam_int  = proxy_ptr_ ? proxy_ptr_->GetFrameIntervalAvgUs() : 0;
+                    MLOG_INFO("CAM[%d] INF-thread (avg over %llu cycles, us): dq=%llu pre=%llu req=%llu push=%llu total=%llu | avframe_q avg=%llu max=%llu | inflight_q avg=%llu max=%llu | gst_appsink_buf=%u camera_interval_us=%llu",
+                        id_,
+                        static_cast<unsigned long long>( inf_prof.count ),
+                        static_cast<unsigned long long>( inf_prof.dq_us / inf_prof.count ),
+                        static_cast<unsigned long long>( inf_prof.pre_us / inf_prof.count ),
+                        static_cast<unsigned long long>( inf_prof.req_us / inf_prof.count ),
+                        static_cast<unsigned long long>( inf_prof.push_us / inf_prof.count ),
+                        static_cast<unsigned long long>( ( inf_prof.dq_us + inf_prof.pre_us + inf_prof.req_us + inf_prof.push_us ) / inf_prof.count ),
+                        static_cast<unsigned long long>( inf_prof.avframe_size_sum / inf_prof.count ),
+                        static_cast<unsigned long long>( inf_prof.avframe_size_max ),
+                        static_cast<unsigned long long>( inf_prof.inflight_size_sum / inf_prof.count ),
+                        static_cast<unsigned long long>( inf_prof.inflight_size_max ),
+                        gst_buf,
+                        static_cast<unsigned long long>( cam_int ) );
+                    inf_prof = InfProf{};
                 }
             }
 
@@ -1343,6 +1249,384 @@ namespace MGEN
 
         avframe_q_->terminate();
         avframe_q_->clear_without_action();
+
+        // B2 — inflight_q 도 terminate. ResponseThread 가 곧 종료될 수 있도록 신호.
+        if( inflight_q_ ) {
+            inflight_q_->terminate();
+        }
+    }
+
+    // ------------------------------------------------------------------------------------
+    //  B2 async pipeline — ResponseThread:
+    //    InferenceThread 가 RequestAsync 후 inflight_q_ 에 push.
+    //    여기서 dequeue → RespondAsync (NPU 응답 대기) → tracking → ONVIF metadata → schedule check → emit + io_work_queue.
+    //
+    //  cam thread cycle 에서 NPU resp + post 가 빠짐 → dfps +50% 기대 (이론 ~108).
+    //  shutdown 순서: inference_thread → inflight_q->terminate → response_thread (race-free).
+    // ------------------------------------------------------------------------------------
+    void RtspDetectorUnit::ResponseThreadRunner( void )
+    {
+        using namespace std::chrono_literals;
+
+        // P53: 이 thread 의 모든 MLOG 에 정적 correlation_id 부여.
+        MGEN::CorrelationContext::Set( "sys-response-" + std::to_string( this->id_ ) );
+
+        auto& running = this->response_thread_.GetRunningFlag();
+
+        // Response thread 자체 origin_ctx — cam thread 의 origin_ctx 와 분리.
+        // 이벤트 발생 시 1080p frame 의 cv::Mat 변환 + cv::imwrite 위해 io_work_queue 에 넘김.
+        FrameFormattingContext resp_origin_ctx;
+
+        // Response thread 자체 timing.
+        EventTime last_interval_log_print_time = std::chrono::system_clock::now();
+        const auto long_timelapse_log_interval = 10min;
+
+        // ResponseThread stage profile — 모든 단계 us 단위 평균.
+        struct RspProf {
+            uint64_t ifq_us  = 0;   // inflight_q dequeue wait
+            uint64_t resp_us = 0;   // RespondAsync + bbox merge (NPU 왕복)
+            uint64_t trk_us  = 0;   // tracking
+            uint64_t meta_us = 0;   // SendDetectResultToMetaData
+            uint64_t ev_us   = 0;   // schedule + emit + io_work_queue + grpc (event 측 post)
+            uint64_t io_size_sum   = 0;  // io_work_queue size 누적 (push 직전 — cv::Mat 누적 감시)
+            uint64_t io_size_max   = 0;
+            uint64_t trk_cnt_sum   = 0;  // 이 cycle 의 tracking output 개수
+            uint64_t trk_cnt_max   = 0;
+            uint64_t lb_resp_size_sum = 0;  // LoadBalancer infer_respond_receiver size (단일 응답 큐)
+            uint64_t lb_resp_size_max = 0;
+            uint64_t lb_input_size_sum = 0; // LoadBalancer 모든 handler input queue 합산
+            uint64_t lb_input_size_max = 0;
+            uint64_t sched_count = 0;       // scheduler_ size (event schedule 개수)
+            uint64_t trk_obj_count = 0;     // trackers_ size (class id 별 tracker 수)
+            uint64_t sio_emit_count = 0;    // 누적 sio emit 호출 (event 마다 ++)
+            uint64_t grpc_send_count = 0;   // 누적 GRPC send 호출
+            uint64_t count   = 0;
+        };
+        RspProf rsp_prof;
+
+        // jemalloc stats — dlsym 으로 mallctl symbol 동적 찾기 (jemalloc 가 LD_PRELOAD 됐을 때 작동).
+        typedef int (*mallctl_t)(const char*, void*, size_t*, void*, size_t);
+        auto mallctl_fn = reinterpret_cast<mallctl_t>( dlsym( RTLD_DEFAULT, "mallctl" ) );
+        auto rsp_us = []( const std::chrono::steady_clock::time_point& a,
+                          const std::chrono::steady_clock::time_point& b ) -> uint64_t {
+            return static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>( b - a ).count() );
+        };
+
+        while( running.load() == true )
+        {
+            // inflight_q 가 nullptr 인 race 방어. Init 가 끝난 후에야 set 되므로 일반적으로 nullptr 아님.
+            if( !inflight_q_ ) {
+                std::this_thread::sleep_for( 10ms );
+                continue;
+            }
+
+            const auto t_rsp_top = std::chrono::steady_clock::now();
+            std::chrono::steady_clock::time_point t_after_ifq, t_after_resp, t_after_trk, t_after_meta, t_after_ev;
+            bool t_ifq_set = false, t_resp_set = false, t_trk_set = false, t_meta_set = false, t_ev_set = false;
+            size_t cyc_io_size = 0;
+            size_t cyc_trk_cnt = 0;
+
+            auto opt_item = inflight_q_->dequeue_wait_for( 100ms );
+            t_after_ifq = std::chrono::steady_clock::now();
+            t_ifq_set = true;
+
+            if( !opt_item.has_value() ) {
+                if( inflight_q_->is_terminated() ) {
+                    break;
+                }
+                continue;
+            }
+
+            const InflightItem item = std::move( *opt_item );
+            auto frame = item.frame;
+            if( !frame ) continue;
+
+            // -----------------------------------------------------------------
+            // 1. RespondAsync + bbox convert + merge
+            // -----------------------------------------------------------------
+            std::vector<InferObject> merged_results;
+            for( const auto& engine_inflight : item.engines )
+            {
+                auto now              = std::chrono::steady_clock::now();
+                auto elapsed_ms       = std::chrono::duration_cast<std::chrono::milliseconds>( now - item.request_time ).count();
+                int  remaining_budget = item.inference_wait_ms - static_cast<int>( elapsed_ms );
+
+                if( remaining_budget <= 0 ) {
+                    MLOG_WARN("CAM[%d] Engine %s skipped (Total budget %dms exhausted)",
+                        id_, engine_inflight.magic_name.c_str(), item.inference_wait_ms );
+                    continue;
+                }
+
+                auto result_opt = load_balancer_->RespondAsync( engine_inflight.subscribe_id, remaining_budget );
+
+                if( result_opt.has_value() )
+                {
+                    load_balancer_->AddInferCount( engine_inflight.subscribe_id );
+
+                    for( const auto& obj : result_opt->infer_objects )
+                    {
+                        bool target_found = false;
+                        for( auto const& [ name, id ] : engine_inflight.target_class_ids )
+                        {
+                            if( id == obj.class_id ) { target_found = true; break; }
+                        }
+                        if( target_found )
+                        {
+                            InferObject target = obj;
+                            ConvertInferObjectCoordinate( target, engine_inflight.inference_style, engine_inflight.original_style );
+                            merged_results.push_back( target );
+                        }
+                    }
+                }
+                else {
+                    MLOG_WARN("CAM[%d] Engine %s timeout (Waited max %d ms)",
+                        id_, engine_inflight.magic_name.c_str(), remaining_budget );
+                }
+            }
+            t_after_resp = std::chrono::steady_clock::now();
+            t_resp_set = true;
+
+            // -----------------------------------------------------------------
+            // 2. Tracking
+            // -----------------------------------------------------------------
+            std::vector<InferObject> entire_track_results;
+            std::map<InferClassID, std::vector<InferObject>> classified_objects;
+
+            for( const auto& obj : merged_results ){
+                classified_objects[ obj.class_id ].push_back( obj );
+            }
+
+            for( auto& [ class_id, objects ] : classified_objects )
+            {
+                const bool need_tracking
+                    = ( class_id == class_id_person_ ) || ( class_id == class_id_car_ );
+
+                if( need_tracking )
+                {
+                    if( trackers_.find( class_id ) == trackers_.end() )
+                    {
+                        ImageExpressStyle tracker_style( frame->width, frame->height );
+                        trackers_[ class_id ]     = std::make_unique<SORTTracker>( tracker_style, tracker_style );
+                        tracker_seqs_[ class_id ] = 1;
+                    }
+                    auto& seq = tracker_seqs_[ class_id ];
+                    auto  res = trackers_[ class_id ]->TrackObjects( objects, seq++ );
+                    if( res ) {
+                        entire_track_results.insert( entire_track_results.end(), res->begin(), res->end() );
+                    }
+                }
+                else
+                {
+                    entire_track_results.insert( entire_track_results.end(), objects.begin(), objects.end() );
+                }
+            }
+
+            t_after_trk = std::chrono::steady_clock::now();
+            t_trk_set = true;
+
+            cyc_trk_cnt = entire_track_results.size();  // 이 cycle 의 tracking output 개수 (운영 추세)
+
+            SendDetectResultToMetaData( entire_track_results );
+            t_after_meta = std::chrono::steady_clock::now();
+            t_meta_set = true;
+
+            if( entire_track_results.empty() ) {
+                t_after_ev = std::chrono::steady_clock::now();
+                t_ev_set = true;
+                if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
+                    rsp_prof.ifq_us           += rsp_us( t_rsp_top, t_after_ifq );
+                    rsp_prof.resp_us          += rsp_us( t_after_ifq, t_after_resp );
+                    rsp_prof.trk_us           += rsp_us( t_after_resp, t_after_trk );
+                    rsp_prof.meta_us          += rsp_us( t_after_trk, t_after_meta );
+                    rsp_prof.ev_us            += rsp_us( t_after_meta, t_after_ev );
+                    rsp_prof.io_size_sum      += cyc_io_size;
+                    if( cyc_io_size > rsp_prof.io_size_max ) rsp_prof.io_size_max = cyc_io_size;
+                    rsp_prof.trk_cnt_sum      += cyc_trk_cnt;
+                    if( cyc_trk_cnt > rsp_prof.trk_cnt_max ) rsp_prof.trk_cnt_max = cyc_trk_cnt;
+                    // LoadBalancer 응답 큐 + input queue (모든 handler 합산) — leak hunt
+                    const size_t lb_resp  = load_balancer_ ? load_balancer_->GetRespondReceiverSize() : 0;
+                    const size_t lb_input = load_balancer_ ? load_balancer_->GetTotalInputQueueSize() : 0;
+                    rsp_prof.lb_resp_size_sum += lb_resp;
+                    if( lb_resp > rsp_prof.lb_resp_size_max ) rsp_prof.lb_resp_size_max = lb_resp;
+                    rsp_prof.lb_input_size_sum += lb_input;
+                    if( lb_input > rsp_prof.lb_input_size_max ) rsp_prof.lb_input_size_max = lb_input;
+                    rsp_prof.sched_count     = scheduler_.size();
+                    rsp_prof.trk_obj_count   = trackers_.size();
+                    rsp_prof.count           += 1;
+                    if( rsp_prof.count >= 100 ) {
+                        // jemalloc stats (LD_PRELOAD 활성 시)
+                        uint64_t je_alloc = 0, je_active = 0, je_resident = 0, je_mapped = 0;
+                        if( mallctl_fn ) {
+                            uint64_t epoch = 1; size_t sz = sizeof(epoch);
+                            mallctl_fn( "epoch", &epoch, &sz, &epoch, sz );
+                            sz = sizeof(je_alloc);    mallctl_fn( "stats.allocated", &je_alloc,    &sz, nullptr, 0 );
+                            sz = sizeof(je_active);   mallctl_fn( "stats.active",    &je_active,   &sz, nullptr, 0 );
+                            sz = sizeof(je_resident); mallctl_fn( "stats.resident",  &je_resident, &sz, nullptr, 0 );
+                            sz = sizeof(je_mapped);   mallctl_fn( "stats.mapped",    &je_mapped,   &sz, nullptr, 0 );
+                        }
+                        MLOG_INFO("CAM[%d] RSP-thread (avg over %llu cycles, us): ifq=%llu resp=%llu trk=%llu meta=%llu ev=%llu total=%llu | io_q avg=%llu max=%llu | trk_cnt avg=%llu max=%llu | lb_resp avg=%llu max=%llu | lb_input avg=%llu max=%llu | sched=%llu trk_map=%llu | sio_emit=%llu grpc=%llu | jem_alloc=%lluKB active=%lluKB resident=%lluKB mapped=%lluKB",
+                            id_,
+                            static_cast<unsigned long long>( rsp_prof.count ),
+                            static_cast<unsigned long long>( rsp_prof.ifq_us  / rsp_prof.count ),
+                            static_cast<unsigned long long>( rsp_prof.resp_us / rsp_prof.count ),
+                            static_cast<unsigned long long>( rsp_prof.trk_us  / rsp_prof.count ),
+                            static_cast<unsigned long long>( rsp_prof.meta_us / rsp_prof.count ),
+                            static_cast<unsigned long long>( rsp_prof.ev_us   / rsp_prof.count ),
+                            static_cast<unsigned long long>( ( rsp_prof.ifq_us + rsp_prof.resp_us + rsp_prof.trk_us + rsp_prof.meta_us + rsp_prof.ev_us ) / rsp_prof.count ),
+                            static_cast<unsigned long long>( rsp_prof.io_size_sum / rsp_prof.count ),
+                            static_cast<unsigned long long>( rsp_prof.io_size_max ),
+                            static_cast<unsigned long long>( rsp_prof.trk_cnt_sum / rsp_prof.count ),
+                            static_cast<unsigned long long>( rsp_prof.trk_cnt_max ),
+                            static_cast<unsigned long long>( rsp_prof.lb_resp_size_sum / rsp_prof.count ),
+                            static_cast<unsigned long long>( rsp_prof.lb_resp_size_max ),
+                            static_cast<unsigned long long>( rsp_prof.lb_input_size_sum / rsp_prof.count ),
+                            static_cast<unsigned long long>( rsp_prof.lb_input_size_max ),
+                            static_cast<unsigned long long>( rsp_prof.sched_count ),
+                            static_cast<unsigned long long>( rsp_prof.trk_obj_count ),
+                            static_cast<unsigned long long>( rsp_prof.sio_emit_count ),
+                            static_cast<unsigned long long>( rsp_prof.grpc_send_count ),
+                            static_cast<unsigned long long>( je_alloc / 1024 ),
+                            static_cast<unsigned long long>( je_active / 1024 ),
+                            static_cast<unsigned long long>( je_resident / 1024 ),
+                            static_cast<unsigned long long>( je_mapped / 1024 ) );
+                        rsp_prof = RspProf{};
+                    }
+                }
+                continue;
+            }
+
+            // -----------------------------------------------------------------
+            // 3. Schedule check + event emit + io_work_queue + grpc_send
+            // -----------------------------------------------------------------
+            if( scheduler_.empty() ){
+                EventTime now_sys = std::chrono::system_clock::now();
+                if( IsOverTime( now_sys, last_interval_log_print_time, long_timelapse_log_interval ) ){
+                    MLOG_INFO("CAM[%d] AI inference detected ( %4d ojbect ), but target camera has not exist EVENT schedule.",
+                        id_, entire_track_results.size() );
+                    last_interval_log_print_time = now_sys;
+                }
+                continue;
+            }
+
+            std::vector<ScheduleEventDTO> event_list {};
+            std::string frame_path {};
+            event_list.reserve( scheduler_.size() );
+            frame_path.reserve( 128 );
+
+            if( auto opt = MakeImageSavePath( GetFrameImageCurrentProxyRootPath() ); opt.has_value() ){
+                frame_path = *opt;
+            }
+            else {
+                MLOG_ERROR( "%s() => CAM[%d] make frame image save directory failed", __func__, id_ );
+                continue;
+            }
+
+            struct tm tstruct;
+            auto      curr_time = std::time( nullptr );
+            auto*     time_info = localtime_r( &curr_time, &tstruct );
+
+            for( const auto& each_schedule : scheduler_ )
+            {
+                const std::vector<InferObject> on_event_results = each_schedule->Check( entire_track_results );
+                if( on_event_results.empty() ) continue;
+
+                {
+                    const std::string ev_name = Abnormal::Schedule::GetEventName( each_schedule->sch_info.event_code );
+                    MGEN::MetricsRegistry::Instance().IncrementCounter(
+                        "detectbase_events_total",
+                        { { "type", ev_name }, { "cam", std::to_string( id_ ) } },
+                        static_cast<double>( on_event_results.size() ) );
+                    MLOG_INFO( "event_detected type=%s cam=%d count=%zu",
+                        ev_name.c_str(), id_, on_event_results.size() );
+                }
+
+                auto event_msg_json = this->BuildNotifyJsonImpl_Analysis( each_schedule, on_event_results, time_info, frame_path );
+                event_list.push_back( ScheduleEventDTO{ std::move( event_msg_json ), on_event_results } );
+            }
+
+            if( event_list.empty() ) continue;
+
+            // 이벤트 발생 시에만 origin_ctx 작업 (cv::Mat 1080p convert).
+            if( !resp_origin_ctx.Update( frame->width, frame->height, frame->width, frame->height, frame->format ) ){
+                MLOG_ERROR("CAM[%d] Response | resp_origin_ctx update failed", id_);
+            }
+            if( resp_origin_ctx.Convert( frame, true, false ) == false ){
+                MLOG_ERROR("CAM[%d] Response | Origin Image Convert failed", id_);
+                continue;
+            }
+
+            if( io_work_queue_ ){
+                cyc_io_size = io_work_queue_->size();  // push 직전 size (cv::Mat 누적 감시)
+                IOWorkItem io_item;
+                io_item.frame_path = frame_path;
+                io_item.image_mat  = resp_origin_ctx.save_snapshot_mat.clone();
+                if( cyc_io_size >= 30 ) {
+                    MGEN::MetricsRegistry::Instance().IncrementCounter(
+                        "detectbase_errors_total", { { "type", "io_work_drop" } } );
+                }
+                io_work_queue_->enqueue_move( std::move( io_item ) );
+            }
+
+            if( sio_handler_ )
+            {
+                for( auto& target_event : event_list )
+                {
+                    sio_handler_->Emit( std::string { SocketIO::EventName::DETECTOR_MESSAGE }, target_event.event_message );
+                    rsp_prof.sio_emit_count += 1;
+                }
+            }
+
+            if( network_manager_ && network_manager_->IsGrpcClientEnabled() )
+            {
+                for( auto& target_event : event_list )
+                {
+                    const size_t sent = network_manager_->BroadcastEventOnlyJsonToGrpcPeers(
+                        target_event.event_message.dump() );
+                    if( sent > 0 ) {
+                        MGEN::MetricsRegistry::Instance().IncrementCounter(
+                            "detectbase_grpc_send_total",
+                            { { "rpc", "SendEventOnlyJson" } },
+                            static_cast<double>( sent ) );
+                        rsp_prof.grpc_send_count += static_cast<uint64_t>( sent );
+                    }
+                }
+            }
+
+            t_after_ev = std::chrono::steady_clock::now();
+            t_ev_set = true;
+
+            // ResponseThread stage profile flush — 정상 cycle 만 누적.
+            if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
+                rsp_prof.ifq_us  += rsp_us( t_rsp_top, t_after_ifq );
+                rsp_prof.resp_us += rsp_us( t_after_ifq, t_after_resp );
+                rsp_prof.trk_us  += rsp_us( t_after_resp, t_after_trk );
+                rsp_prof.meta_us += rsp_us( t_after_trk, t_after_meta );
+                rsp_prof.ev_us   += rsp_us( t_after_meta, t_after_ev );
+                rsp_prof.count   += 1;
+                if( rsp_prof.count >= 100 ) {
+                    MLOG_INFO("CAM[%d] RSP-thread (avg over %llu cycles, us): ifq=%llu resp=%llu trk=%llu meta=%llu ev=%llu total=%llu",
+                        id_,
+                        static_cast<unsigned long long>( rsp_prof.count ),
+                        static_cast<unsigned long long>( rsp_prof.ifq_us  / rsp_prof.count ),
+                        static_cast<unsigned long long>( rsp_prof.resp_us / rsp_prof.count ),
+                        static_cast<unsigned long long>( rsp_prof.trk_us  / rsp_prof.count ),
+                        static_cast<unsigned long long>( rsp_prof.meta_us / rsp_prof.count ),
+                        static_cast<unsigned long long>( rsp_prof.ev_us   / rsp_prof.count ),
+                        static_cast<unsigned long long>( ( rsp_prof.ifq_us + rsp_prof.resp_us + rsp_prof.trk_us + rsp_prof.meta_us + rsp_prof.ev_us ) / rsp_prof.count ) );
+                    rsp_prof = RspProf{};
+                }
+            }
+        }
+        MLOG_INFO("CAM[%d] ResponseThreadRunner finished", id_);
+    }
+
+    void RtspDetectorUnit::ResponseThreadCloser( void )
+    {
+        // InferenceThreadCloser 에서 이미 inflight_q_->terminate() 호출됨 — race-free.
+        if( inflight_q_ ) {
+            inflight_q_->clear_without_action();
+        }
     }
 
     void RtspDetectorUnit::IOWorkerThreadRunner( void )

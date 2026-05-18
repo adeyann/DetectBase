@@ -86,6 +86,9 @@ namespace MGEN
         uint64_t GetReconnectCount() const noexcept { return reconnect_count_.load(); }
         uint64_t GetErrorCount()     const noexcept { return error_count_.load();     }
 
+        // GStreamer appsink (frame I420 sink) 의 queued buffer 개수. leak hunt — GStreamer pipeline 내부 누적 측정.
+        uint32_t GetAppSinkQueuedBuffers() const noexcept;
+
     private:
         static GstFlowReturn OnNewSample   ( GstAppSink* sink, void* user_data );
         static GstFlowReturn OnNewRawSample( GstAppSink* sink, void* user_data );
