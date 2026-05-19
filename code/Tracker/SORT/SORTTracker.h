@@ -45,6 +45,10 @@ namespace MGEN
         std::optional<std::vector<InferObject>>
         TrackObjects( const std::vector<InferObject>& objects, const int request_seq );
 
+        // Inspection: 살아있는 kalman tracker 개수 + 누적 생성 카운트 (leak hunt 용 — kalman 자연 누적 감시).
+        size_t       GetAliveKalmanCount()   const noexcept { std::lock_guard<std::mutex> lk{ mtx_ }; return kalmans_.size(); }
+        unsigned int GetCreatedKalmanCount() const noexcept { std::lock_guard<std::mutex> lk{ mtx_ }; return kalman_tracker_create_count_; }
+
     private:
         // Const vars
         const size_t            max_track_size_;

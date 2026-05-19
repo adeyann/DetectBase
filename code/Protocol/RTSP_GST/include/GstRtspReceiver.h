@@ -89,6 +89,12 @@ namespace MGEN
         // GStreamer appsink (frame I420 sink) 의 queued buffer 개수. leak hunt — GStreamer pipeline 내부 누적 측정.
         uint32_t GetAppSinkQueuedBuffers() const noexcept;
 
+        // leak hunt v4 — AVFrame shared_ptr alive count (process-wide, deleter wrap). frame 1개 ~3MB.
+        static uint64_t GetAvFrameAliveCount() noexcept { return s_avframe_alive_.load(); }
+
+        // leak hunt v4 — ResetSourceOnly 호출 누적 카운터 (EOS reconn 빈도 측정 + 매 reconn 시 leak 감시).
+        uint64_t GetResetSourceCount() const noexcept { return reset_source_count_.load(); }
+
     private:
         static GstFlowReturn OnNewSample   ( GstAppSink* sink, void* user_data );
         static GstFlowReturn OnNewRawSample( GstAppSink* sink, void* user_data );
@@ -114,6 +120,12 @@ namespace MGEN
         std::atomic<uint64_t> frame_count_     { 0 };
         std::atomic<uint64_t> reconnect_count_ { 0 };
         std::atomic<uint64_t> error_count_     { 0 };
+
+        // leak hunt v4 — ResetSourceOnly 호출 누적.
+        std::atomic<uint64_t> reset_source_count_ { 0 };
+
+        // leak hunt v4 — process-wide AVFrame alive count (ConvertSampleToAVFrame deleter wrap).
+        static std::atomic<uint64_t> s_avframe_alive_;
     };
 
 } // namespace MGEN

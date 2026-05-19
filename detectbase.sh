@@ -272,8 +272,26 @@ cmd_audit() {
         ' > "${OUT_DIR}/asan_build.log" 2>&1
 
     if [[ -x "${OUT_DIR}/asan_pkg/DetectBase" ]]; then
-        log_info "  ASan binary 빌드 완료. 운영 정지 + 90초 실행..."
+        # ASan run 의 default duration = 240 분 (4h). interval mid-run leak check 위해 long-run.
+        #   - SIGUSR1 시점: T+5min, T+15min, T+30min, T+60min, T+120min, T+240min (종료)
+        #   - 각 시점의 leak 출력 → 누적 차이 = 시간 구간 별 runtime 누수 식별
+        #   환경 변수 ASAN_DURATION_MIN 으로 override 가능.
+        local ASAN_DURATION_MIN="${ASAN_DURATION_MIN:-240}"
+        local ASAN_DURATION_SEC=$(( ASAN_DURATION_MIN * 60 ))
+        log_info "  ASan binary 빌드 완료. 운영 정지 + ${ASAN_DURATION_MIN}분 실행 (interval SIGUSR1 mid-run leak check)..."
         docker-compose -f "${DOCKER_COMPOSE_FILE}" stop >/dev/null 2>&1
+
+        # 백그라운드 SIGUSR1 sender — container 안 main process (PID 1) 에 SIGUSR1 보냄.
+        (
+            for t_sec in 300 900 1800 3600 7200; do
+                if [[ $t_sec -ge $ASAN_DURATION_SEC ]]; then break; fi
+                sleep $t_sec
+                docker exec detectbase_asan sh -c 'kill -USR1 1' 2>/dev/null \
+                    && echo "===== SIGUSR1 sent at t+${t_sec}s =====" >> "${OUT_DIR}/asan_run.log" \
+                    || echo "SIGUSR1 send failed at t+${t_sec}s" >> "${OUT_DIR}/asan_run.log"
+            done
+        ) &
+        local SIGUSR1_BG_PID=$!
 
         docker run --rm --name detectbase_asan \
             --privileged --network host \
@@ -288,8 +306,10 @@ cmd_audit() {
             -e LD_LIBRARY_PATH="/DetectBase/logs/audit_${STAMP}/asan_pkg:/usr/local/lib" \
             -e TZ=Asia/Seoul --shm-size=512m \
             "${ANALYSIS_IMG}" \
-            timeout --signal=SIGINT 90s "/DetectBase/logs/audit_${STAMP}/asan_pkg/DetectBase" \
-            > "${OUT_DIR}/asan_run.log" 2>&1 || true
+            timeout --signal=SIGINT "${ASAN_DURATION_SEC}s" "/DetectBase/logs/audit_${STAMP}/asan_pkg/DetectBase" \
+            >> "${OUT_DIR}/asan_run.log" 2>&1 || true
+
+        kill "$SIGUSR1_BG_PID" 2>/dev/null || true
 
         log_info "  운영 재시작..."
         docker-compose -f "${DOCKER_COMPOSE_FILE}" up -d >/dev/null 2>&1

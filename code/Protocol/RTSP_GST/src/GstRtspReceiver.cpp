@@ -249,6 +249,7 @@ namespace MGEN
     {
         if( !pipeline_ ) return false;
 
+        reset_source_count_.fetch_add( 1, std::memory_order_relaxed );
         MLOG_INFO( "ResetSourceOnly — pipeline destroy/rebuild (single)" );
 
         TeardownPipeline();
@@ -374,10 +375,15 @@ namespace MGEN
             frame->pts = GST_BUFFER_PTS( buf );
         }
 
+        s_avframe_alive_.fetch_add( 1, std::memory_order_relaxed );
         return std::shared_ptr<AVFrame>( frame, []( AVFrame* f ) {
             av_frame_free( &f );
+            s_avframe_alive_.fetch_sub( 1, std::memory_order_relaxed );
         } );
     }
+
+    // leak hunt v4 — process-wide AVFrame alive counter 정의.
+    std::atomic<uint64_t> GstRtspReceiver::s_avframe_alive_ { 0 };
 
     gboolean GstRtspReceiver::OnBusMessage( GstBus* /*bus*/, GstMessage* msg, void* user_data )
     {

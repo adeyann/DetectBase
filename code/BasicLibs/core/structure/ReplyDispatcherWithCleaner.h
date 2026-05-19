@@ -54,6 +54,10 @@ namespace MGEN
             return dispatcher_.is_exist_in_entry(uuid);
         }
 
+        size_t total_size() const noexcept {
+            return dispatcher_.total_size();
+        }
+
         void remove_expired( unsigned int expiration_ms ) {
             dispatcher_.remove_expired(expiration_ms);
         }

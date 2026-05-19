@@ -254,4 +254,10 @@ namespace MGEN
         return receiver_ ? receiver_->GetAppSinkQueuedBuffers() : 0;
     }
 
+    uint64_t GstRtspClient::GetResetSourceCount() const noexcept
+    {
+        std::lock_guard<std::mutex> lk( const_cast<std::mutex&>( receiver_mtx_ ) );
+        return receiver_ ? receiver_->GetResetSourceCount() : 0;
+    }
+
 } // namespace MGEN

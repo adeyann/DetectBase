@@ -104,6 +104,9 @@ namespace MGEN
         // 모든 raw RTP 측 (raw_cb) 의 queued buffer count — appsink queue 측정 위해. (Phase 2 raw passthrough 시)
         uint32_t GetAppSinkQueuedBuffers() const noexcept;
 
+        // leak hunt v4 — receiver 의 ResetSourceOnly 호출 누적 카운터 (EOS reconn 빈도 측정).
+        uint64_t GetResetSourceCount() const noexcept;
+
     private:
         /** Receiver 의 on_error/on_timeout/on_eos 콜백에서 호출. 비동기 reconnect 트리거. */
         void RequestReconnect() noexcept;

@@ -67,7 +67,7 @@ namespace MGEN
 
     /**
      * @brief Cam thread 가 RequestAsync 후 ResponseThread 에 넘기는 inflight frame.
-     *        ResponseThread 가 dequeue 하여 RespondAsync + post (tracking + metadata + event + emit).
+     *        ResponseThread 가 dequeue 하여 RespondAsync + post (tracking + metadata).
      */
     struct InflightItem
     {
@@ -76,6 +76,17 @@ namespace MGEN
         uint64_t                                    correlation_id     = 0;
         std::chrono::steady_clock::time_point       request_time;
         int                                         inference_wait_ms  = 5000;
+    };
+
+    /**
+     * @brief ResponseThread 가 tracking 결과를 EventThread 에 넘기는 item.
+     *        EventThread 가 dequeue 하여 schedule check + sio/grpc + io_work_queue 처리.
+     *        RspThread cycle 에서 event burst (sio/grpc/Convert/io_work) 빼서 inflight_q drift 제거.
+     */
+    struct EventItem
+    {
+        std::shared_ptr<AVFrame>                    frame;          // Convert + clone 위해 보존 (shared_ptr ref 1)
+        std::vector<InferObject>                    track_results;  // entire_track_results
     };
 
     class RtspDetectorUnit final : private SettingMonitor
@@ -108,9 +119,14 @@ namespace MGEN
         void InferenceThreadRunner( void );
         void InferenceThreadCloser( void );
 
-        // B2 async pipeline — ResponseThread 본체. inflight_q_ dequeue → RespondAsync → tracking/metadata/event/emit.
+        // B2 async pipeline — ResponseThread 본체. inflight_q_ dequeue → RespondAsync → tracking → metadata → event_q push.
         void ResponseThreadRunner( void );
         void ResponseThreadCloser( void );
+
+        // B3 — EventThread 본체. event_q_ dequeue → schedule check → BuildNotifyJsonImpl → Convert/clone → io_work_queue + sio + grpc.
+        //   RspThread cycle 에서 event burst 제거 → inflight_q drift 0.
+        void EventThreadRunner( void );
+        void EventThreadCloser( void );
 
         // IO Worker (cv::imwrite 비동기 처리). 이벤트 빈발 시 main loop 의 frame drop 차단.
         void IOWorkerThreadRunner( void );
@@ -165,10 +181,15 @@ namespace MGEN
         sptrSafeQueue<std::shared_ptr<AVFrame>> avframe_q_ = nullptr;
 
         // B2 async pipeline — InferenceThread 가 RequestAsync 후 inflight_q_ 에 push, ResponseThread 가 dequeue 후 post 처리.
-        //   cam thread cycle 에서 (resp + tracker + metadata + event + emit) 빠짐 → 이론 dfps +52%.
-        //   shutdown 순서: inference_thread → inflight_q_->terminate → response_thread.
+        //   cam thread cycle 에서 (resp + tracker + metadata) 빠짐 → 이론 dfps +52%.
+        //   shutdown 순서: inference_thread → inflight_q_->terminate → response_thread → event_q_->terminate → event_thread → io_worker.
         SafeThread                                  response_thread_;
         std::shared_ptr<SafeQueue<InflightItem>>    inflight_q_         = nullptr;
+
+        // B3 — ResponseThread 가 tracking 결과를 EventThread 에 넘김. EventThread 가 schedule check + sio/grpc + io_work.
+        //   효과: RspThread cycle 에서 event burst (2~12ms) 제거 → cam thread cycle (34ms) 보다 항상 빠름 → inflight_q max 0~1.
+        SafeThread                                  event_thread_;
+        std::shared_ptr<SafeQueue<EventItem>>       event_q_            = nullptr;
 
         // Stage G (cv::imwrite) 비동기 처리. main loop 가 enqueue 만 → main 의 frame period 보호.
         SafeThread                              io_worker_thread_;

@@ -139,6 +139,41 @@ namespace MGEN
             return total;
         }
 
+        /**
+         * @brief Inspection: ReplyDispatcher pending entry 합산 (leak hunt 용 — set_reply 후 wait_and_get 으로 erase 안 된 entry 누적 감시).
+         *        B4 (cam-별 result queue) 도입 후 reply_dispatcher_ 가 미사용 — 항상 0 반환.
+         */
+        size_t GetReplyDispatcherEntrySize() const noexcept {
+            return reply_dispatcher_.total_size();
+        }
+
+        /**
+         * @brief Inspection: cam-별 result queue 의 합산 size (B4 추가).
+         *        NPU 결과가 RspThread 가 pop 하기 전 까지 보유. 평균 0~1 기대 (RspThread drain rate >> NPU output rate).
+         */
+        size_t GetCamResultQTotalSize() const noexcept {
+            std::lock_guard<std::mutex> lck { this->cam_result_qs_mutex_ };
+            size_t total = 0;
+            for( const auto& [uuid, q] : this->cam_result_qs_ ) {
+                (void) uuid;
+                if( q ) total += q->size();
+            }
+            return total;
+        }
+
+        /**
+         * @brief Inspection: cam-별 result queue 의 drop_oldest 누적 카운터 합산 (B4 추가).
+         */
+        uint64_t GetCamResultQTotalDrop() const noexcept {
+            std::lock_guard<std::mutex> lck { this->cam_result_qs_mutex_ };
+            uint64_t total = 0;
+            for( const auto& [uuid, q] : this->cam_result_qs_ ) {
+                (void) uuid;
+                if( q ) total += q->GetDropCount();
+            }
+            return total;
+        }
+
     private:
         void ReplyDispatcherThreadRunner( void );
         void ReplyDispatcherThreadCloser( void );
@@ -152,11 +187,20 @@ namespace MGEN
         std::map<EngineHandleUUID, sptrSafeQueue<InputLayerWrapper>>        engine_input_qs_;
         std::atomic<size_t>                                                 round_robin_idx_ { 0 };
 
-        // 응답 수신 큐 (모든 응답이 모이는 단일 큐)
+        // 응답 수신 큐 (모든 응답이 모이는 단일 큐 — NPU handler 들이 push, ReplyDispatcherThread 가 dequeue)
         sptrSafeQueue<OutputLayerWrapper> infer_respond_receiver_;
 
-        // Unit ID 기반 응답 분배기
+        // (DEPRECATED B4 이후) Unit ID 기반 응답 분배기 — cam-별 entry 1개만 보유 (덮어쓰기) 라
+        //   backlog 처리 불가. RspThread cycle = NPU pacing 으로 묶임.
+        // B4 (2026-05-18) — cam_result_qs_ 로 교체. ReplyDispatcherThreadRunner 가 cam-별 큐 push.
+        //   reply_dispatcher_ 자체는 호환 위해 남기지만 set_reply / wait_and_get 호출 없음.
         MGEN::ReplyDispatcherWithCleaner<OutputLayerWrapper, MGEN::Type::UnitID> reply_dispatcher_;
+
+        // B4 — cam-별 result queue. NPU 결과 (cam 별) 가 도착 순서대로 push, RspThread 가 dequeue.
+        //   기존 reply_dispatcher_ (entry 1개 덮어쓰기) 의 backlog drain 불가 문제 해결.
+        //   cap = 10 (RspThread 가 빠르게 drain 하므로 cap 도달 거의 없음, 안전 buffer).
+        std::map<MGEN::Type::UnitID, std::shared_ptr<SafeQueue<OutputLayerWrapper>>> cam_result_qs_;
+        mutable std::mutex                                                            cam_result_qs_mutex_;
 
         // 결과 구독 유닛 목록
         std::set<MGEN::Type::UnitID> subscribers_;

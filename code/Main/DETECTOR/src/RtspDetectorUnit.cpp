@@ -394,16 +394,31 @@ namespace MGEN
 
         // B2 async pipeline — InferenceThread (producer) 와 ResponseThread (consumer) 사이의 inflight queue.
         // cam thread 가 RequestAsync 후 inflight push, response thread 가 dequeue 후 RespondAsync + post.
-        // max_size = 2 * detect_fps_limit_ (대략 cam-thread 1초 분량). 초과 시 oldest drop.
+        //
+        // cap=10 결정 근거 (2026-05-18 v6 monitor 분석):
+        //   - RspThread total cycle ≈ cam interval (~34ms). pop rate ≈ push rate → drain rate 0.
+        //   - jitter spike (EOS reconnect 등) 마다 backlog +N 누적. spike 후에도 drain 못 함.
+        //   - cap=60 으로 5h 가동 시 한 cam 의 inflight 가 cap 까지 도달 (CAM[661] 58/60 직전).
+        //   - 60 frame × 3MB × 4 cam = 720 MB anon 누적. baseline 크게 형성.
+        //   - cap=10 으로 줄이면 drop_oldest 일찍 발동 (q_drop inf > 0) → 누적 폭 10 × 3MB × 4 cam = 120 MB 만.
+        //   - dfps 영향 없음: drop_oldest 가 oldest frame 만 버리고 NPU 가 항상 latest 처리.
+        //   - tracking continuity 약간 영향 가능 — 진짜 fix (B4 = RspThread cycle < cam interval) 는 별도 작업.
         this->inflight_q_ = std::make_shared<SafeQueue<InflightItem>>();
-        // inflight_q max_size — RspThread 가 InfThread 보다 평균 4% 느려 매 cycle 미세 frame 누적.
-        //   60 (2 × fps_limit) 으로 두면 5h 만에 ~700 MB anon 메모리 누적 (frame 3MB × 60).
-        //   4 로 줄임: drop_oldest 가 oldest frame 만 버리고 NPU 가 항상 latest 처리 → dfps 영향 없음.
-        //   메모리 영향: 4 × 3MB × 4 cam = 48 MB 만.
-        this->inflight_q_->SetMaxSize( 4 );
+        this->inflight_q_->SetMaxSize( 10 );
         this->response_thread_.SetThreadFunctions(
             std::bind( &RtspDetectorUnit::ResponseThreadRunner, this ),
             std::bind( &RtspDetectorUnit::ResponseThreadCloser, this )
+        );
+
+        // B3 — ResponseThread (producer) 와 EventThread (consumer) 사이의 event queue.
+        // RspThread 가 tracking 결과 push, EvtThread 가 schedule check + sio/grpc + io_work_queue 처리.
+        // EventItem = frame (shared_ptr ref) + track_results (vector). frame 보존 비용 = shared_ptr ref 1 (~bytes).
+        // cap=10 — event 빈도 평균 1/min 미만, burst 도 ~수 event/sec 이내 → 10 충분. drop_oldest 발동 시 oldest event 버림.
+        this->event_q_ = std::make_shared<SafeQueue<EventItem>>();
+        this->event_q_->SetMaxSize( 10 );
+        this->event_thread_.SetThreadFunctions(
+            std::bind( &RtspDetectorUnit::EventThreadRunner, this ),
+            std::bind( &RtspDetectorUnit::EventThreadCloser, this )
         );
 
         // Setting Manager Get Check =====================================================================
@@ -485,6 +500,10 @@ namespace MGEN
         if( this->io_worker_thread_.Start() == false )
             return false;
 
+        // B3 — Event thread 가 가장 downstream consumer. response 가 event_q push 시 이미 가동되어야 함.
+        if( this->event_thread_.Start() == false )
+            return false;
+
         // B2 — Response thread 도 inference 시작 전에 start (inflight push 시 consumer 준비).
         if( this->response_thread_.Start() == false )
             return false;
@@ -497,13 +516,16 @@ namespace MGEN
 
     bool RtspDetectorUnit::Stop( void )
     {
-        // !!! DO NOT REORDER !!! Shutdown 순서 (B2 async pipeline):
+        // !!! DO NOT REORDER !!! Shutdown 순서 (B2+B3 async pipeline):
         //   1) inference_thread Stop  — producer 정지 → inflight push 없음
         //      InferenceThreadCloser 가 inflight_q_->terminate() 호출 (response_thread 가 dequeue 종료 가능)
-        //   2) response_thread Stop  — consumer 정지 → 남은 inflight 자연 cleanup
-        //   3) io_worker_thread Stop  — response 가 io_work_queue 에 push 안 함 후 정지
+        //   2) response_thread Stop  — RspThread 정지 → event_q push 없음
+        //      ResponseThreadCloser 가 event_q_->terminate() 호출 (event_thread 가 dequeue 종료 가능)
+        //   3) event_thread Stop  — EvtThread 정지 → io_work_queue push 없음
+        //   4) io_worker_thread Stop  — io_work_queue 안 남은 cv::Mat cleanup 후 정지
         this->inference_thread_.Stop();
         this->response_thread_.Stop();
+        this->event_thread_.Stop();
         this->io_worker_thread_.Stop();
         return true;
     }
@@ -1300,9 +1322,63 @@ namespace MGEN
             uint64_t trk_obj_count = 0;     // trackers_ size (class id 별 tracker 수)
             uint64_t sio_emit_count = 0;    // 누적 sio emit 호출 (event 마다 ++)
             uint64_t grpc_send_count = 0;   // 누적 GRPC send 호출
+            // leak hunt v4 추가 — 내 코드 안 leak 후보 식별.
+            uint64_t avf_alive_sum = 0;     // GstRtspReceiver process-wide AVFrame alive count 누적
+            uint64_t avf_alive_max = 0;
+            uint64_t reset_cnt_total = 0;   // 이 cam 의 ResetSourceOnly 호출 누적 (proxy_ptr_)
+            uint64_t kalman_alive_sum = 0;  // trackers_ 의 GetAliveKalmanCount() 합산 누적
+            uint64_t kalman_alive_max = 0;
+            uint64_t kalman_created_total = 0;  // trackers_ 의 GetCreatedKalmanCount() 합산 (snapshot)
+            uint64_t lb_pending_sum = 0;    // EngineLoadBalancer ReplyDispatcher entry 누적
+            uint64_t lb_pending_max = 0;
+            uint64_t ev_path_count = 0;     // event path (entire_track_results.empty() == false) 진입 누적
+            uint64_t ev_json_kb_sum = 0;    // event_msg_json.dump().size() / 1024 누적
+            uint64_t ev_push_count = 0;     // io_work_queue->enqueue_move 호출 누적 (event path)
+            uint64_t anon_mb_sample = 0;    // /proc/self/maps 의 anonymous mapping 합산 (MB, 측정 시점 sample)
+            // SafeQueue drop_oldest 누적 카운터 (v5 추가).
+            uint64_t avframe_drop_total  = 0;
+            uint64_t inflight_drop_total = 0;
+            uint64_t event_drop_total    = 0;
+            uint64_t io_drop_total       = 0;
+            // v7 — resp_us 분해.
+            uint64_t resp_wait_us_sum    = 0;   // RespondAsync wait_and_get (NPU 결과 대기)
+            uint64_t resp_wait_us_max    = 0;
+            uint64_t resp_merge_us_sum   = 0;   // bbox convert + merge for loop
+            uint64_t resp_merge_us_max   = 0;
+            uint64_t resp_obj_count_sum  = 0;   // infer_objects 합산
+            uint64_t resp_obj_count_max  = 0;
+            uint64_t event_q_size_sum    = 0;   // event_q push 직전 size
+            uint64_t event_q_size_max    = 0;
             uint64_t count   = 0;
         };
         RspProf rsp_prof;
+
+        // leak hunt v4 helper — /proc/self/maps 의 anonymous mapping 합산 (KB).
+        // anonymous = 마지막 column (pathname) 가 비었거나 "[heap]" 또는 "[anon..." 또는 "[stack]" 등 [ 로 시작.
+        auto read_anon_mapping_kb = []() -> uint64_t {
+            FILE* fp = std::fopen( "/proc/self/maps", "r" );
+            if( !fp ) return 0;
+            uint64_t total_kb = 0;
+            char line[ 512 ];
+            while( std::fgets( line, sizeof( line ), fp ) ) {
+                uint64_t start = 0, end = 0;
+                char perms[ 8 ] = {0};
+                int matched = std::sscanf( line, "%lx-%lx %7s", &start, &end, perms );
+                if( matched < 3 ) continue;
+                // pathname 위치 (6번째 column). 짧으면 anonymous.
+                int spaces = 0;
+                const char* p = line;
+                while( *p && spaces < 5 ) {
+                    if( *p == ' ' ) spaces++;
+                    p++;
+                }
+                while( *p == ' ' ) p++;
+                bool is_anon = ( *p == '\0' || *p == '\n' || *p == '[' );
+                if( is_anon ) total_kb += ( end - start ) / 1024;
+            }
+            std::fclose( fp );
+            return total_kb;
+        };
 
         // jemalloc stats — dlsym 으로 mallctl symbol 동적 찾기 (jemalloc 가 LD_PRELOAD 됐을 때 작동).
         typedef int (*mallctl_t)(const char*, void*, size_t*, void*, size_t);
@@ -1344,8 +1420,12 @@ namespace MGEN
 
             // -----------------------------------------------------------------
             // 1. RespondAsync + bbox convert + merge
+            //    v7 — resp_us 분해: wait (NPU 결과 대기) vs merge (bbox convert loop).
             // -----------------------------------------------------------------
             std::vector<InferObject> merged_results;
+            uint64_t cyc_resp_wait_us   = 0;
+            uint64_t cyc_resp_merge_us  = 0;
+            size_t   cyc_resp_obj_count = 0;
             for( const auto& engine_inflight : item.engines )
             {
                 auto now              = std::chrono::steady_clock::now();
@@ -1358,11 +1438,15 @@ namespace MGEN
                     continue;
                 }
 
+                const auto t_wait_start = std::chrono::steady_clock::now();
                 auto result_opt = load_balancer_->RespondAsync( engine_inflight.subscribe_id, remaining_budget );
+                const auto t_wait_end = std::chrono::steady_clock::now();
+                cyc_resp_wait_us += rsp_us( t_wait_start, t_wait_end );
 
                 if( result_opt.has_value() )
                 {
                     load_balancer_->AddInferCount( engine_inflight.subscribe_id );
+                    cyc_resp_obj_count += result_opt->infer_objects.size();
 
                     for( const auto& obj : result_opt->infer_objects )
                     {
@@ -1383,9 +1467,19 @@ namespace MGEN
                     MLOG_WARN("CAM[%d] Engine %s timeout (Waited max %d ms)",
                         id_, engine_inflight.magic_name.c_str(), remaining_budget );
                 }
+                const auto t_merge_end = std::chrono::steady_clock::now();
+                cyc_resp_merge_us += rsp_us( t_wait_end, t_merge_end );
             }
             t_after_resp = std::chrono::steady_clock::now();
             t_resp_set = true;
+
+            // v7 accumulate
+            rsp_prof.resp_wait_us_sum  += cyc_resp_wait_us;
+            if( cyc_resp_wait_us > rsp_prof.resp_wait_us_max ) rsp_prof.resp_wait_us_max = cyc_resp_wait_us;
+            rsp_prof.resp_merge_us_sum += cyc_resp_merge_us;
+            if( cyc_resp_merge_us > rsp_prof.resp_merge_us_max ) rsp_prof.resp_merge_us_max = cyc_resp_merge_us;
+            rsp_prof.resp_obj_count_sum += cyc_resp_obj_count;
+            if( cyc_resp_obj_count > rsp_prof.resp_obj_count_max ) rsp_prof.resp_obj_count_max = cyc_resp_obj_count;
 
             // -----------------------------------------------------------------
             // 2. Tracking
@@ -1453,6 +1547,30 @@ namespace MGEN
                     if( lb_input > rsp_prof.lb_input_size_max ) rsp_prof.lb_input_size_max = lb_input;
                     rsp_prof.sched_count     = scheduler_.size();
                     rsp_prof.trk_obj_count   = trackers_.size();
+                    // leak hunt v4 — 매 cycle sample (cheap)
+                    {
+                        const uint64_t avf_alive = MGEN::GstRtspReceiver::GetAvFrameAliveCount();
+                        rsp_prof.avf_alive_sum += avf_alive;
+                        if( avf_alive > rsp_prof.avf_alive_max ) rsp_prof.avf_alive_max = avf_alive;
+                        uint64_t kalman_alive = 0, kalman_created = 0;
+                        for( const auto& [cid, trk] : trackers_ ) {
+                            (void) cid;
+                            if( trk ) { kalman_alive += trk->GetAliveKalmanCount(); kalman_created += trk->GetCreatedKalmanCount(); }
+                        }
+                        rsp_prof.kalman_alive_sum += kalman_alive;
+                        if( kalman_alive > rsp_prof.kalman_alive_max ) rsp_prof.kalman_alive_max = kalman_alive;
+                        rsp_prof.kalman_created_total = kalman_created;
+                        // B4 — cam-별 result queue 의 합산 size (이전 GetReplyDispatcherEntrySize 는 deprecated, 항상 0).
+                        const uint64_t lb_pending = load_balancer_ ? load_balancer_->GetCamResultQTotalSize() : 0;
+                        rsp_prof.lb_pending_sum += lb_pending;
+                        if( lb_pending > rsp_prof.lb_pending_max ) rsp_prof.lb_pending_max = lb_pending;
+                        rsp_prof.reset_cnt_total = proxy_ptr_ ? proxy_ptr_->GetResetSourceCount() : 0;
+                        // v5 — SafeQueue drop counter snapshot (모든 큐).
+                        rsp_prof.avframe_drop_total  = avframe_q_     ? avframe_q_->GetDropCount()     : 0;
+                        rsp_prof.inflight_drop_total = inflight_q_    ? inflight_q_->GetDropCount()    : 0;
+                        rsp_prof.event_drop_total    = event_q_       ? event_q_->GetDropCount()       : 0;
+                        rsp_prof.io_drop_total       = io_work_queue_ ? io_work_queue_->GetDropCount() : 0;
+                    }
                     rsp_prof.count           += 1;
                     if( rsp_prof.count >= 100 ) {
                         // jemalloc stats (LD_PRELOAD 활성 시)
@@ -1465,7 +1583,9 @@ namespace MGEN
                             sz = sizeof(je_resident); mallctl_fn( "stats.resident",  &je_resident, &sz, nullptr, 0 );
                             sz = sizeof(je_mapped);   mallctl_fn( "stats.mapped",    &je_mapped,   &sz, nullptr, 0 );
                         }
-                        MLOG_INFO("CAM[%d] RSP-thread (avg over %llu cycles, us): ifq=%llu resp=%llu trk=%llu meta=%llu ev=%llu total=%llu | io_q avg=%llu max=%llu | trk_cnt avg=%llu max=%llu | lb_resp avg=%llu max=%llu | lb_input avg=%llu max=%llu | sched=%llu trk_map=%llu | sio_emit=%llu grpc=%llu | jem_alloc=%lluKB active=%lluKB resident=%lluKB mapped=%lluKB",
+                        // 100 cycle 마다 한 번만 anon mapping 측정 (expensive — /proc/self/maps 전체 파싱).
+                        rsp_prof.anon_mb_sample = read_anon_mapping_kb() / 1024;
+                        MLOG_INFO("CAM[%d] RSP-thread (avg over %llu cycles, us): ifq=%llu resp=%llu trk=%llu meta=%llu ev=%llu total=%llu | resp_wait avg=%llu max=%llu | resp_merge avg=%llu max=%llu | resp_obj avg=%llu max=%llu | event_q_push avg=%llu max=%llu | io_q avg=%llu max=%llu | trk_cnt avg=%llu max=%llu | lb_resp avg=%llu max=%llu | lb_input avg=%llu max=%llu | sched=%llu trk_map=%llu | sio_emit=%llu grpc=%llu | jem_alloc=%lluKB active=%lluKB resident=%lluKB mapped=%lluKB | avf_alive avg=%llu max=%llu | reset_cnt=%llu | kalman alive avg=%llu max=%llu created=%llu | lb_pending avg=%llu max=%llu | ev_path=%llu ev_json_kb=%llu ev_push=%llu | anon=%lluMB | q_drop avf=%llu inf=%llu ev=%llu io=%llu",
                             id_,
                             static_cast<unsigned long long>( rsp_prof.count ),
                             static_cast<unsigned long long>( rsp_prof.ifq_us  / rsp_prof.count ),
@@ -1474,6 +1594,14 @@ namespace MGEN
                             static_cast<unsigned long long>( rsp_prof.meta_us / rsp_prof.count ),
                             static_cast<unsigned long long>( rsp_prof.ev_us   / rsp_prof.count ),
                             static_cast<unsigned long long>( ( rsp_prof.ifq_us + rsp_prof.resp_us + rsp_prof.trk_us + rsp_prof.meta_us + rsp_prof.ev_us ) / rsp_prof.count ),
+                            static_cast<unsigned long long>( rsp_prof.resp_wait_us_sum  / rsp_prof.count ),
+                            static_cast<unsigned long long>( rsp_prof.resp_wait_us_max ),
+                            static_cast<unsigned long long>( rsp_prof.resp_merge_us_sum / rsp_prof.count ),
+                            static_cast<unsigned long long>( rsp_prof.resp_merge_us_max ),
+                            static_cast<unsigned long long>( rsp_prof.resp_obj_count_sum / rsp_prof.count ),
+                            static_cast<unsigned long long>( rsp_prof.resp_obj_count_max ),
+                            static_cast<unsigned long long>( rsp_prof.event_q_size_sum / rsp_prof.count ),
+                            static_cast<unsigned long long>( rsp_prof.event_q_size_max ),
                             static_cast<unsigned long long>( rsp_prof.io_size_sum / rsp_prof.count ),
                             static_cast<unsigned long long>( rsp_prof.io_size_max ),
                             static_cast<unsigned long long>( rsp_prof.trk_cnt_sum / rsp_prof.count ),
@@ -1489,7 +1617,23 @@ namespace MGEN
                             static_cast<unsigned long long>( je_alloc / 1024 ),
                             static_cast<unsigned long long>( je_active / 1024 ),
                             static_cast<unsigned long long>( je_resident / 1024 ),
-                            static_cast<unsigned long long>( je_mapped / 1024 ) );
+                            static_cast<unsigned long long>( je_mapped / 1024 ),
+                            static_cast<unsigned long long>( rsp_prof.avf_alive_sum / rsp_prof.count ),
+                            static_cast<unsigned long long>( rsp_prof.avf_alive_max ),
+                            static_cast<unsigned long long>( rsp_prof.reset_cnt_total ),
+                            static_cast<unsigned long long>( rsp_prof.kalman_alive_sum / rsp_prof.count ),
+                            static_cast<unsigned long long>( rsp_prof.kalman_alive_max ),
+                            static_cast<unsigned long long>( rsp_prof.kalman_created_total ),
+                            static_cast<unsigned long long>( rsp_prof.lb_pending_sum / rsp_prof.count ),
+                            static_cast<unsigned long long>( rsp_prof.lb_pending_max ),
+                            static_cast<unsigned long long>( rsp_prof.ev_path_count ),
+                            static_cast<unsigned long long>( rsp_prof.ev_json_kb_sum ),
+                            static_cast<unsigned long long>( rsp_prof.ev_push_count ),
+                            static_cast<unsigned long long>( rsp_prof.anon_mb_sample ),
+                            static_cast<unsigned long long>( rsp_prof.avframe_drop_total ),
+                            static_cast<unsigned long long>( rsp_prof.inflight_drop_total ),
+                            static_cast<unsigned long long>( rsp_prof.event_drop_total ),
+                            static_cast<unsigned long long>( rsp_prof.io_drop_total ) );
                         rsp_prof = RspProf{};
                     }
                 }
@@ -1497,115 +1641,74 @@ namespace MGEN
             }
 
             // -----------------------------------------------------------------
-            // 3. Schedule check + event emit + io_work_queue + grpc_send
+            // 3. B3 — track 결과를 event_q push (EvtThread 가 schedule check + sio/grpc + io_work_queue 처리)
             // -----------------------------------------------------------------
-            if( scheduler_.empty() ){
-                EventTime now_sys = std::chrono::system_clock::now();
-                if( IsOverTime( now_sys, last_interval_log_print_time, long_timelapse_log_interval ) ){
-                    MLOG_INFO("CAM[%d] AI inference detected ( %4d ojbect ), but target camera has not exist EVENT schedule.",
-                        id_, entire_track_results.size() );
-                    last_interval_log_print_time = now_sys;
-                }
-                continue;
-            }
+            if( event_q_ ) {
+                const size_t cyc_evq_size = event_q_->size();  // v7 — push 직전 event_q size
+                rsp_prof.event_q_size_sum += cyc_evq_size;
+                if( cyc_evq_size > rsp_prof.event_q_size_max ) rsp_prof.event_q_size_max = cyc_evq_size;
 
-            std::vector<ScheduleEventDTO> event_list {};
-            std::string frame_path {};
-            event_list.reserve( scheduler_.size() );
-            frame_path.reserve( 128 );
-
-            if( auto opt = MakeImageSavePath( GetFrameImageCurrentProxyRootPath() ); opt.has_value() ){
-                frame_path = *opt;
-            }
-            else {
-                MLOG_ERROR( "%s() => CAM[%d] make frame image save directory failed", __func__, id_ );
-                continue;
-            }
-
-            struct tm tstruct;
-            auto      curr_time = std::time( nullptr );
-            auto*     time_info = localtime_r( &curr_time, &tstruct );
-
-            for( const auto& each_schedule : scheduler_ )
-            {
-                const std::vector<InferObject> on_event_results = each_schedule->Check( entire_track_results );
-                if( on_event_results.empty() ) continue;
-
-                {
-                    const std::string ev_name = Abnormal::Schedule::GetEventName( each_schedule->sch_info.event_code );
-                    MGEN::MetricsRegistry::Instance().IncrementCounter(
-                        "detectbase_events_total",
-                        { { "type", ev_name }, { "cam", std::to_string( id_ ) } },
-                        static_cast<double>( on_event_results.size() ) );
-                    MLOG_INFO( "event_detected type=%s cam=%d count=%zu",
-                        ev_name.c_str(), id_, on_event_results.size() );
-                }
-
-                auto event_msg_json = this->BuildNotifyJsonImpl_Analysis( each_schedule, on_event_results, time_info, frame_path );
-                event_list.push_back( ScheduleEventDTO{ std::move( event_msg_json ), on_event_results } );
-            }
-
-            if( event_list.empty() ) continue;
-
-            // 이벤트 발생 시에만 origin_ctx 작업 (cv::Mat 1080p convert).
-            if( !resp_origin_ctx.Update( frame->width, frame->height, frame->width, frame->height, frame->format ) ){
-                MLOG_ERROR("CAM[%d] Response | resp_origin_ctx update failed", id_);
-            }
-            if( resp_origin_ctx.Convert( frame, true, false ) == false ){
-                MLOG_ERROR("CAM[%d] Response | Origin Image Convert failed", id_);
-                continue;
-            }
-
-            if( io_work_queue_ ){
-                cyc_io_size = io_work_queue_->size();  // push 직전 size (cv::Mat 누적 감시)
-                IOWorkItem io_item;
-                io_item.frame_path = frame_path;
-                io_item.image_mat  = resp_origin_ctx.save_snapshot_mat.clone();
-                if( cyc_io_size >= 30 ) {
-                    MGEN::MetricsRegistry::Instance().IncrementCounter(
-                        "detectbase_errors_total", { { "type", "io_work_drop" } } );
-                }
-                io_work_queue_->enqueue_move( std::move( io_item ) );
-            }
-
-            if( sio_handler_ )
-            {
-                for( auto& target_event : event_list )
-                {
-                    sio_handler_->Emit( std::string { SocketIO::EventName::DETECTOR_MESSAGE }, target_event.event_message );
-                    rsp_prof.sio_emit_count += 1;
-                }
-            }
-
-            if( network_manager_ && network_manager_->IsGrpcClientEnabled() )
-            {
-                for( auto& target_event : event_list )
-                {
-                    const size_t sent = network_manager_->BroadcastEventOnlyJsonToGrpcPeers(
-                        target_event.event_message.dump() );
-                    if( sent > 0 ) {
-                        MGEN::MetricsRegistry::Instance().IncrementCounter(
-                            "detectbase_grpc_send_total",
-                            { { "rpc", "SendEventOnlyJson" } },
-                            static_cast<double>( sent ) );
-                        rsp_prof.grpc_send_count += static_cast<uint64_t>( sent );
-                    }
-                }
+                EventItem ev_item;
+                ev_item.frame         = frame;                              // shared_ptr ref +1 (Convert 위해 보존)
+                ev_item.track_results = std::move( entire_track_results );  // move (RspThread scope 끝나므로)
+                event_q_->enqueue_move( std::move( ev_item ) );             // SafeQueue 가 cap 도달 시 drop_oldest + drop_count_++
+                rsp_prof.ev_path_count += 1;
             }
 
             t_after_ev = std::chrono::steady_clock::now();
             t_ev_set = true;
 
-            // ResponseThread stage profile flush — 정상 cycle 만 누적.
+            // ResponseThread stage profile flush — event path 도 동일 full format 으로 통합 (v4 leak hunt).
             if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
                 rsp_prof.ifq_us  += rsp_us( t_rsp_top, t_after_ifq );
                 rsp_prof.resp_us += rsp_us( t_after_ifq, t_after_resp );
                 rsp_prof.trk_us  += rsp_us( t_after_resp, t_after_trk );
                 rsp_prof.meta_us += rsp_us( t_after_trk, t_after_meta );
                 rsp_prof.ev_us   += rsp_us( t_after_meta, t_after_ev );
+                // event path 의 io_size + LoadBalancer + tracker map 도 sample (empty path 와 동일).
+                rsp_prof.io_size_sum      += cyc_io_size;
+                if( cyc_io_size > rsp_prof.io_size_max ) rsp_prof.io_size_max = cyc_io_size;
+                rsp_prof.trk_cnt_sum      += cyc_trk_cnt;
+                if( cyc_trk_cnt > rsp_prof.trk_cnt_max ) rsp_prof.trk_cnt_max = cyc_trk_cnt;
+                const size_t lb_resp_ev  = load_balancer_ ? load_balancer_->GetRespondReceiverSize() : 0;
+                const size_t lb_input_ev = load_balancer_ ? load_balancer_->GetTotalInputQueueSize() : 0;
+                rsp_prof.lb_resp_size_sum += lb_resp_ev;
+                if( lb_resp_ev > rsp_prof.lb_resp_size_max ) rsp_prof.lb_resp_size_max = lb_resp_ev;
+                rsp_prof.lb_input_size_sum += lb_input_ev;
+                if( lb_input_ev > rsp_prof.lb_input_size_max ) rsp_prof.lb_input_size_max = lb_input_ev;
+                rsp_prof.sched_count     = scheduler_.size();
+                rsp_prof.trk_obj_count   = trackers_.size();
+                // leak hunt v4 — 매 cycle sample (cheap)
+                {
+                    const uint64_t avf_alive = MGEN::GstRtspReceiver::GetAvFrameAliveCount();
+                    rsp_prof.avf_alive_sum += avf_alive;
+                    if( avf_alive > rsp_prof.avf_alive_max ) rsp_prof.avf_alive_max = avf_alive;
+                    uint64_t kalman_alive = 0, kalman_created = 0;
+                    for( const auto& [cid, trk] : trackers_ ) {
+                        (void) cid;
+                        if( trk ) { kalman_alive += trk->GetAliveKalmanCount(); kalman_created += trk->GetCreatedKalmanCount(); }
+                    }
+                    rsp_prof.kalman_alive_sum += kalman_alive;
+                    if( kalman_alive > rsp_prof.kalman_alive_max ) rsp_prof.kalman_alive_max = kalman_alive;
+                    rsp_prof.kalman_created_total = kalman_created;
+                    const uint64_t lb_pending = load_balancer_ ? load_balancer_->GetReplyDispatcherEntrySize() : 0;
+                    rsp_prof.lb_pending_sum += lb_pending;
+                    if( lb_pending > rsp_prof.lb_pending_max ) rsp_prof.lb_pending_max = lb_pending;
+                    rsp_prof.reset_cnt_total = proxy_ptr_ ? proxy_ptr_->GetResetSourceCount() : 0;
+                }
                 rsp_prof.count   += 1;
                 if( rsp_prof.count >= 100 ) {
-                    MLOG_INFO("CAM[%d] RSP-thread (avg over %llu cycles, us): ifq=%llu resp=%llu trk=%llu meta=%llu ev=%llu total=%llu",
+                    uint64_t je_alloc = 0, je_active = 0, je_resident = 0, je_mapped = 0;
+                    if( mallctl_fn ) {
+                        uint64_t epoch = 1; size_t sz = sizeof(epoch);
+                        mallctl_fn( "epoch", &epoch, &sz, &epoch, sz );
+                        sz = sizeof(je_alloc);    mallctl_fn( "stats.allocated", &je_alloc,    &sz, nullptr, 0 );
+                        sz = sizeof(je_active);   mallctl_fn( "stats.active",    &je_active,   &sz, nullptr, 0 );
+                        sz = sizeof(je_resident); mallctl_fn( "stats.resident",  &je_resident, &sz, nullptr, 0 );
+                        sz = sizeof(je_mapped);   mallctl_fn( "stats.mapped",    &je_mapped,   &sz, nullptr, 0 );
+                    }
+                    rsp_prof.anon_mb_sample = read_anon_mapping_kb() / 1024;
+                    MLOG_INFO("CAM[%d] RSP-thread (avg over %llu cycles, us): ifq=%llu resp=%llu trk=%llu meta=%llu ev=%llu total=%llu | resp_wait avg=%llu max=%llu | resp_merge avg=%llu max=%llu | resp_obj avg=%llu max=%llu | event_q_push avg=%llu max=%llu | io_q avg=%llu max=%llu | trk_cnt avg=%llu max=%llu | lb_resp avg=%llu max=%llu | lb_input avg=%llu max=%llu | sched=%llu trk_map=%llu | sio_emit=%llu grpc=%llu | jem_alloc=%lluKB active=%lluKB resident=%lluKB mapped=%lluKB | avf_alive avg=%llu max=%llu | reset_cnt=%llu | kalman alive avg=%llu max=%llu created=%llu | lb_pending avg=%llu max=%llu | ev_path=%llu ev_json_kb=%llu ev_push=%llu | anon=%lluMB | q_drop avf=%llu inf=%llu ev=%llu io=%llu",
                         id_,
                         static_cast<unsigned long long>( rsp_prof.count ),
                         static_cast<unsigned long long>( rsp_prof.ifq_us  / rsp_prof.count ),
@@ -1613,7 +1716,47 @@ namespace MGEN
                         static_cast<unsigned long long>( rsp_prof.trk_us  / rsp_prof.count ),
                         static_cast<unsigned long long>( rsp_prof.meta_us / rsp_prof.count ),
                         static_cast<unsigned long long>( rsp_prof.ev_us   / rsp_prof.count ),
-                        static_cast<unsigned long long>( ( rsp_prof.ifq_us + rsp_prof.resp_us + rsp_prof.trk_us + rsp_prof.meta_us + rsp_prof.ev_us ) / rsp_prof.count ) );
+                        static_cast<unsigned long long>( ( rsp_prof.ifq_us + rsp_prof.resp_us + rsp_prof.trk_us + rsp_prof.meta_us + rsp_prof.ev_us ) / rsp_prof.count ),
+                        static_cast<unsigned long long>( rsp_prof.resp_wait_us_sum  / rsp_prof.count ),
+                        static_cast<unsigned long long>( rsp_prof.resp_wait_us_max ),
+                        static_cast<unsigned long long>( rsp_prof.resp_merge_us_sum / rsp_prof.count ),
+                        static_cast<unsigned long long>( rsp_prof.resp_merge_us_max ),
+                        static_cast<unsigned long long>( rsp_prof.resp_obj_count_sum / rsp_prof.count ),
+                        static_cast<unsigned long long>( rsp_prof.resp_obj_count_max ),
+                        static_cast<unsigned long long>( rsp_prof.event_q_size_sum / rsp_prof.count ),
+                        static_cast<unsigned long long>( rsp_prof.event_q_size_max ),
+                        static_cast<unsigned long long>( rsp_prof.io_size_sum / rsp_prof.count ),
+                        static_cast<unsigned long long>( rsp_prof.io_size_max ),
+                        static_cast<unsigned long long>( rsp_prof.trk_cnt_sum / rsp_prof.count ),
+                        static_cast<unsigned long long>( rsp_prof.trk_cnt_max ),
+                        static_cast<unsigned long long>( rsp_prof.lb_resp_size_sum / rsp_prof.count ),
+                        static_cast<unsigned long long>( rsp_prof.lb_resp_size_max ),
+                        static_cast<unsigned long long>( rsp_prof.lb_input_size_sum / rsp_prof.count ),
+                        static_cast<unsigned long long>( rsp_prof.lb_input_size_max ),
+                        static_cast<unsigned long long>( rsp_prof.sched_count ),
+                        static_cast<unsigned long long>( rsp_prof.trk_obj_count ),
+                        static_cast<unsigned long long>( rsp_prof.sio_emit_count ),
+                        static_cast<unsigned long long>( rsp_prof.grpc_send_count ),
+                        static_cast<unsigned long long>( je_alloc / 1024 ),
+                        static_cast<unsigned long long>( je_active / 1024 ),
+                        static_cast<unsigned long long>( je_resident / 1024 ),
+                        static_cast<unsigned long long>( je_mapped / 1024 ),
+                        static_cast<unsigned long long>( rsp_prof.avf_alive_sum / rsp_prof.count ),
+                        static_cast<unsigned long long>( rsp_prof.avf_alive_max ),
+                        static_cast<unsigned long long>( rsp_prof.reset_cnt_total ),
+                        static_cast<unsigned long long>( rsp_prof.kalman_alive_sum / rsp_prof.count ),
+                        static_cast<unsigned long long>( rsp_prof.kalman_alive_max ),
+                        static_cast<unsigned long long>( rsp_prof.kalman_created_total ),
+                        static_cast<unsigned long long>( rsp_prof.lb_pending_sum / rsp_prof.count ),
+                        static_cast<unsigned long long>( rsp_prof.lb_pending_max ),
+                        static_cast<unsigned long long>( rsp_prof.ev_path_count ),
+                        static_cast<unsigned long long>( rsp_prof.ev_json_kb_sum ),
+                        static_cast<unsigned long long>( rsp_prof.ev_push_count ),
+                        static_cast<unsigned long long>( rsp_prof.anon_mb_sample ),
+                        static_cast<unsigned long long>( rsp_prof.avframe_drop_total ),
+                        static_cast<unsigned long long>( rsp_prof.inflight_drop_total ),
+                        static_cast<unsigned long long>( rsp_prof.event_drop_total ),
+                        static_cast<unsigned long long>( rsp_prof.io_drop_total ) );
                     rsp_prof = RspProf{};
                 }
             }
@@ -1627,6 +1770,256 @@ namespace MGEN
         if( inflight_q_ ) {
             inflight_q_->clear_without_action();
         }
+        // B3 — RspThread 가 종료되면 event_q producer 정지. EvtThread 가 dequeue 종료할 수 있도록 terminate.
+        if( event_q_ ) {
+            event_q_->terminate();
+        }
+    }
+
+    void RtspDetectorUnit::EventThreadCloser( void )
+    {
+        // ResponseThreadCloser 에서 이미 event_q_->terminate() 호출됨 — race-free.
+        if( event_q_ ) {
+            event_q_->clear_without_action();
+        }
+    }
+
+    void RtspDetectorUnit::EventThreadRunner( void )
+    {
+        using namespace std::chrono_literals;
+
+        MGEN::CorrelationContext::Set( "sys-event-" + std::to_string( this->id_ ) );
+        auto& running = this->event_thread_.GetRunningFlag();
+
+        // EvtThread 자체 origin_ctx — RspThread 의 resp_origin_ctx 와 분리.
+        FrameFormattingContext evt_origin_ctx;
+        EventTime last_interval_log_print_time = std::chrono::system_clock::now();
+        const auto long_timelapse_log_interval = 10min;
+
+        // v7 — EvtThread stage timing instrument.
+        struct EvtProf {
+            uint64_t pop_us           = 0;   // event_q dequeue 시간 (대부분 wait, frame in 따라)
+            uint64_t sched_us         = 0;   // scheduler->Check loop + BuildNotifyJsonImpl_Analysis (event_list 만들기)
+            uint64_t conv_us          = 0;   // Convert + clone + io_work_queue push
+            uint64_t sio_us           = 0;   // sio_emit loop (event_list 별)
+            uint64_t grpc_us          = 0;   // grpc send loop
+            uint64_t event_q_size_sum = 0;   // pop 직전 event_q size (sample)
+            uint64_t event_q_size_max = 0;
+            uint64_t io_q_size_sum    = 0;   // io_work_queue push 직전 size (sample)
+            uint64_t io_q_size_max    = 0;
+            uint64_t json_bytes_sum   = 0;   // event_msg_json dump size 누적 (모든 event)
+            uint64_t json_bytes_max   = 0;
+            uint64_t event_list_size_sum = 0;  // event_list (per cycle) size 누적
+            uint64_t event_list_size_max = 0;
+            uint64_t sio_emit_count   = 0;
+            uint64_t grpc_send_count  = 0;
+            uint64_t empty_cycle_count = 0;  // event_list 비어서 skip 한 cycle (no_schedule 또는 trigger 없음)
+            uint64_t event_drop_total = 0;   // event_q drop counter snapshot
+            uint64_t io_drop_total    = 0;
+            uint64_t count            = 0;   // event_list 가 있어 진짜 event 처리 한 cycle
+        };
+        EvtProf evt_prof;
+
+        auto evt_us = []( const std::chrono::steady_clock::time_point& a,
+                          const std::chrono::steady_clock::time_point& b ) -> uint64_t {
+            return static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>( b - a ).count() );
+        };
+
+        while( running.load() == true )
+        {
+            if( !event_q_ ) {
+                std::this_thread::sleep_for( 10ms );
+                continue;
+            }
+
+            const auto t_evt_top = std::chrono::steady_clock::now();
+            const size_t cyc_event_q_size = event_q_->size();  // v7 — pop 직전 size sample
+
+            auto opt_item = event_q_->dequeue_wait_for( 100ms );
+            const auto t_after_pop = std::chrono::steady_clock::now();
+
+            if( !opt_item.has_value() ) {
+                if( event_q_->is_terminated() ) break;
+                continue;
+            }
+            const EventItem item = std::move( *opt_item );
+            auto& frame         = item.frame;
+            auto& track_results = item.track_results;
+            if( !frame ) continue;
+
+            // ─────────────────────────────────────────────────────────────
+            // 1. schedule check + BuildNotifyJsonImpl (event_list 만들기)
+            // ─────────────────────────────────────────────────────────────
+            if( scheduler_.empty() ){
+                EventTime now_sys = std::chrono::system_clock::now();
+                if( IsOverTime( now_sys, last_interval_log_print_time, long_timelapse_log_interval ) ){
+                    MLOG_INFO("CAM[%d] AI inference detected ( %4zu ojbect ), but target camera has not exist EVENT schedule.",
+                        id_, track_results.size() );
+                    last_interval_log_print_time = now_sys;
+                }
+                evt_prof.empty_cycle_count += 1;
+                continue;
+            }
+
+            std::vector<ScheduleEventDTO> event_list {};
+            std::string frame_path {};
+            event_list.reserve( scheduler_.size() );
+            frame_path.reserve( 128 );
+
+            if( auto opt = MakeImageSavePath( GetFrameImageCurrentProxyRootPath() ); opt.has_value() ){
+                frame_path = *opt;
+            }
+            else {
+                MLOG_ERROR( "%s() => CAM[%d] make frame image save directory failed", __func__, id_ );
+                evt_prof.empty_cycle_count += 1;
+                continue;
+            }
+
+            struct tm tstruct;
+            auto      curr_time = std::time( nullptr );
+            auto*     time_info = localtime_r( &curr_time, &tstruct );
+
+            uint64_t cyc_json_bytes = 0;
+            for( const auto& each_schedule : scheduler_ )
+            {
+                const std::vector<InferObject> on_event_results = each_schedule->Check( track_results );
+                if( on_event_results.empty() ) continue;
+
+                {
+                    const std::string ev_name = Abnormal::Schedule::GetEventName( each_schedule->sch_info.event_code );
+                    MGEN::MetricsRegistry::Instance().IncrementCounter(
+                        "detectbase_events_total",
+                        { { "type", ev_name }, { "cam", std::to_string( id_ ) } },
+                        static_cast<double>( on_event_results.size() ) );
+                    MLOG_INFO( "event_detected type=%s cam=%d count=%zu",
+                        ev_name.c_str(), id_, on_event_results.size() );
+                }
+
+                auto event_msg_json = this->BuildNotifyJsonImpl_Analysis( each_schedule, on_event_results, time_info, frame_path );
+                cyc_json_bytes += static_cast<uint64_t>( event_msg_json.dump().size() );
+                event_list.push_back( ScheduleEventDTO{ std::move( event_msg_json ), on_event_results } );
+            }
+            const auto t_after_sched = std::chrono::steady_clock::now();
+
+            if( event_list.empty() ) {
+                // schedule trigger 안 됨 cycle — sched timing 만 누적
+                evt_prof.pop_us           += evt_us( t_evt_top,  t_after_pop  );
+                evt_prof.sched_us         += evt_us( t_after_pop, t_after_sched );
+                evt_prof.event_q_size_sum += cyc_event_q_size;
+                if( cyc_event_q_size > evt_prof.event_q_size_max ) evt_prof.event_q_size_max = cyc_event_q_size;
+                evt_prof.empty_cycle_count += 1;
+                continue;
+            }
+
+            // ─────────────────────────────────────────────────────────────
+            // 2. Convert + clone + io_work_queue push (event 발생 시만)
+            // ─────────────────────────────────────────────────────────────
+            if( !evt_origin_ctx.Update( frame->width, frame->height, frame->width, frame->height, frame->format ) ){
+                MLOG_ERROR("CAM[%d] Event | evt_origin_ctx update failed", id_);
+            }
+            if( evt_origin_ctx.Convert( frame, true, false ) == false ){
+                MLOG_ERROR("CAM[%d] Event | Origin Image Convert failed", id_);
+                continue;
+            }
+
+            const size_t cyc_io_q_size = io_work_queue_ ? io_work_queue_->size() : 0;
+            if( io_work_queue_ ){
+                IOWorkItem io_item;
+                io_item.frame_path = frame_path;
+                io_item.image_mat  = evt_origin_ctx.save_snapshot_mat.clone();
+                if( cyc_io_q_size >= 30 ) {
+                    MGEN::MetricsRegistry::Instance().IncrementCounter(
+                        "detectbase_errors_total", { { "type", "io_work_drop" } } );
+                }
+                io_work_queue_->enqueue_move( std::move( io_item ) );
+            }
+            const auto t_after_conv = std::chrono::steady_clock::now();
+
+            // ─────────────────────────────────────────────────────────────
+            // 3. sio emit (event_list 별)
+            // ─────────────────────────────────────────────────────────────
+            uint64_t cyc_sio_emit = 0;
+            if( sio_handler_ )
+            {
+                for( auto& target_event : event_list )
+                {
+                    sio_handler_->Emit( std::string { SocketIO::EventName::DETECTOR_MESSAGE }, target_event.event_message );
+                    cyc_sio_emit += 1;
+                }
+            }
+            const auto t_after_sio = std::chrono::steady_clock::now();
+
+            // ─────────────────────────────────────────────────────────────
+            // 4. grpc send
+            // ─────────────────────────────────────────────────────────────
+            uint64_t cyc_grpc_send = 0;
+            if( network_manager_ && network_manager_->IsGrpcClientEnabled() )
+            {
+                for( auto& target_event : event_list )
+                {
+                    const size_t sent = network_manager_->BroadcastEventOnlyJsonToGrpcPeers(
+                        target_event.event_message.dump() );
+                    if( sent > 0 ) {
+                        MGEN::MetricsRegistry::Instance().IncrementCounter(
+                            "detectbase_grpc_send_total",
+                            { { "rpc", "SendEventOnlyJson" } },
+                            static_cast<double>( sent ) );
+                        cyc_grpc_send += static_cast<uint64_t>( sent );
+                    }
+                }
+            }
+            const auto t_after_grpc = std::chrono::steady_clock::now();
+
+            // ─────────────────────────────────────────────────────────────
+            // v7 — EvtProf flush 누적 + 100 cycle 마다 log
+            // ─────────────────────────────────────────────────────────────
+            evt_prof.pop_us           += evt_us( t_evt_top,    t_after_pop   );
+            evt_prof.sched_us         += evt_us( t_after_pop,  t_after_sched );
+            evt_prof.conv_us          += evt_us( t_after_sched, t_after_conv );
+            evt_prof.sio_us           += evt_us( t_after_conv,  t_after_sio  );
+            evt_prof.grpc_us          += evt_us( t_after_sio,   t_after_grpc );
+            evt_prof.event_q_size_sum += cyc_event_q_size;
+            if( cyc_event_q_size > evt_prof.event_q_size_max ) evt_prof.event_q_size_max = cyc_event_q_size;
+            evt_prof.io_q_size_sum    += cyc_io_q_size;
+            if( cyc_io_q_size > evt_prof.io_q_size_max ) evt_prof.io_q_size_max = cyc_io_q_size;
+            evt_prof.json_bytes_sum   += cyc_json_bytes;
+            if( cyc_json_bytes > evt_prof.json_bytes_max ) evt_prof.json_bytes_max = cyc_json_bytes;
+            evt_prof.event_list_size_sum += event_list.size();
+            if( event_list.size() > evt_prof.event_list_size_max ) evt_prof.event_list_size_max = event_list.size();
+            evt_prof.sio_emit_count   += cyc_sio_emit;
+            evt_prof.grpc_send_count  += cyc_grpc_send;
+            evt_prof.count            += 1;
+
+            if( evt_prof.count >= 100 ) {
+                evt_prof.event_drop_total = event_q_       ? event_q_->GetDropCount()       : 0;
+                evt_prof.io_drop_total    = io_work_queue_ ? io_work_queue_->GetDropCount() : 0;
+                const uint64_t denom = evt_prof.count + evt_prof.empty_cycle_count;  // queue size 평균은 모든 cycle 기준
+                MLOG_INFO("CAM[%d] EVT-thread (avg over %llu event cycles + %llu empty cycles, us): pop=%llu sched=%llu conv=%llu sio=%llu grpc=%llu | event_q avg=%llu max=%llu | io_q avg=%llu max=%llu | json_bytes avg=%llu max=%llu | event_list avg=%llu max=%llu | sio_emit=%llu grpc_send=%llu | q_drop ev=%llu io=%llu",
+                    id_,
+                    static_cast<unsigned long long>( evt_prof.count ),
+                    static_cast<unsigned long long>( evt_prof.empty_cycle_count ),
+                    static_cast<unsigned long long>( evt_prof.pop_us   / std::max<uint64_t>( denom, 1 ) ),
+                    static_cast<unsigned long long>( evt_prof.sched_us / std::max<uint64_t>( denom, 1 ) ),
+                    static_cast<unsigned long long>( evt_prof.conv_us  / evt_prof.count ),
+                    static_cast<unsigned long long>( evt_prof.sio_us   / evt_prof.count ),
+                    static_cast<unsigned long long>( evt_prof.grpc_us  / evt_prof.count ),
+                    static_cast<unsigned long long>( evt_prof.event_q_size_sum / std::max<uint64_t>( denom, 1 ) ),
+                    static_cast<unsigned long long>( evt_prof.event_q_size_max ),
+                    static_cast<unsigned long long>( evt_prof.io_q_size_sum / evt_prof.count ),
+                    static_cast<unsigned long long>( evt_prof.io_q_size_max ),
+                    static_cast<unsigned long long>( evt_prof.json_bytes_sum / evt_prof.count ),
+                    static_cast<unsigned long long>( evt_prof.json_bytes_max ),
+                    static_cast<unsigned long long>( evt_prof.event_list_size_sum / evt_prof.count ),
+                    static_cast<unsigned long long>( evt_prof.event_list_size_max ),
+                    static_cast<unsigned long long>( evt_prof.sio_emit_count ),
+                    static_cast<unsigned long long>( evt_prof.grpc_send_count ),
+                    static_cast<unsigned long long>( evt_prof.event_drop_total ),
+                    static_cast<unsigned long long>( evt_prof.io_drop_total ) );
+                evt_prof = EvtProf{};
+            }
+        }
+        MLOG_INFO("CAM[%d] EventThreadRunner finished", id_);
     }
 
     void RtspDetectorUnit::IOWorkerThreadRunner( void )

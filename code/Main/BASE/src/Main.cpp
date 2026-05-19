@@ -16,6 +16,10 @@
 #include <cstring>
 #include <unistd.h>
 
+#ifdef __SANITIZE_ADDRESS__
+#include <sanitizer/lsan_interface.h>
+#endif
+
 using namespace MGEN;
 
 std::atomic<bool>         g_terminate_flag    { false }; // 종료 요청 플래그
@@ -30,6 +34,12 @@ void RegisterSignalHandler( void (*handler)( int ) );
 // Signal Handler
 void ExitSignalHandler  ( int Signal );
 void IgnoreSignalHandler( int Signal );
+
+#ifdef __SANITIZE_ADDRESS__
+// ASan/LSan runtime mid-run leak check (process 안 죽임).
+//   kill -SIGUSR1 <pid> 로 trigger. 운영 중 누수 시간순 누적 분석.
+void LeakCheckSignalHandler( int /*Signal*/ );
+#endif
 
 int main()
 {
@@ -47,6 +57,17 @@ int main()
 
 	// 초기화 동안에는 IgnoreSignalHandler 등록 (강제 종료 방지)
 	RegisterSignalHandler( IgnoreSignalHandler );
+
+#ifdef __SANITIZE_ADDRESS__
+	// SIGUSR1 → LSan recoverable leak check (mid-run, runtime 누수 시간순 분석용).
+	//   ASan 빌드 시만 활성. production binary 영향 0.
+	{
+		struct sigaction sa_usr1 {};
+		sa_usr1.sa_handler = LeakCheckSignalHandler;
+		sigemptyset( &sa_usr1.sa_mask );
+		sigaction( SIGUSR1, &sa_usr1, nullptr );
+	}
+#endif
 
 	if( !App->Initialize() ) {
 		App->Quit();
@@ -111,3 +132,15 @@ void IgnoreSignalHandler( int Signal )
 	}
 	ExitSignalHandler( Signal );
 }
+
+#ifdef __SANITIZE_ADDRESS__
+// SIGUSR1 → LSan recoverable leak check (process 안 죽임).
+//   ASan run 중간에 leak 상태 stderr 출력. 시간 구간 별 누적 분석용.
+void LeakCheckSignalHandler( int /*Signal*/ )
+{
+	static const char msg[] = "[ASAN] mid-run leak check triggered (SIGUSR1)\n";
+	ssize_t written = write( STDERR_FILENO, msg, sizeof( msg ) - 1 );
+	std::ignore = written;
+	__lsan_do_recoverable_leak_check();
+}
+#endif
