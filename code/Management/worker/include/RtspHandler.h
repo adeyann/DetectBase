@@ -25,8 +25,8 @@ namespace MGEN
         std::string my_local_ip;
         /// 정적 init data 사용 여부 (true = init 시 등록된 카메라만, false = runtime 변경 허용)
         bool        is_rtsp_proxy_static_with_init = true;
-        /// Phase 2: output RTSP server bind port (default 8554)
-        std::string proxy_server_port = "8554";
+        /// Phase 2: output RTSP server bind port (default 555, ServerSetting.RtspPort 로 override)
+        std::string proxy_server_port = "555";
     };
 
     enum class RtspState { Create, Ready, Run, Stop };
@@ -94,7 +94,7 @@ namespace MGEN
         std::string my_local_ip_                    = "";
         bool        is_init_done_                   = false;
         bool        is_rtsp_proxy_static_with_init_ = true;
-        std::string proxy_server_port_              = "8554";
+        std::string proxy_server_port_              = "555";
         RtspState   state_                          = RtspState::Create;
 
         mutable std::mutex                                clients_mtx_;

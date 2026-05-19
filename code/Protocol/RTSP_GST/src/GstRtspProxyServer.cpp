@@ -158,7 +158,7 @@ namespace MGEN
             return false;
         }
 
-        const std::string path = "/cam" + std::to_string( cam_id );
+        const std::string path = "/" + std::to_string( cam_id );
 
         GstRTSPMediaFactory* factory = gst_rtsp_media_factory_new();
         gst_rtsp_media_factory_set_shared( factory, TRUE );

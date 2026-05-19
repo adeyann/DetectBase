@@ -44,10 +44,11 @@
 - 비용: ~3~4시간
 - 빌드 branch: `refactor/audit-cleanup`
 
-### D. MAIA RTSP URL 정정
-- 별도 PR: port 555 + mount `/<id>` (현재 `/cam<id>`)
-- NetworkSettings.json 의 `RTSP_Proxy_Port` 추가
-- docker-compose.yml port 매핑 검토
+### D. ~~RTSP URL / publish port 정정~~ ✅ 완료 (2026-05-19, `fix/rtsp-url-port`)
+- mount path `/cam<id>` → `/<id>`
+- default port `8554` → `555` (RtspHandler.h + GstRtspProxyServer.h)
+- `ServerSetting.RtspPort` (MVAS dynamic) → `RtspHandler::Setting.proxy_server_port` 실제 연결 (NetworkManager::BuildRtspSetting)
+- 외부 viewer URL: `rtsp://<host>:555/<id>` (이전 `rtsp://<host>:8554/cam<id>`)
 
 ### E. TSan SafeQueue 추적 한계 (~5건)
 - structural redesign (lock 범위 확장 또는 atomic guard)
