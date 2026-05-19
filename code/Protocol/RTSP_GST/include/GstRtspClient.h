@@ -94,6 +94,19 @@ namespace MGEN
         uint64_t GetReconnectCount() const noexcept { return reconnect_count_.load(); }
         uint64_t GetEnqueueDropCount() const noexcept { return enqueue_drop_count_.load(); }
 
+        // Frame interval 실측 — camera FPS 자체의 시간 간격 (drop 무관 매 frame_cb 호출 기준).
+        // avg = total_interval_ns / interval_count. 0 분모 보호.
+        uint64_t GetFrameIntervalAvgUs() const noexcept {
+            const uint64_t c = frame_interval_count_.load();
+            return c > 0 ? ( frame_interval_sum_ns_.load() / c / 1000 ) : 0;
+        }
+
+        // 모든 raw RTP 측 (raw_cb) 의 queued buffer count — appsink queue 측정 위해. (Phase 2 raw passthrough 시)
+        uint32_t GetAppSinkQueuedBuffers() const noexcept;
+
+        // leak hunt v4 — receiver 의 ResetSourceOnly 호출 누적 카운터 (EOS reconn 빈도 측정).
+        uint64_t GetResetSourceCount() const noexcept;
+
     private:
         /** Receiver 의 on_error/on_timeout/on_eos 콜백에서 호출. 비동기 reconnect 트리거. */
         void RequestReconnect() noexcept;
@@ -122,6 +135,11 @@ namespace MGEN
         std::atomic<uint64_t> enqueue_drop_count_   { 0 };
         // 마지막 enqueue 시각 (ns since steady_clock epoch). frame_cb interval skip 판정용.
         std::atomic<int64_t>  last_enqueue_ns_      { 0 };
+
+        // Frame interval 실측 (drop 무관, 매 frame_cb 호출 기준 = camera 자체 frame rate).
+        std::atomic<int64_t>  last_cb_ns_           { 0 };
+        std::atomic<uint64_t> frame_interval_sum_ns_{ 0 };  // 누적 nanoseconds
+        std::atomic<uint64_t> frame_interval_count_ { 0 };
 
         std::mutex              cv_mtx_;
         std::condition_variable cv_;

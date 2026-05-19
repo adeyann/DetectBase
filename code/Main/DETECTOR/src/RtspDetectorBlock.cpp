@@ -13,9 +13,9 @@ namespace MGEN
         std::shared_ptr<EngineLoadBalancer> load_balancer
     )
         : profile_          ( service_block_profile )
-        , network_manager_  ( network_manager )
-        , io_stream_manager_( io_stream_manager )
-        , load_balancer_    ( load_balancer )
+        , network_manager_  ( std::move( network_manager ) )
+        , io_stream_manager_( std::move( io_stream_manager ) )
+        , load_balancer_    ( std::move( load_balancer ) )
     {
         //
     }

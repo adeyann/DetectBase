@@ -225,54 +225,54 @@ namespace MGEN
 
     void GrpcEventServerBase::SetSendEventOnlyJsonQueue(std::shared_ptr<SafeQueue<EventDataOnlyJson>> q)
     {
-        queue_send_event_json_ = q;
+        queue_send_event_json_ = std::move( q );
     }
 
     void GrpcEventServerBase::SetSendEventWithImagesQueue(std::shared_ptr<SafeQueue<EventDataWithRawImages>> q)
     {
-        queue_send_event_images_ = q;
+        queue_send_event_images_ = std::move( q );
     }
 
     void GrpcEventServerBase::SetRequestEventOnlyJsonQueues(
         std::shared_ptr<SafeQueue<EventDataOnlyJson>> in,
         std::shared_ptr<ReplyDispatcher<EventDataOnlyJson>> dispatcher)
     {
-        queue_request_event_json_in_ = in;
-        dispatcher_event_json_ = dispatcher;
+        queue_request_event_json_in_ = std::move( in );
+        dispatcher_event_json_ = std::move( dispatcher );
     }
 
     void GrpcEventServerBase::SetRequestEventWithImagesQueues(
         std::shared_ptr<SafeQueue<EventDataWithRawImages>> in,
         std::shared_ptr<ReplyDispatcher<EventDataOnlyJson>> dispatcher)
     {
-        queue_request_event_images_in_ = in;
-        dispatcher_event_images_ = dispatcher;
+        queue_request_event_images_in_ = std::move( in );
+        dispatcher_event_images_ = std::move( dispatcher );
     }
 
     void GrpcEventServerBase::SetSendEventOnlyJsonPostProcesser( std::function<void(const EventDataOnlyJson&, Empty&)> post_processor )
     {
-        send_event_json_post_process_ = post_processor;
+        send_event_json_post_process_ = std::move( post_processor );
     }
 
     void GrpcEventServerBase::SetSendEventWithImagesPostProcesser( std::function<void(const EventDataWithRawImages&, Empty&)> post_processor )
     {
-        send_event_images_post_process_ = post_processor;
+        send_event_images_post_process_ = std::move( post_processor );
     }
 
     // [Phase 4 샘플] post-processor setter.
     void GrpcEventServerBase::SetSendCounterDeltaPostProcesser( std::function<void(const CounterDelta&, Empty&)> post )
     {
-        send_counter_delta_post_process_ = post;
+        send_counter_delta_post_process_ = std::move( post );
     }
 
     void GrpcEventServerBase::SetSendHeartbeatPostProcesser( std::function<void(const HeartbeatPing&, Empty&)> post )
     {
-        send_heartbeat_post_process_ = post;
+        send_heartbeat_post_process_ = std::move( post );
     }
 
     void GrpcEventServerBase::SetRequestCounterSnapshotHandler( std::function<void(const CounterRequest&, CounterSnapshot&)> post )
     {
-        request_counter_snapshot_handler_ = post;
+        request_counter_snapshot_handler_ = std::move( post );
     }
 
 } // namespace MGEN

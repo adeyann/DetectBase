@@ -758,12 +758,23 @@ grep -n "DEBUG VIRTUAL LINES" code/Main/DETECTOR/src/RtspDetectorUnit.cpp
 
 ## §15. 정적 분석 / Sanitizer (audit)
 
-### 한 명령으로 5종 도구
+### 5종 도구 — 전체 / 묶음 / 단독 실행 모두 지원 (2026-05-19 갱신)
 
 ```bash
-./detectbase.sh audit              # cppcheck + clang-tidy + ASan + UBSan (운영 90초 정지)
-./detectbase.sh audit --with-tsan  # 위 + TSan (운영 30초 추가 정지)
+# 묶음 모드
+./detectbase.sh audit                    # 전체 (cppcheck + clang-tidy + ASan/UBSan + TSan)
+./detectbase.sh audit --no-tsan          # TSan 제외 (정적 + ASan/UBSan)
+./detectbase.sh audit --with-tsan        # = 전체 (backward compat)
+
+# 단독 모드 — 변경 검증 시 필요 도구만 빠르게
+./detectbase.sh audit --only cppcheck    # 정적 (~1분)
+./detectbase.sh audit --only clang-tidy  # 정적 (~10분)
+./detectbase.sh audit --only asan        # 동적, ASan+UBSan 같은 빌드 (운영 정지)
+./detectbase.sh audit --only ubsan       # asan 의 alias
+./detectbase.sh audit --only tsan        # 동적, race detection (운영 정지, 5분)
 ```
+
+환경변수 override: `ASAN_DURATION_MIN=5 ./detectbase.sh audit --only asan` (default 240분), `TSAN_DURATION_SEC=600 ./detectbase.sh audit --only tsan` (default 300초).
 
 ### 도구 비교
 
@@ -775,16 +786,44 @@ grep -n "DEBUG VIRTUAL LINES" code/Main/DETECTOR/src/RtspDetectorUnit.cpp
 | **UBSan** | 런타임 sanitizer | UB (overflow, null deref) | -fsanitize=undefined (ASan 과 같이) |
 | **ThreadSanitizer (TSan)** | 런타임 sanitizer | data race, lock-order-inversion, double lock | -fsanitize=thread (별도 빌드) |
 
-### 결과 기준 (production-ready baseline)
+### 결과 기준 (production-ready baseline) — 2026-05-19 갱신
 
-| 도구 | 자체 코드 결함 |
+| 도구 | 자체 코드 결함 (audit 2026-05-19) |
 |---|---|
-| cppcheck | 50건 (모두 style, 외부 SORT 알고리즘) |
-| clang-tidy | 327 warning (대부분 false positive 또는 외부 tinyxml) |
-| ASan / UBSan | **0건** (외부 librknnrt.so init leak 만) |
-| TSan | **자체 코드 진짜 race 0건** (cv_any 패턴 false positive 18건 + 외부 RTSP) |
+| cppcheck | 79건 → 12건 fix, 18건 false positive (`_` dummy), 11건 needs-review (v0.1.0 후 cleanup PR), 9건 자연 정리 예정 (ThreadProfiler 마이그레이션 시) |
+| clang-tidy | 166건 → 잠재 14 + safe 137 fix, 21건 needs-review (v0.1.0 후 cleanup PR) |
+| ASan / UBSan | **startup leak 0건** (외부 librknnrt.so / glib init), **runtime leak 1건** (GStreamer rtpmanager — 외부 lib 내부, 수용) |
+| TSan | **우리 코드 진짜 race 0건 ✅** (5분 run 기준). 144 WARNING 중 우리 코드 race 는 SioHandler UAF / InferenceCounter map / RegisterMetricsOnce / SafeQueue shared_ptr ref count 4종 모두 fix. 잔여 ~140 건은 SIGKILL `mutex destroyed` false positive (~506 mention, graceful shutdown 안 거침) + GStreamer 내부 callback race (외부 lib) + SafeQueue happens-before 추적 한계 (mutex 정상 작동) |
 
 자체 코드 결함 추가 검출 시 `audit_<timestamp>/summary.txt` 보고서 비교.
+
+### Known long-running leak: GStreamer rtpmanager (수용)
+
+ASan 1시간 long-run + interval `__lsan_do_recoverable_leak_check()` 검출 결과:
+
+- **위치**: `libgstrtpmanager.so` 내부 cleanup 코드 (외부 release lib)
+- **호출 경로**: `GstRtspReceiver::TeardownPipeline` → `gst_element_set_state(NULL)` → rtspsrc → rtpbin → rtpsession sources `g_list_free_full` → 각 source `g_object_unref` → rtpmanager 내부 finalize 시 g_malloc 메모리 회수 누락
+- **크기**: ~320 byte / EOS reconnect cycle (5분 cycle 기준 ~3.8 KB/h ≈ **~340 MB/year**)
+- **영향**: Odroid M2 8GB RAM 기준 plateau noise 안 (12h v8 monitor: RSS 602~657 MB ±55 MB stable)
+- **우리 코드 책임**: 없음 — TeardownPipeline 의 state NULL 전환 + 대기 + 정확한 unref 검증 완료. call stack 의 #5~#11 은 GStreamer 내부 finalize chain, #15 (TeardownPipeline) 까지가 우리 책임 범위
+- **결정 (2026-05-19)**: **수용**. 외부 lib 내부 leak 으로 우리 코드 수정 불가. ~340 MB/year 는 운영 영향 0
+- **v1.0.0 후 재시도 예정**: GStreamer 1.24+ 업그레이드 시도 (현 1.20.3, Ubuntu 22.04 jammy default). 1.22/1.24/1.26 changelog 에서 본 케이스 fix 가 명시 안 됐으나 시도 가치 있음
+
+### TSan fix 적용 내역 (2026-05-19, commit 9690b90)
+
+**진짜 race 4종 → 0**:
+1. **SioHandler UAF** (8 double lock + 1 race) — `enable_shared_from_this<SioHandler>` 상속 + 모든 sio::client 콜백을 `weak_ptr` capture lambda 로 변경. SioHandler 소멸 후 callback no-op.
+2. **InferenceCounter map race** (1 race) — `counters_` unordered_map 의 Regist/Unregist/AddCount 모두 mutex_ 보호. ThreadRunner 는 snapshot 후 lock 해제.
+3. **RegisterMetricsOnce init race** (1 race) — bool flag → `std::call_once`.
+4. **SafeQueue shared_ptr ref-count race** (5 race) — RspThread/InfThread 의 `frame = *opt_frame` (copy → atomic add) → `std::move` 로 변경. SafeQueue mutex 자체는 정상.
+
+**Frame ordering 방어 카운터** (신규 metric):
+- LoadBalancer 의 round-robin handler 분배 + NPU 처리시간 variance 시 cam_result_qs 응답 순서 ≠ frame 순서 가능성 (correlation_id 매칭 검증 없음).
+- RspThread 에 `result.correlation_id != item.correlation_id` 검증 + `detectbase_correlation_mismatch_total{cam_id}` counter + WARN log 추가.
+- 실측 후 진짜 fix (per-correlation_id lookup or handler affinity) 결정 예정.
+
+**TSan-only fps=1 conditional patch**:
+- TSan build (`__SANITIZE_THREAD__`) 시만 `inference_per_cams_fps_limit=1` 강제. 100x slowdown 환경 packet drop 방지. ASan/Release 영향 0 (compile-time guard).
 
 ### TSan 주의
 
@@ -909,6 +948,8 @@ grep "PROGRAM QUIT SUCCESS" logs/DetectBase.log
 | F-I2-01 rknn_run async | 성능 최적화 필요 시 |
 | TSan 카메라 1대 환경 검증 | 분기 시 1회 |
 | Debug Virtual Lines 제거 | 분기 시 |
+| **GStreamer 1.24+ upgrade (Ubuntu 24.04 base)** | **v1.0.0 후** — rtpmanager runtime leak (~340 MB/year) fix 시도. Dockerfile.build 22.04 → 24.04, GStreamer 1.20.3 → 1.24.x, ASan long-run 재검증 |
+| audit cleanup PR (clang-tidy 21 + cppcheck 11) | v0.1.0 후 별도 refactor PR (swappable-parameters 16, branch-clone 4, useStlAlgorithm 5 등 needs-review 항목) |
 
 ---
 

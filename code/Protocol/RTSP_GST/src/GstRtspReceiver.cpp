@@ -63,6 +63,25 @@ namespace MGEN
             (unsigned long) error_count_.load() );
     }
 
+    uint32_t GstRtspReceiver::GetAppSinkQueuedBuffers() const noexcept
+    {
+        // GStreamer pipeline 내부 누적 측정 — appsink 의 current-level-buffers property.
+        //   appsink queue 가 cam thread dequeue 못 따라가면 누적.
+        //   property 명: "current-level-buffers" (GStreamer 1.18+).
+        uint32_t total = 0;
+        if( appsink_ ) {
+            guint level = 0;
+            g_object_get( const_cast<GstAppSink*>( appsink_ ), "current-level-buffers", &level, nullptr );
+            total += static_cast<uint32_t>( level );
+        }
+        if( raw_appsink_ ) {
+            guint level = 0;
+            g_object_get( const_cast<GstAppSink*>( raw_appsink_ ), "current-level-buffers", &level, nullptr );
+            total += static_cast<uint32_t>( level );
+        }
+        return total;
+    }
+
     void GstRtspReceiver::SetRawPacketCallback( RawPacketCallback cb ) noexcept
     {
         raw_cb_ = std::move( cb );
@@ -230,6 +249,7 @@ namespace MGEN
     {
         if( !pipeline_ ) return false;
 
+        reset_source_count_.fetch_add( 1, std::memory_order_relaxed );
         MLOG_INFO( "ResetSourceOnly — pipeline destroy/rebuild (single)" );
 
         TeardownPipeline();
@@ -355,10 +375,15 @@ namespace MGEN
             frame->pts = GST_BUFFER_PTS( buf );
         }
 
+        s_avframe_alive_.fetch_add( 1, std::memory_order_relaxed );
         return std::shared_ptr<AVFrame>( frame, []( AVFrame* f ) {
             av_frame_free( &f );
+            s_avframe_alive_.fetch_sub( 1, std::memory_order_relaxed );
         } );
     }
+
+    // leak hunt v4 — process-wide AVFrame alive counter 정의.
+    std::atomic<uint64_t> GstRtspReceiver::s_avframe_alive_ { 0 };
 
     gboolean GstRtspReceiver::OnBusMessage( GstBus* /*bus*/, GstMessage* msg, void* user_data )
     {

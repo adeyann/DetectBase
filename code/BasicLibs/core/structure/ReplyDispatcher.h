@@ -220,6 +220,19 @@ namespace MGEN
         }
 
         /**
+         * @brief 모든 bucket 의 table size 합산 — leak hunt 용 (pending reply entry 누적 감시).
+         */
+        size_t total_size() const noexcept
+        {
+            size_t total = 0;
+            for( const auto& bucket_ptr : _buckets ){
+                std::lock_guard<std::mutex> lock{ bucket_ptr->mutex };
+                total += bucket_ptr->table.size();
+            }
+            return total;
+        }
+
+        /**
          * @brief 특정 UUID에 해당하는 응답 엔트리를 수동 제거.
          */
         void remove( const U& uuid )

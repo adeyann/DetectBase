@@ -42,7 +42,7 @@ namespace MGEN
     {
     public:
         RtspHandler( void ) = delete;
-        explicit RtspHandler( const RtspSetting setting ) noexcept;
+        explicit RtspHandler( const RtspSetting& setting ) noexcept;
 
         ~RtspHandler();
 

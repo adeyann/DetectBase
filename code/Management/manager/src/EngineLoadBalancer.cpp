@@ -106,29 +106,45 @@ namespace MGEN
         if ( is_terminate_instance_.load() == true )
             return false;
 
-        std::lock_guard<std::mutex> lck { this->unit_regist_mutex_ };
+        {
+            std::lock_guard<std::mutex> lck { this->unit_regist_mutex_ };
 
-        if ( this->subscribers_.count( unit_id ) > 0 ){
-            MLOG_WARN("Unit ID %d already subscribed.", unit_id);
-            return false;
+            if ( this->subscribers_.count( unit_id ) > 0 ){
+                MLOG_WARN("Unit ID %d already subscribed.", unit_id);
+                return false;
+            }
+
+            this->subscribers_.insert( unit_id );
+            this->inference_counter_.Regist( unit_id );
         }
 
-        if ( this->reply_dispatcher_.is_exist_in_entry( unit_id ) ){
-            MLOG_WARN("Unit ID %d already exists in reply dispatcher.", unit_id);
+        // B4 — cam-별 result queue 생성. NPU 결과가 도착 순서대로 push 됨.
+        //   cap=10: RspThread 가 빠르게 drain (post 0.2ms / cycle) 하므로 cap 도달 거의 없음.
+        //   기존 reply_dispatcher_ 가 entry 1개 덮어쓰기 design 이라 backlog drain 불가했던 점 fix.
+        {
+            std::lock_guard<std::mutex> q_lck { this->cam_result_qs_mutex_ };
+            auto q = std::make_shared<SafeQueue<OutputLayerWrapper>>();
+            q->SetMaxSize( 10 );
+            this->cam_result_qs_[ unit_id ] = std::move( q );
         }
-
-        this->subscribers_.insert( unit_id );
-        this->inference_counter_.Regist( unit_id );
 
         return true;
     }
 
     void EngineLoadBalancer::Unsubscribe( const MGEN::Type::UnitID unit_id ) noexcept
     {
-        std::lock_guard<std::mutex> lck { this->unit_regist_mutex_ };
-        if ( this->subscribers_.find( unit_id ) != this->subscribers_.end() ){
-            this->inference_counter_.Unregist( unit_id );
-            this->subscribers_.erase( unit_id );
+        {
+            std::lock_guard<std::mutex> lck { this->unit_regist_mutex_ };
+            if ( this->subscribers_.find( unit_id ) != this->subscribers_.end() ){
+                this->inference_counter_.Unregist( unit_id );
+                this->subscribers_.erase( unit_id );
+            }
+        }
+        // B4 — cam-별 result queue 정리.
+        std::lock_guard<std::mutex> q_lck { this->cam_result_qs_mutex_ };
+        if( auto it = this->cam_result_qs_.find( unit_id ); it != this->cam_result_qs_.end() ){
+            if( it->second ) it->second->terminate();
+            this->cam_result_qs_.erase( it );
         }
     }
 
@@ -154,7 +170,7 @@ namespace MGEN
             return nullptr;
         }
 
-        this->engine_input_qs_[ handle_uuid ] = input_q;
+        this->engine_input_qs_[ handle_uuid ] = std::move( input_q );
         this->engine_handles_.push_back( handle_uuid );
 
         MLOG_INFO("Engine handler (%d, %d) linked successfully. Total handlers: %zu",
@@ -220,7 +236,16 @@ namespace MGEN
             if ( this->subscribers_.find( unit_id ) == this->subscribers_.end() )
                 return std::nullopt;
         }
-        return this->reply_dispatcher_.wait_and_get( unit_id, timeout_ms );
+        // B4 — reply_dispatcher_ (entry 1개 덮어쓰기) 대신 cam-별 result queue 의 oldest 받음.
+        //   효과: backlog drain 가능 (RspThread cycle = NPU pacing → post 0.2ms 로 단축).
+        std::shared_ptr<SafeQueue<OutputLayerWrapper>> q;
+        {
+            std::lock_guard<std::mutex> q_lck { this->cam_result_qs_mutex_ };
+            auto it = this->cam_result_qs_.find( unit_id );
+            if( it == this->cam_result_qs_.end() || !it->second ) return std::nullopt;
+            q = it->second;
+        }
+        return q->dequeue_wait_for( std::chrono::milliseconds( timeout_ms ) );
     }
 
     std::optional<OutputLayerWrapper> EngineLoadBalancer::Request( InputLayerWrapper&& request, const int timeout_ms )
@@ -239,9 +264,21 @@ namespace MGEN
     {
         MLOG_INFO("Destroying all subscribers...");
         this->reply_dispatcher_.terminate();
+        // B4 — 모든 cam result queue terminate (RspThread dequeue 종료 가능).
+        {
+            std::lock_guard<std::mutex> q_lck { this->cam_result_qs_mutex_ };
+            for( auto& [uid, q] : this->cam_result_qs_ ){
+                (void) uid;
+                if( q ) q->terminate();
+            }
+        }
         {
             std::lock_guard<std::mutex> lck { this->unit_regist_mutex_ };
             this->subscribers_.clear();
+        }
+        {
+            std::lock_guard<std::mutex> q_lck { this->cam_result_qs_mutex_ };
+            this->cam_result_qs_.clear();
         }
         MLOG_INFO("All subscribers destroyed.");
     }
@@ -273,8 +310,21 @@ namespace MGEN
                 continue; // timeout → 다시 wait
             }
 
-            // 응답을 unit_id 별 ReplyDispatcher 로 분배
-            this->reply_dispatcher_.set_reply( opt_respond->meta_data.requester_unit_id, *opt_respond );
+            // B4 — cam-별 result queue 에 push (이전엔 reply_dispatcher_.set_reply 가 entry 1개 덮어쓰기).
+            //   cam-별 queue 라 backlog 보존 가능 → RspThread 가 oldest pop → cycle 짧음 → drain 가능.
+            const auto uid = opt_respond->meta_data.requester_unit_id;
+            std::shared_ptr<SafeQueue<OutputLayerWrapper>> q;
+            {
+                std::lock_guard<std::mutex> q_lck { this->cam_result_qs_mutex_ };
+                auto it = this->cam_result_qs_.find( uid );
+                if( it != this->cam_result_qs_.end() && it->second ){
+                    q = it->second;
+                }
+            }
+            if( q ){
+                q->enqueue_move( std::move( *opt_respond ) );  // cap 도달 시 drop_oldest + drop_count_++
+            }
+            // q == nullptr 시 (unsubscribe 직후 등) — 결과 silently discard. subscribers_ 에 없는 cam.
         }
         MLOG_INFO("   - ReplyDispatcherThreadRunner finished.");
     }

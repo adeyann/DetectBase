@@ -50,6 +50,45 @@ namespace MGEN
         std::vector<InferObject> on_event_results;
     };
 
+    /**
+     * @brief Per-engine inflight 데이터 — InferenceThread → ResponseThread 전달용 (B2 async pipeline).
+     *        EngineClient 의 cam-thread-local 데이터 중 response 측에서 필요한 것 self-contained copy.
+     */
+    struct EngineInflight
+    {
+        MGEN::Type::UnitID                          subscribe_id     = UNIT_ID_NOT_SET;
+        int                                         input_width      = 0;
+        int                                         input_height     = 0;
+        std::map<std::string, MGEN::InferClassID>   target_class_ids;
+        MGEN::ImageExpressStyle                     inference_style;
+        MGEN::ImageExpressStyle                     original_style;
+        std::string                                 magic_name;
+    };
+
+    /**
+     * @brief Cam thread 가 RequestAsync 후 ResponseThread 에 넘기는 inflight frame.
+     *        ResponseThread 가 dequeue 하여 RespondAsync + post (tracking + metadata).
+     */
+    struct InflightItem
+    {
+        std::shared_ptr<AVFrame>                    frame;
+        std::vector<EngineInflight>                 engines;
+        uint64_t                                    correlation_id     = 0;
+        std::chrono::steady_clock::time_point       request_time;
+        int                                         inference_wait_ms  = 5000;
+    };
+
+    /**
+     * @brief ResponseThread 가 tracking 결과를 EventThread 에 넘기는 item.
+     *        EventThread 가 dequeue 하여 schedule check + sio/grpc + io_work_queue 처리.
+     *        RspThread cycle 에서 event burst (sio/grpc/Convert/io_work) 빼서 inflight_q drift 제거.
+     */
+    struct EventItem
+    {
+        std::shared_ptr<AVFrame>                    frame;          // Convert + clone 위해 보존 (shared_ptr ref 1)
+        std::vector<InferObject>                    track_results;  // entire_track_results
+    };
+
     class RtspDetectorUnit final : private SettingMonitor
     {
     public:
@@ -79,6 +118,15 @@ namespace MGEN
         // Thread functions
         void InferenceThreadRunner( void );
         void InferenceThreadCloser( void );
+
+        // B2 async pipeline — ResponseThread 본체. inflight_q_ dequeue → RespondAsync → tracking → metadata → event_q push.
+        void ResponseThreadRunner( void );
+        void ResponseThreadCloser( void );
+
+        // B3 — EventThread 본체. event_q_ dequeue → schedule check → BuildNotifyJsonImpl → Convert/clone → io_work_queue + sio + grpc.
+        //   RspThread cycle 에서 event burst 제거 → inflight_q drift 0.
+        void EventThreadRunner( void );
+        void EventThreadCloser( void );
 
         // IO Worker (cv::imwrite 비동기 처리). 이벤트 빈발 시 main loop 의 frame drop 차단.
         void IOWorkerThreadRunner( void );
@@ -111,10 +159,10 @@ namespace MGEN
 
         // For Socket.io message - 선별(Analysis) 부분 ( Detection )
         nlohmann::json BuildNotifyJsonImpl_Analysis(
-            std::shared_ptr<Abnormal::Schedule>   event_occured_schedule,
-            const std::vector<MGEN::InferObject>& on_event_results,
-            const tm*                             event_occur_time_info,
-            const std::string&                    frame_image_path
+            const std::shared_ptr<Abnormal::Schedule>& event_occured_schedule,
+            const std::vector<MGEN::InferObject>&      on_event_results,
+            const tm*                                  event_occur_time_info,
+            const std::string&                         frame_image_path
         );
 
         // Internal Helper - for release & reset
@@ -132,6 +180,17 @@ namespace MGEN
         SafeThread inference_thread_;
         sptrSafeQueue<std::shared_ptr<AVFrame>> avframe_q_ = nullptr;
 
+        // B2 async pipeline — InferenceThread 가 RequestAsync 후 inflight_q_ 에 push, ResponseThread 가 dequeue 후 post 처리.
+        //   cam thread cycle 에서 (resp + tracker + metadata) 빠짐 → 이론 dfps +52%.
+        //   shutdown 순서: inference_thread → inflight_q_->terminate → response_thread → event_q_->terminate → event_thread → io_worker.
+        SafeThread                                  response_thread_;
+        std::shared_ptr<SafeQueue<InflightItem>>    inflight_q_         = nullptr;
+
+        // B3 — ResponseThread 가 tracking 결과를 EventThread 에 넘김. EventThread 가 schedule check + sio/grpc + io_work.
+        //   효과: RspThread cycle 에서 event burst (2~12ms) 제거 → cam thread cycle (34ms) 보다 항상 빠름 → inflight_q max 0~1.
+        SafeThread                                  event_thread_;
+        std::shared_ptr<SafeQueue<EventItem>>       event_q_            = nullptr;
+
         // Stage G (cv::imwrite) 비동기 처리. main loop 가 enqueue 만 → main 의 frame period 보호.
         SafeThread                              io_worker_thread_;
         std::unique_ptr<SafeQueue<IOWorkItem>>  io_work_queue_     = nullptr;
@@ -146,6 +205,10 @@ namespace MGEN
         // Tracker
         std::unordered_map<MGEN::InferClassID, std::unique_ptr<SORTTracker>> trackers_;
         std::unordered_map<MGEN::InferClassID, unsigned int>                 tracker_seqs_;
+
+        // B2 — InferenceThread 초기화 시 한 번 set, ResponseThread 가 read-only access (tracker 대상 분류).
+        MGEN::InferClassID class_id_person_ = INFER_CLASS_ID_NOT_SET;
+        MGEN::InferClassID class_id_car_    = INFER_CLASS_ID_NOT_SET;
 
         // atmoic frame count
         std::atomic<unsigned int> frame_count_ { 0 };

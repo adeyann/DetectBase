@@ -101,7 +101,7 @@ namespace MGEN
          * @param capture_save_image 저장용 Mat 스냅샷을 생성할지 여부 (Default: false)
          * @param generate_inference_blob 추론용 공유 블롭을 생성할지 여부 (Default: true)
          */
-        bool Convert( std::shared_ptr<AVFrame> frame, bool capture_save_image = false, bool generate_inference_blob = true );
+        bool Convert( const std::shared_ptr<AVFrame>& frame, bool capture_save_image = false, bool generate_inference_blob = true );
 
         /**
          * @brief 추론에 즉시 투입 가능한 블롭 데이터가 준비되었는지 확인합니다.

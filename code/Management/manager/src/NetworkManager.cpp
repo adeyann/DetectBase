@@ -120,7 +120,7 @@ namespace MGEN
         }
 
         api_setting.api_service_ip   = this->init_profile_.mvas_ip;
-        api_setting.api_service_port = this->init_profile_.mvas_api_port;
+        api_setting.api_service_port = static_cast<int>( this->init_profile_.mvas_api_port );
         api_setting.my_local_ip      = this->init_profile_.local_ip;
 
         return api_setting;
@@ -146,7 +146,7 @@ namespace MGEN
         }
 
         sio_setting.sio_service_ip   = this->init_profile_.mvas_ip;
-        sio_setting.sio_service_port = this->init_profile_.mvas_sio_port;
+        sio_setting.sio_service_port = static_cast<int>( this->init_profile_.mvas_sio_port );
         sio_setting.my_local_ip      = this->init_profile_.local_ip;
         sio_setting.my_server_id     = my_service_id;
 

@@ -230,13 +230,13 @@ namespace MGEN
          * @brief 인자로 주어진 프록시 ID 리스트에 대해 새로운 AVFramePtrQueue들을 할당합니다.
          * @return 할당 성공한 unit id 목록
          */
-        std::set<MGEN::Type::UnitID> RegisterRtspProxies( std::set<MGEN::Type::UnitID> unit_set );
+        std::set<MGEN::Type::UnitID> RegisterRtspProxies( const std::set<MGEN::Type::UnitID>& unit_set );
 
         /**
          * @brief 인자로 주어진 프록시 ID 리스트에 대해 AVFramePtrQueue들을 unlink 합니다.
          * @return 해제 성공한 unit id 목록
          */
-        std::set<MGEN::Type::UnitID> UnregisterRtspProxies( std::set<MGEN::Type::UnitID> unit_set );
+        std::set<MGEN::Type::UnitID> UnregisterRtspProxies( const std::set<MGEN::Type::UnitID>& unit_set );
 
         bool Ready( const ServiceProfile& service_profile, const std::shared_ptr<NetworkManager>& network_manager );
 

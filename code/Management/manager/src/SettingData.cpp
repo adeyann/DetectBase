@@ -61,6 +61,13 @@ namespace MGEN
             setting->inference_per_cams_fps_limit = setting_js.value( "DetectFps", MGEN::DefineDefault::DFPS_LIMIT_PER_UNIT );
         }
 
+#if defined(__SANITIZE_THREAD__)
+        // TSan build 전용: 100x slowdown 환경에서 packet drop / hang 방지 위해 fps=1 강제.
+        // race detection 은 매 frame thread interaction 에서 즉시 stderr 출력되므로 1 fps 로도 충분.
+        // production / ASan 빌드는 영향 0 (compile-time guard).
+        setting->inference_per_cams_fps_limit = 1;
+#endif
+
         return true;
     }
 
@@ -341,17 +348,27 @@ namespace MGEN
     }
 
     // CameraSettingData
+    //   bugprone-exception-escape (audit 2026-05-19) — noexcept ctor 안 SetUpdater/UpdateFromJson 가
+    //   throw 가능 → std::terminate. CLAUDE.md "외부 lib throw 흡수" 패턴으로 catch(...).
     CameraSettingData::CameraSettingData() noexcept
         : ISettingData( UpdateMode::FirstOnly )
     {
-        this->SetUpdater( Impl_CameraSettingData_UpdateFromJsonObject );
+        try {
+            this->SetUpdater( Impl_CameraSettingData_UpdateFromJsonObject );
+        } catch( ... ) {
+            // noexcept ctor 안 throw 흡수. ctor 실패 시 객체는 default state (Updater 미설정).
+        }
     }
 
     CameraSettingData::CameraSettingData( const nlohmann::json& init_json_data ) noexcept
         : ISettingData( UpdateMode::FirstOnly )
     {
-        this->SetUpdater( Impl_CameraSettingData_UpdateFromJsonObject );
-        this->UpdateFromJson( init_json_data );
+        try {
+            this->SetUpdater( Impl_CameraSettingData_UpdateFromJsonObject );
+            this->UpdateFromJson( init_json_data );
+        } catch( ... ) {
+            // noexcept ctor 안 throw 흡수. JSON parse 실패 시 객체는 partial state.
+        }
     }
 
     // ExcludeCamSettingData
