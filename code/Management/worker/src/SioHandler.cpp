@@ -69,10 +69,28 @@ namespace MGEN
 
     bool SioHandler::Initialize()
     {
+        // TSan UAF fix: callback 이 SioHandler 소멸 후 호출될 가능성 (sio::client lib callback thread).
+        // weak_ptr capture → lock() 성공 시만 자기 멤버 접근. 소멸 후엔 callback no-op (안전).
+        std::weak_ptr<SioHandler> weak_self = shared_from_this();
+
         // Set Connection Listener
-        this->client.set_open_listener ( std::bind( &SioHandler::connection_listener::OnConnect, &conn_listener ) );
-        this->client.set_close_listener( std::bind( &SioHandler::connection_listener::OnClose,   &conn_listener, placeholders::_1 ) );
-        this->client.set_fail_listener ( std::bind( &SioHandler::connection_listener::OnFail,    &conn_listener ) );
+        this->client.set_open_listener( [weak_self]{
+            if( auto self = weak_self.lock() ){
+                std::unique_lock<std::mutex> lck { self->lock };
+                self->cond.notify_all();
+                self->conn_finish = true;
+            }
+        });
+        this->client.set_close_listener( [weak_self]( sio::client::close_reason const& reason ){
+            if( auto self = weak_self.lock() ){
+                self->conn_listener.OnClose( reason );
+            }
+        });
+        this->client.set_fail_listener( [weak_self]{
+            if( auto self = weak_self.lock() ){
+                self->conn_listener.OnFail();
+            }
+        });
 
         // Set connection address format
         char c_url[128] = { '\0', };
@@ -112,15 +130,18 @@ namespace MGEN
         this->client.set_reconnect_attempts( 0 );          // 0 = unlimited
         this->client.set_reconnect_delay   ( 1000 );       // 1초 시작
         this->client.set_reconnect_delay_max( 30000 );     // 최대 30초 (지수 백오프 상한)
+        // TSan UAF fix: [this] capture 대신 weak_ptr capture.
         this->client.set_reconnect_listener(
-            [this]( unsigned attempt, unsigned delay_ms ) {
-                MLOG_INFO( "SocketIO reconnect attempt #%u (delay %u ms) -> %s:%d",
-                    attempt, delay_ms,
-                    this->setting.sio_service_ip.c_str(),
-                    this->setting.sio_service_port );
-                // P54: reconnect 누적 (Prometheus exporter).
-                MGEN::MetricsRegistry::Instance().IncrementCounter(
-                    "detectbase_socketio_reconnect_total", {} );
+            [weak_self]( unsigned attempt, unsigned delay_ms ) {
+                if( auto self = weak_self.lock() ){
+                    MLOG_INFO( "SocketIO reconnect attempt #%u (delay %u ms) -> %s:%d",
+                        attempt, delay_ms,
+                        self->setting.sio_service_ip.c_str(),
+                        self->setting.sio_service_port );
+                    // P54: reconnect 누적 (Prometheus exporter).
+                    MGEN::MetricsRegistry::Instance().IncrementCounter(
+                        "detectbase_socketio_reconnect_total", {} );
+                }
             }
         );
 
@@ -175,16 +196,21 @@ namespace MGEN
         std::string event_name = event_binder->GetEventName();
         this->event_binders[event_name] = event_binder;
 
+        // TSan UAF fix: [&] capture 대신 weak_ptr capture. SioHandler 소멸 후 callback 호출 안전화.
+        std::weak_ptr<SioHandler> weak_self = shared_from_this();
         this->current_socket->on( event_name,
-            sio::socket::event_listener_aux( [&] ( string const& recv_event_name, message::ptr const& data, bool isAck, message::list& ack_resp )
+            sio::socket::event_listener_aux( [weak_self] ( string const& recv_event_name, message::ptr const& data, bool isAck, message::list& ack_resp )
             {
+                auto self = weak_self.lock();
+                if( !self ) return;   // SioHandler 이미 소멸 → callback no-op
+
                 // P53: 한 SocketIO 이벤트의 lifecycle 추적용 correlation_id 부여.
                 // 이 scope 안에서 호출되는 모든 동기 chain 의 MLOG 가 동일 ID 출력.
                 MGEN::CorrelationScope corr_scope { "evt" };
 
                 MLOG_INFO( "Event (%s) update reqeust occred.", recv_event_name.c_str() );
 
-                if( this->event_binders.find( recv_event_name ) == this->event_binders.end() ) {
+                if( self->event_binders.find( recv_event_name ) == self->event_binders.end() ) {
                     MLOG_ERROR("event binder not exist" );
                     return;
                 }
@@ -202,7 +228,7 @@ namespace MGEN
                     MLOG_INFO( " * Ack response sended for event : %s", recv_event_name.c_str() );
                 }
 
-                this->event_binders[recv_event_name]->Run( sio_js );
+                self->event_binders[recv_event_name]->Run( sio_js );
             }
         ) );
         MLOG_INFO( "   - Event bind successful ( %s )", event_name.c_str() );

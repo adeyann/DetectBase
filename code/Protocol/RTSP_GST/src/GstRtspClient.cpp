@@ -13,6 +13,7 @@ extern "C" {
 }
 
 #include <chrono>
+#include <mutex>
 
 namespace MGEN
 {
@@ -23,15 +24,16 @@ namespace MGEN
 
         const std::map<std::string, std::string> NO_LABELS;
 
-        bool g_metrics_registered = false;
+        // TSan: 여러 GstRtspClient ctor 가 동시에 register 시 race. call_once 로 한 번만 실행 보장.
+        std::once_flag g_metrics_once;
 
         void RegisterMetricsOnce() noexcept
         {
-            if( g_metrics_registered ) return;
-            auto& reg = MetricsRegistry::Instance();
-            reg.RegisterCounter( METRIC_RECONNECT_TOTAL,    "GstRtspClient successful reconnect attempts" );
-            reg.RegisterCounter( METRIC_ENQUEUE_DROP_TOTAL, "GstRtspClient frame drops (queue full)" );
-            g_metrics_registered = true;
+            std::call_once( g_metrics_once, []{
+                auto& reg = MetricsRegistry::Instance();
+                reg.RegisterCounter( METRIC_RECONNECT_TOTAL,    "GstRtspClient successful reconnect attempts" );
+                reg.RegisterCounter( METRIC_ENQUEUE_DROP_TOTAL, "GstRtspClient frame drops (queue full)" );
+            } );
         }
     } // anonymous
 

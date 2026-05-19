@@ -96,7 +96,10 @@ namespace MGEN
 
     class SioEventBinder;
 
-    class SioHandler
+    // TSan: callback (OnConnect/OnClose/OnFail) 가 SioHandler 소멸 후 호출되면 UAF.
+    // sio::client 외부 lib 의 callback thread 가 sync_close() 이전에 진행 중일 수 있음.
+    // enable_shared_from_this + weak_ptr capture 로 callback 안전화 (소멸 시 weak.lock() == nullptr → skip).
+    class SioHandler : public std::enable_shared_from_this<SioHandler>
     {
     public:
         // Constructor : default constructor forbidden

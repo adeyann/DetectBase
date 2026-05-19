@@ -972,8 +972,8 @@ namespace MGEN
                 avframe_current_recv_time = std::chrono::system_clock::now();
             }
 
-            // get AVFrame ptr
-            std::shared_ptr<AVFrame> frame = *opt_frame;
+            // get AVFrame ptr — std::move 로 atomic ref-count op 회피 (TSan happens-before 추적 한계).
+            std::shared_ptr<AVFrame> frame = std::move( *opt_frame );
 
             // 엔진 로드가 아직 이루어지지 않았다면 스킵
             if( load_balancer_->IsLoadEngine() == false ) {
@@ -1415,8 +1415,10 @@ namespace MGEN
                 continue;
             }
 
-            const InflightItem item = std::move( *opt_item );
-            auto frame = item.frame;
+            InflightItem item = std::move( *opt_item );
+            // shared_ptr copy → atomic ref-count add (TSan happens-before 추적 한계로 race report).
+            // std::move 로 ownership 이양 → atomic op 없음. item.frame 은 이후 unused.
+            auto frame = std::move( item.frame );
             if( !frame ) continue;
 
             // -----------------------------------------------------------------
@@ -1446,6 +1448,20 @@ namespace MGEN
 
                 if( result_opt.has_value() )
                 {
+                    // 방어 카운터: round-robin handler 의 NPU 처리시간 variance 때문에 cam_result_qs_ 의 응답
+                    // 순서와 inflight_q 의 frame 순서가 어긋날 가능성. 발생 빈도 측정용 (실측 후 fix 결정).
+                    // NPU rknn_run 시간은 거의 일정 (~22ms ± few ms) 이라 실제 빈도 매우 낮을 것으로 예상.
+                    if( result_opt->meta_data.correlation_id != item.correlation_id ) {
+                        MGEN::MetricsRegistry::Instance().IncrementCounter(
+                            "detectbase_correlation_mismatch_total",
+                            { { "cam_id", std::to_string( id_ ) } } );
+                        MLOG_WARN( "CAM[%d] correlation_id mismatch — expected %lu, got %lu (engine=%s)",
+                            id_,
+                            static_cast<unsigned long>( item.correlation_id ),
+                            static_cast<unsigned long>( result_opt->meta_data.correlation_id ),
+                            engine_inflight.magic_name.c_str() );
+                    }
+
                     load_balancer_->AddInferCount( engine_inflight.subscribe_id );
                     cyc_resp_obj_count += result_opt->infer_objects.size();
 
