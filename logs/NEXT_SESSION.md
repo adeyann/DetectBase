@@ -64,19 +64,11 @@
 ### G. DEBUG virtual lines 제거 (v1.0.0 시점)
 - 시연용 임시 코드 제거 (위치: README §14)
 
-### H. EngineHandlerBase dtor pure virtual UB fix
-- 위치: `code/Engine/EngineBase/src/EngineHandlerBase.cpp:79`
-- 현 상태: NOLINT 만 적용 (audit cleanup PR `refactor/audit-cleanup` 2026-05-19)
-- 진짜 fix: derived dtor (`~YoloV5_Torch_Onnx_RKNN_NPU`) 에 명시 호출 추가 + base fallback 단순화
-  ```cpp
-  ~YoloV5_Torch_Onnx_RKNN_NPU() override {
-      if( IsActive() ) TerminateEngine();
-  }
-  ```
-- 위험: abnormal shutdown 시 `~EngineHandlerBase` fallback path 진입 시 pure virtual 호출 + Preprocess race 두 가지 UB
-- normal path: `DETECTOR.cpp:410` 명시 `TerminateEngine()` 호출 → fallback path 진입 0 (실 운영 안전)
-- 비용: ~1시간 (derived dtor 1개 추가 + base 단순화 + 검증)
-- 빌드 branch: `fix/engine-dtor-pure-virtual-call`
+### H. ~~EngineHandlerBase dtor pure virtual UB fix~~ ✅ 완료 (2026-05-19, `fix/engine-dtor-pure-virtual-call`)
+- derived dtor (`~YoloV5_Torch_Onnx_RKNN_NPU`) 에 `if(IsActive()) TerminateEngine();` 명시 호출 추가
+- base dtor (`~EngineHandlerBase`) 의 `TerminateEngine()` 호출 제거 → ERROR log 만 (계약: derived 가 호출 책임)
+- `EngineHandlerBase.cpp:79` 의 `NOLINTNEXTLINE(clang-analyzer-cplusplus.PureVirtualCall)` 제거 (UB 실제 해결)
+- 호출 경로 모두 derived 살아있는 동안 처리 → pure virtual UB + Preprocess race 둘 다 회피
 
 ### A. ThreadProfiler module 신규 작성
 - 현재: RspProf/InfProf/EvtProf inline struct + 100 cycle 마다 직접 MLOG_INFO + SetGauge

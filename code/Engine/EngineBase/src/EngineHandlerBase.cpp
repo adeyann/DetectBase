@@ -16,11 +16,13 @@ namespace MGEN
 
     EngineHandlerBase::~EngineHandlerBase()
     {
-        // 아직 실행 중이면 TerminateEngine 호출 보장
+        // 책임: derived dtor 가 IsActive() 시 TerminateEngine() 명시 호출 (계약). base dtor 진입
+        //   시점엔 is_activate_handler_=false 보장. true 면 derived dtor 가 호출 누락 = 자원 leak.
+        //   base 가 TerminateEngine() 호출하면 pure virtual call UB (derived 이미 destruct).
         if( is_activate_handler_.load() == true ){
-            MLOG_WARN("EngineHandlerBase destructor called while engine '%s' on device %d was still active. Forcing termination.",
+            MLOG_ERROR("EngineHandlerBase dtor: engine '%s' on device %d still active. "
+                "Derived dtor must call TerminateEngine() before destruction. Resources may leak.",
                 profile_.GetProfileName().c_str(), device_id_);
-            this->TerminateEngine();
         }
         MLOG_DEBUG("EngineHandlerBase instance destroyed for profile '%s' (UUID: %d) on device %d.",
             profile_.GetProfileName().c_str(), profile_.GetProfileUUID(), device_id_);
@@ -76,9 +78,8 @@ namespace MGEN
         this->inference_thread_.Stop();
 
         // 3. 하위 클래스의 장치 자원 해제 호출
-        // NOTE: TerminateEngine() 는 normal path 에서 DETECTOR 가 명시 호출 → derived 살아있음.
-        // dtor 의 fallback path 진입 시 derived 이미 destruct → pure virtual UB. fix 별도 PR 예정.
-        // NOLINTNEXTLINE(clang-analyzer-cplusplus.PureVirtualCall)
+        //   호출 경로: (a) normal path: DETECTOR.cpp:410 명시 호출, (b) derived dtor (IsActive()==true).
+        //   두 경로 모두 derived 가 살아있는 동안 호출 → ReleaseDeviceResources() 의 derived override 정상 호출.
         ReleaseDeviceResources();
         MLOG_DEBUG("Device resources released for engine '%s', device %d.", profile_.GetProfileName().c_str(), device_id_);
 
