@@ -29,6 +29,7 @@ logs/asan_*
 logs/massif*
 logs/bisect*
 *.log
+*.txt
 
 # logs/ 임시 파일 (확장자 .log 외 — AI 작업 중 생성)
 logs/.current_*

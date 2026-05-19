@@ -154,6 +154,7 @@ namespace MGEN
 	}
 
 	// Convert bounding box from [cx,cy,s,r] to [x,y,w,h] style.
+	// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 	StateXYWH MgenKalmanTracker::get_StateXYWH( float cx, float cy, float s, float r )
 	{
 		float w = std::sqrt( s * r );

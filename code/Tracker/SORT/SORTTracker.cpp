@@ -14,6 +14,7 @@ namespace MGEN
         constexpr float SORT_TRACKER_IOU_THRESHOLD   = 0.7f;
     }
 
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     SORTTracker::SORTTracker( const ImageExpressStyle& track_in_style, const ImageExpressStyle& track_out_style  )
         : max_track_size_  ( SORT_TRACKING_MAX_NUM )
         , max_age_         ( SORT_TRACKER_DEFAULT_MAX_AGE )

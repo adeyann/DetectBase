@@ -229,6 +229,7 @@ namespace MGEN
         return true;
     }
 
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     std::optional<OutputLayerWrapper> EngineLoadBalancer::RespondAsync( const MGEN::Type::UnitID unit_id, const int timeout_ms )
     {
         {

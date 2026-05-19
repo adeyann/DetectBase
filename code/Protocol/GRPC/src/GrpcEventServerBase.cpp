@@ -62,6 +62,8 @@ namespace MGEN
     void GrpcEventServerBase::UnregisterHandler( CallDataBase* raw_handler )
     {
         if( !raw_handler ) return;
+        // RAII: released 가 함수 종료 시 lock 밖에서 dtor.
+        // cppcheck-suppress unreadVariable
         std::shared_ptr<CallDataBase> released; // map 밖에서 release (lock 외부 dtor)
         {
             std::lock_guard<std::mutex> lck { alive_mtx_ };

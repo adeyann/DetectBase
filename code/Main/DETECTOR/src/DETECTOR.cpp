@@ -483,6 +483,8 @@ namespace MGEN
                 if( !v.is_array() )
                     continue;
                 bool all_scalar = true;
+                // raw loop 가독성 우선.
+                // cppcheck-suppress useStlAlgorithm
                 for( const auto& e : v ) {
                     if( !e.is_string() && !e.is_number() ) { all_scalar = false; break; }
                 }

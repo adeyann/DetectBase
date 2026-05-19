@@ -204,6 +204,8 @@ namespace std
             std::size_t h1 = std::hash<MGEN::EngineStreamMetaData>()( key.meta_data );
             std::size_t h2 = 0;
 
+            // hash combine raw loop 가독성 우선.
+            // cppcheck-suppress useStlAlgorithm
             for( const auto& obj : key.infer_objects )
             {
                 h2 ^= std::hash<MGEN::InferObject>()( obj ) + MGEN::HASH_MAGIC_NUMB + ( h2 << 6 ) + ( h2 >> 2 );
