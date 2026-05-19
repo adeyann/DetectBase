@@ -241,7 +241,7 @@ GStreamer 1.22/1.24/1.26 changelog WebSearch 결과: 명확한 본 케이스 fix
 
 ## 사용자 결정사항 (이번 세션)
 - Git Flow 변형 채택 (develop branch 영구 + master 보호)
-- Squash merge 표준
+- ~~Squash merge 표준~~ → **No-ff merge commit 표준** (2026-05-19 변경 — squash merge 가 매 release 마다 develop/master sibling 분기 만드는 부산물 회피)
 - 머지 후 미반영 변경 없는 branch delete
 - semver 0.x.x (AI 추천 + 사용자 승인)
 - Memory 영어 내부 / 한국어 사용자 대면
@@ -251,3 +251,80 @@ GStreamer 1.22/1.24/1.26 changelog WebSearch 결과: 명확한 본 케이스 fix
 - cap 10 유지 + monitor 12h 가동 (B4 후)
 - audit 먼저 후 PR
 - instrument 모으기 (ThreadProfiler 별도 thread, 삭제 X)
+- **GStreamer rtpmanager runtime leak**: A 수용 결정 (v1.0.0 후 C upgrade 시도)
+- **Co-Authored-By trailer 금지** (모든 commit/PR 에서 제거, memory rule 저장)
+
+## v0.1.0 release 마무리 (2026-05-19 15:56)
+
+### Release 결과
+
+| 항목 | 결과 |
+|------|------|
+| PR #7 | feature/dfps-step2-async-inference → develop (squash, commit `e910640`) |
+| PR #8 | develop → master (squash, commit `d9ab212`) |
+| **v0.1.0 tag** | https://github.com/adeyann/DetectBase/releases/tag/v0.1.0 |
+| develop ↔ master sibling 분기 | `90eee99 merge: master v0.1.0 sync to develop` (no-ff merge commit) |
+
+### TSan race fix 최종 결과 (audit_20260519_145745)
+
+| 분류 | 이전 | 현재 |
+|------|------|------|
+| TSan WARNING 총 | 144 | **139** (-5) |
+| Mutex destroyed (SIGKILL false positive) | 533 | 514 |
+| **우리 코드 진짜 race** | **4 root cause** | **0 ✅** |
+|   ├ A. SioHandler UAF (8 double + 1 race) | 9 | 0 |
+|   ├ D+F. InferenceCounter map race | 1+3 | 0 |
+|   ├ E. RegisterMetricsOnce init race | 1 | 0 |
+|   └ B. SafeQueue shared_ptr atomic copy | 여러 | 0 (copy→move) |
+| 잔여 race | - | SIGKILL FP (대부분) + GStreamer 내부 (skip) + SafeQueue happens-before 추적 한계 (~5건, 운영 영향 0) |
+
+### Audit baseline (5종 도구)
+
+| 도구 | 결과 |
+|------|------|
+| cppcheck | 79 → **63** (안전 12 fix 적용, false positive 20 + Profiler 자연정리 9 + needs-review 11) |
+| clang-tidy | 166 → **30** (잠재 14 + safe 137 fix 적용, needs-review 24 + 누락 narrowing 4 + exception-escape FP 2) |
+| ASan/UBSan | startup leak 0 ✅, **runtime leak 1 (GStreamer rtpmanager, 수용)** |
+| TSan | **우리 코드 진짜 race 0 ✅**, 잔여 139 (SIGKILL + 외부 lib + 추적 한계) |
+
+### detectbase.sh 7-mode 분리 실행 (신규)
+
+```bash
+audit                    # 전체 (5종)
+audit --no-tsan          # 정적 + ASan/UBSan
+audit --with-tsan        # backward compat = 전체
+audit --only cppcheck    # ~1분
+audit --only clang-tidy  # ~10분
+audit --only asan|ubsan  # 동적, 운영 정지
+audit --only tsan        # 동적, race detection, 운영 정지
+```
+
+env var override: `ASAN_DURATION_MIN`, `TSAN_DURATION_SEC`.
+
+### 신규 metric
+
+- `detectbase_correlation_mismatch_total{cam_id}` — frame ordering 방어 카운터
+- 발생 빈도 측정 후 진짜 fix (per-correlation_id lookup or handler affinity) 결정
+
+### Git 정리
+
+- stash 2개 drop (이전 dfps-step1 작업의 옛 instrument, 현 코드에 더 발전된 버전 통합됨)
+- `git gc --prune=now` + `git reflog expire --expire=now --all` — local 정리
+- develop/master sibling 분기 → no-ff merge commit 으로 cleanup
+- Co-Authored-By trailer 제거 (`amend + force push --force-with-lease`, commit `2d4a7c4` → `e910640`)
+
+### v0.1.x 후속 PR (defer)
+
+| 항목 | 작업 |
+|------|------|
+| audit cleanup PR | clang-tidy needs-review 24 + 누락 narrowing 4 + exception-escape FP 2 + cppcheck needs-review 11 |
+| ThreadProfiler 모듈 | RspProf/InfProf/EvtProf inline 측정 → 별도 thread + PUSH/PULL API |
+| Frame ordering 진짜 fix | mismatch metric 측정 후 옵션 결정 (per-correlation_id lookup or handler affinity) |
+| MAIA RTSP URL 정정 | port 555, mount /<id> 별도 PR |
+| GStreamer 1.24+ upgrade | v1.0.0 후 시도 (rtpmanager leak fix 가능성 검증) |
+| DEBUG virtual lines 제거 | v1.0.0 시점 |
+| TSan SafeQueue 추적 한계 | structural redesign 필요 (운영 영향 0, 보류) |
+
+## 다음 세션 진입점
+
+[NEXT_SESSION.md](NEXT_SESSION.md) 참조.

@@ -201,5 +201,5 @@ rollback 은 git revert 또는 branch 이전 commit checkout 으로 수행. mast
 - ASan 빌드: `.deleted_backup/mpp_rollback_20260515/Build-ASan/`
 - 빌드 logs: `logs/build_mpp_*.log`, `logs/build_v3_*.log`, `logs/gstreamer_phase0_*.log`, `logs/jemalloc_rebuild_*.log`
 - cam별 isolation: `logs/gst_diag_160804/gst_cam[1-4].log`
-- 자체 ONVIF 페이로더 설계: `logs/ONVIF_PAYLOADER_DESIGN.md`
-- 단계별 심층 review: `logs/GSTREAMER_DEEP_REVIEW.md`
+- 자체 ONVIF 페이로더 설계: `.DOCS/ONVIF_PAYLOADER_DESIGN.md`
+- 단계별 심층 review: `.DOCS/GSTREAMER_DEEP_REVIEW.md`

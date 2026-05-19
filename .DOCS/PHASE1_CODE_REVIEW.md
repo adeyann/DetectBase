@@ -277,7 +277,7 @@ Phase 1 build 후 (24h baseline test 종료 시) 검증:
 
 ## §7. 참고 자료
 
-- BISECT 결과 표: `logs/GSTREAMER_REWORK_PLAN.md` §1.2
+- BISECT 결과 표: `.DOCS/GSTREAMER_REWORK_PLAN.md` §1.2
 - 이전 시도 코드: `.deleted_backup/gst_attempt_20260515/RTSP_GST/`
 - valgrind massif log: `.deleted_backup/mpp_rollback_20260515/massif_run.log`
 - GST_TRACERS log: `.deleted_backup/gst_tracer_v[12]_*.log`

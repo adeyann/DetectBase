@@ -1,191 +1,124 @@
-# NEXT_SESSION — happytimesoft baseline 완전 복원 + git push 진행
+# NEXT_SESSION — v0.1.0 release 완료 후 진입점
 
-**최종 갱신**: 2026-05-15 16:30 KST
-**상황**: ✅ git push 완료 (master branch, 452 objects, https://github.com/adeyann/DetectBase) → STEP 5 (GStreamer 재작업 branch) 진행 단계
-
----
-
-## 사용자 명령 (확정)
-
-1. ✅ happytimesoft baseline 으로 완전 복원 (옵션 B: jemalloc/W-14/P1/P3 유지)
-2. ✅ REID/AlphaRover 의존성 제거 (RtspHandler.cpp 도 이미 DetectBase 용 19KB 정리본으로 변경됨)
-3. ⏳ 빌드 + sanity → git push (https://github.com/adeyann/DetectBase.git)
-4. ⏸ 그 후 GStreamer 재작업 (branch 으로 단계별 commit)
+**최종 갱신**: 2026-05-19 16:00 KST
+**현 상태**: `v0.1.0` released. master/develop 동기화 완료. 다음 작업 후보 = ThreadProfiler module 또는 audit cleanup PR.
 
 ---
 
-## 진행 상황 (compact 후 진행)
-
-### STEP 1 — RtspHandler.cpp REID/AlphaRover 의존 제거: ✅ 확인 완료
-- 파일 크기: DetectBase **19,221 bytes** (MAIA 27,482 ❌)
-- `RtspProxyConfigXmlMaker::Make(const std::string&)` only overload (set/vector overload 없음)
-- `setting_manager->GetServerSetting()` (AlphaRover 아님)
-- `GetCameraIDSet()`, `GetCameraSettingsManager()`, `sptrCamInfo->GetSetting(cam_id)` 사용
-- REID/AlphaRover/ReidRequestCameraUnit grep 결과 0건
-
-### STEP 2 — clean rebuild + 운영 + 기본 sanity: ✅ PASS
-
-| 항목 | 결과 |
-|---|---|
-| 이전 bin/Build-Integrate | `.deleted_backup/build_rollback_20260515/Build-Integrate_old/` 로 mv |
-| docker run cmake + make -j$(nproc) | exit 0, **error 0, warning 0**, 100% Built target DetectBase |
-| 산출물 | `bin/Build-Integrate/Main/DetectBase` (2,453,128 bytes, ARM aarch64) |
-| `bin/DetectBase` symlink | `→ /DetectBase/bin/Build-Integrate/Main/DetectBase` (컨테이너 내부 path) |
-| docker-compose up -d | detectbase_service Up |
-| DFPS | **53.5** ~ 53.6 |
-| Camera state | **registered=4, active=4** |
-| ERROR/FATAL/CRITICAL | **0** |
-| event_detected | cam 659/660/661 정상 |
-| RTSP Proxy Publish Port | **555** (happytimesoft) |
-
-### STEP 3 — Monitor tool 기반 sanity: ✅ PASS
-
-Monitor task `byyb8z09p` (10분 간격 × 6회 + spot 측정).
-
-| 시점 | Up | RSS (kB) | Δ from T+10 | 비고 |
-|---|---|---|---|---|
-| T+10 | 12분 | 517,656 | baseline | Monitor 시작 첫 측정 |
-| T+20 | 22분 | 516,260 | −1,396 | |
-| T+30 | 32분 | 530,092 | +12,436 | ramp-up |
-| T+40 | 42분 | 535,640 | +17,984 | |
-| T+50 | 52분 | 543,704 | +26,048 | ramp-up peak 근처 |
-| spot (T+60+) | 78분 | **524,408** | **+6,752** | **−19,296 회수, plateau** |
-| **VmHWM** | | **568,844** | **+51,188** | 그 사이 peak (jemalloc 회수 전) |
-
-**해석**:
-- ramp-up 안정화 폭 **+51 MB peak** (사용자 표현 "48h test 초반 안정화 47MB" 와 일치)
-- jemalloc `background_thread:true` 가 peak 후 **−44 MB 회수**
-- plateau ~525 MB (안정)
-- ERROR 0, DFPS 53.2~54.7 (정상), event 19,669 (production 활발)
-
-**결론**: happytimesoft baseline + jemalloc/W-14/P1/P3 patches **leak 없음, 안정 PASS**.
-
-**부수 발견 (사용자 지적, 향후 cleanup 후보)**:
-- W-14 (`malloc_trim(0)` in `RtspDetectorUnit.cpp:231`) 는 **jemalloc 환경에서 사실상 no-op**.
-  이유: LD_PRELOAD 가 malloc/free 만 hook, `malloc_trim` 은 glibc 전용 — jemalloc 은 wrap export 안 함. glibc heap 거의 비어있어 trim 대상 X.
-  실제 회수 = jemalloc background_thread (`madvise MADV_DONTNEED`).
-- W-14 는 dead code 와 유사. emergency cleanup 1회 호출이라 cost 0, 빼도 무해.
-- GStreamer 재작업 마무리 후 정리 권장.
-
----
-
-## ★ 60분 sanity 끝난 후 (사용자 호출)
-
-### 1. 결과 확인 (AI 가 진행)
-
-```bash
-cat /home/claudedev/DetectBase/logs/sanity_60min_20260515_145341.log
-```
-
-`=== FINAL ===` block 의 `Total delta` 가 판단 기준 안에 들어오면 PASS.
-
-### 2. 만약 sanity PASS → git push 안내 (사용자 직접)
-
-```bash
-cd /home/claudedev/DetectBase
-
-# 1) 상태 확인 (bin/, logs/, .deleted_backup/ 가 .gitignore 적용되는지)
-git status
-
-# 2) 첫 commit 준비
-git add .
-git status   # 의도하지 않은 파일 포함되었는지 한 번 더 확인
-
-# 3) commit (한국어 메시지)
-git commit -m "Initial commit: happytimesoft baseline + jemalloc/W-14/P1/P3 patches
-
-- happytimesoft RTSP library 완전 복원 (Protocol/RTSP)
-- GStreamer 시도 코드 제거 (.deleted_backup/gst_attempt_20260515/)
-- jemalloc LD_PRELOAD (docker-compose.yml)
-- W-14: malloc_trim(0) in RtspDetectorUnit.cpp (jemalloc 환경에서 no-op, 추후 정리)
-- P1: libyaml-cpp-dev 중복 제거 (Dockerfile.build)
-- P3: ClassChecker YAML→JSON
-
-Sanity (Up 78분):
-- DFPS 53.2 (4 cameras active)
-- VmRSS 524,408 kB (peak VmHWM 568,844 kB 후 -44 MB 회수)
-- ERROR 0 / event 19,669
-- ramp-up 안정화 +51 MB → plateau 도달 확인"
-
-# 4) branch rename (master → main)
-git branch -M main
-
-# 5) push
-git push -u origin main
-```
-
-### 3. git push 후 GStreamer 재작업 branch 분기
-
-```bash
-git checkout -b feature/gstreamer-integration
-```
-
-작업 순서 (NEXT_SESSION 다음 버전 plan):
-1. PoC (avdec_h264) — 단순 동작 검증
-2. video forward (raw passthrough) 통합
-3. ONVIF metadata payloader 통합
-4. (선택) MPP hardware decoder + leak fix
-
----
-
-## 만약 sanity FAIL 시
-
-happytimesoft baseline 자체가 leak 이면 — 처음으로 복원이 잘못된 것. 확인:
-
-```bash
-# RtspHandler 가 정말 happytimesoft 사용 중인지
-grep -nE "g_rtsp_cfg|CRtspProxy|rtsp_read_config" /home/claudedev/DetectBase/code/Management/worker/src/RtspHandler.cpp
-
-# Protocol/RTSP/ 가 happytimesoft 코드 그대로인지
-ls /home/claudedev/DetectBase/code/Protocol/RTSP/
-diff -r /home/claudedev/DetectBase/.deleted_backup/happytimesoft_rtsp_20260514/RTSP_original /home/claudedev/DetectBase/code/Protocol/RTSP/ | head
-```
-
-만약 baseline 도 leak 이면 jemalloc + W-14 의 patch 가 누락된 것일 수도. docker-compose.yml 의 LD_PRELOAD 라인 / RtspDetectorUnit.cpp:231 의 malloc_trim 호출 확인.
-
----
-
-## 핵심 파일 위치 reference
-
-### 코드
-- DetectBase root: `/home/claudedev/DetectBase`
-- MAIA reference (happytimesoft 시절): `/home/claudedev/MAIA`
-- `code/Protocol/RTSP/`: happytimesoft 라이브러리 (core/http/media/rtp/rtsp)
-- `code/Management/worker/src/RtspHandler.cpp`: 19,221 bytes (DetectBase 용)
-- `code/Management/worker/include/RtspHandler.h`: Make(string) only
-- `code/BasicLibs/core/parser/xml/tiny_xml.h`: P2 롤백 후 복원 (happytimesoft 의 XML config)
-
-### 휴지통 (.deleted_backup/)
-- `gst_attempt_20260515/`: GStreamer 시도 코드 (참고)
-- `happytimesoft_rtsp_20260514/`: 빈 디렉토리 (RTSP_original 은 복원됨)
-- `mpp_rollback_20260515/`: Build-ASan/Build-Debug, ASan/valgrind 로그
-- `build_rollback_20260515/Build-Integrate_old/`: 5월 14일 빌드 (이번 clean rebuild 직전)
-
-### 이미지
-- `detectbase:1.0` (1.17 GB, GStreamer 없는 clean image)
-- `detectbase:before-gst-integration-20260514` (1.34 GB, GStreamer 빌드 deps 포함된 백업)
-- `detectbase:analysis` (audit 용)
+## 현 상태 (2026-05-19 기준)
 
 ### Git
-- Local: `/home/claudedev/DetectBase/.git/` (사용자가 init 완료)
-- Remote: `https://github.com/adeyann/DetectBase.git` (origin 등록됨)
-- Branch: `master` (default — `git branch -M main` 권장)
-- 사용자: `adeyann` <kuy920516@gmail.com>
-- 첫 commit 아직 없음
+- **master**: `d9ab212` — v0.1.0 tagged
+- **develop**: `90eee99` — master 와 동기화 (no-ff merge commit `merge: master v0.1.0 sync to develop`)
+- 모든 feature 브랜치 정리됨 (squash merge 후 자동 삭제)
+- Git workflow 변경: **squash merge → no-ff merge commit** (memory rule 갱신, feedback_git_workflow.md)
+- Co-Authored-By trailer 제거 (memory rule feedback_no_coauthor_trailer.md)
 
-### `.gitignore`
-```
-bin/, code/build/, *.so, *.a, *.rknn, *.engine, logs/*.log, .deleted_backup/,
-code/Protocol/REST/lib/, code/Protocol/SocketIO/lib/,
-code/BasicLibs/core/parser/yaml-cpp/lib/, image_root/, frame/, crop/, ...
-```
+### 운영
+- `detectbase_service` 정상 가동 중
+- 4 cam × ~29 fps/cam, RSS 602~657 MB ±55 MB plateau, q_drop 0
+- jemalloc 활성 (background_thread:true)
+
+### Audit baseline (audit_20260519_145745)
+- cppcheck **63** (false positive 20 + Profiler 자연정리 9 + needs-review 11)
+- clang-tidy **30** (needs-review 24 + 누락 narrowing 4 + exception-escape FP 2)
+- ASan/UBSan: startup leak 0 + runtime leak 1 (GStreamer rtpmanager, 수용)
+- TSan: **우리 코드 진짜 race 0 ✅**, 잔여 139 (SIGKILL FP + 외부 lib + 추적 한계)
+
+자세한 결과: [AUDIT_REPORT_20260519.md](AUDIT_REPORT_20260519.md), [SESSION_DFPS_B3_B4_PLATEAU_20260519.md](SESSION_DFPS_B3_B4_PLATEAU_20260519.md).
 
 ---
 
-## 사용자 메모리 규칙 (재확인)
+## 다음 세션 작업 후보 (우선순위 순)
 
-- **Git 워크플로우** (2026-05-15 도입): AI 는 git/gh 사용 가능, 단 `master` 직접 작업 금지. 본인 branch 만 사용 (자유 생성). `master` 머지는 PR + 사용자 명시 승인. 비-master branch 간 머지는 자유. force push / `git reset --hard` 금지.
-- **삭제 규칙**: `rm`/`unlink`/`rmdir` 직접 금지. `.deleted_backup/` 으로 mv. 실제 `rm` 은 사용자만.
-- 모든 임시 로그는 `DetectBase/logs/` 안에 (절대 /tmp 아님)
-- read 용 명령 (find/grep/awk) 즉시 실행, **sed 금지** (deny 등록)
-- destructive 명령 (docker kill, rm -f 등) 단독 호출
+### A. ThreadProfiler module 신규 작성
+- 현재: RspProf/InfProf/EvtProf inline struct + 100 cycle 마다 직접 MLOG_INFO + SetGauge
+- 목표: 별도 thread 가 모든 stage timing + queue size 일괄 수집
+- 구조:
+  - **PUSH API**: 각 thread 가 `Sample(stage_name, us)` 호출 → atomic accumulator 누적
+  - **PULL API**: queue size / metric 등 외부 source 는 `RegisterPullSource(name, getter)` 등록 → ThreadProfiler thread 가 N초마다 drain
+- 효과: 측정 빈도/필드 변경 시 ThreadProfiler interval 만 수정. 신규 stage 추가는 Sample 한 줄. log format 일관.
+- 위치: `code/Profile/ThreadProfiler.h+cpp` 신규
+- 마이그레이션: RspProf/InfProf/EvtProf → Sample 호출 (~5줄/thread) + RegisterPullSource Init (~15줄)
+- 비용: ~4시간 (구현 + 마이그레이션 + 검증)
+- 빌드 branch: `refactor/thread-profiler` (develop fork)
+
+### B. audit cleanup PR (refactor/audit-cleanup)
+- v0.1.0 후 별도 PR 로 보류한 needs-review + 누락 항목:
+  - clang-tidy needs-review 24:
+    - `bugprone-easily-swappable-parameters` 16 (struct wrapper 또는 named-arg 패턴)
+    - `bugprone-branch-clone` 4 (의도 vs 버그 검토)
+    - `bugprone-string-literal-with-embedded-nul` 1 (RtspDetectorUnit:560)
+    - 3 기타
+  - clang-tidy 누락 4: YoloV5:50/51/59/60 의 `r_w * img.rows` int→float 명시 cast
+  - clang-tidy false positive 2: SettingData:353/363 base ctor exception-escape (NOLINT 또는 base noexcept)
+  - cppcheck needs-review 11: useStlAlgorithm 5 + unreadVariable 4 + unusedStructMember 2
+- 비용: ~3~4시간
+- 빌드 branch: `refactor/audit-cleanup`
+
+### C. Frame ordering 진짜 fix (조건부)
+- 방어 카운터 `detectbase_correlation_mismatch_total{cam_id}` 며칠 운영 후 발생 빈도 측정
+- 발생 빈도 > 0 시 옵션:
+  - per-correlation_id lookup (`cam_result_qs_` → `map<correlation_id, OutputLayerWrapper>`)
+  - handler affinity (cam → 고정 handler, round-robin 포기)
+- 발생 빈도 0 시 보류 가능
+
+### D. MAIA RTSP URL 정정
+- 별도 PR: port 555 + mount `/<id>` (현재 `/cam<id>`)
+- NetworkSettings.json 의 `RTSP_Proxy_Port` 추가
+- docker-compose.yml port 매핑 검토
+
+### E. TSan SafeQueue 추적 한계 (~5건)
+- structural redesign (lock 범위 확장 또는 atomic guard)
+- 운영 영향 0이라 보류 가능
+- v0.1.x cleanup PR 에 포함 가능
+
+### F. GStreamer 1.24+ upgrade (v1.0.0 후)
+- rtpmanager runtime leak (~340 MB/year) fix 시도
+- Ubuntu 22.04 → 24.04 base + glibc/GCC 동반 업그레이드
+- librknnrt ABI 호환 위험 사전 검증 필요
+- 비용 ~1.5~2시간 + 위험
+
+### G. DEBUG virtual lines 제거 (v1.0.0 시점)
+- 시연용 임시 코드 제거 (위치: README §14)
+
+---
+
+## 다음 세션 진입 시 자동 처리
+
+1. `git status` + `git log -3` (현 상태)
+2. `git branch -a` (브랜치 정리 상태 — master, develop 만 있어야)
+3. 이 NEXT_SESSION.md 읽기
+4. [SESSION_DFPS_B3_B4_PLATEAU_20260519.md](SESSION_DFPS_B3_B4_PLATEAU_20260519.md) 의 "v0.1.0 release 마무리" 섹션 (마지막) 읽기
+5. 사용자 명령 또는 위 A~G 중 선택해서 진행
+   - A (ThreadProfiler) 가 가장 자연스러운 다음 단계
+   - B (audit cleanup) 는 짧고 명확한 작업
+   - 둘 다 develop fork 으로 작업 → PR 머지 (no-ff)
+
+---
+
+## 참고 문서
+
+| 문서 | 내용 |
+|------|------|
+| [README.md](../README.md) | 프로젝트 전체 (§15 audit baseline 갱신됨, §17 분기 트리거 보류 항목) |
+| [CLAUDE.md](../CLAUDE.md) | 코딩 표준 + Known issues (rtpmanager leak 추가됨) |
+| [OPERATIONS.md](../OPERATIONS.md) | 운영 트러블슈팅 |
+| [logs/AUDIT_REPORT_20260519.md](AUDIT_REPORT_20260519.md) | audit 결과 + rtpmanager A 결정 |
+| [logs/SESSION_DFPS_B3_B4_PLATEAU_20260519.md](SESSION_DFPS_B3_B4_PLATEAU_20260519.md) | 이번 세션 전체 진행 (B3/B4 + audit + TSan fix + v0.1.0 release) |
+| [logs/NPU_MODEL_PERFORMANCE.md](NPU_MODEL_PERFORMANCE.md) | YOLOv5 s/m/l/x 성능 예측 |
+
+## Legacy (참조 가치 있는 완료 작업, .DOCS/ 로 이동)
+
+| 문서 | 내용 |
+|------|------|
+| `.DOCS/GSTREAMER_DEEP_REVIEW.md` | GStreamer Phase 1 deep review |
+| `.DOCS/GSTREAMER_REWORK_PLAN.md` | GStreamer Phase 1 rework plan |
+| `.DOCS/ONVIF_PAYLOADER_DESIGN.md` | GStreamer Phase 2 ONVIF design |
+| `.DOCS/PHASE1_CODE_REVIEW.md` | Phase 1 code review |
+| `.DOCS/BASICLIBS_AUDIT.md` | BasicLibs 초기 audit |
+| `.DOCS/SESSION_DFPS_LEAK_HUNT_20260518.md` | 이전 세션 (dfps leak hunt) |
+| `.DOCS/CODE_REVIEW_SUMMARY.md` | 1차 코드리뷰 (legacy) |
+| `.DOCS/REVIEW2/`, `.DOCS/REVIEW3/` | 2차, 3차 코드리뷰 |
+| `.DOCS/REVIEW3_COMPLETION_BASELINE_20260513.md` | 3차 리뷰 완료 baseline |
+| `.DOCS/TEST_48H_20260509_LEAK_FOUND.md` | 48h 테스트 leak 발견 |
