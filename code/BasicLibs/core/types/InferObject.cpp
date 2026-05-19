@@ -36,7 +36,7 @@ namespace MGEN
         , class_id        ( other.class_id )
         , track_id        ( other.track_id )
         , score           ( other.score )
-        , bbox            ( std::move(other.bbox) ) // Call InferBBox move constructor (defaulted, noexcept)
+        , bbox            ( other.bbox ) // performance-move-const-arg: InferBBox 는 trivially-copyable → move 무효
         , xy_ref_type     ( other.xy_ref_type )
         , coord_format    ( other.coord_format )
         , extend_data     ( std::move(other.extend_data) ) // Call std::vector move constructor (resource transfer, noexcept)
@@ -62,7 +62,7 @@ namespace MGEN
             class_id        = other.class_id;
             track_id        = other.track_id;
             score           = other.score;
-            bbox            = std::move(other.bbox); // Call InferBBox move assignment (defaulted, noexcept)
+            bbox            = other.bbox; // performance-move-const-arg: InferBBox 는 trivially-copyable → move 무효
             xy_ref_type     = other.xy_ref_type;
             coord_format    = other.coord_format;
             extend_data     = std::move(other.extend_data); // Call std::vector move assignment (resource transfer, noexcept)
@@ -285,14 +285,14 @@ namespace MGEN
                 else
                 {
                     // Convert intermediate ratios (relative to padded src) to pixels in padded src
-                    float px1_padded = ratio_ltx_x * src_style.width;
-                    float py1_padded = ratio_ltx_y * src_style.height;
-                    float pw_padded  = ratio_w * src_style.width;
-                    float ph_padded  = ratio_h * src_style.height;
+                    float px1_padded = ratio_ltx_x * static_cast<float>( src_style.width );
+                    float py1_padded = ratio_ltx_y * static_cast<float>( src_style.height );
+                    float pw_padded  = ratio_w * static_cast<float>( src_style.width );
+                    float ph_padded  = ratio_h * static_cast<float>( src_style.height );
 
                     // Remove padding offset
-                    float px1_scaled = px1_padded - src_style.pad_x_offset;
-                    float py1_scaled = py1_padded - src_style.pad_y_offset;
+                    float px1_scaled = px1_padded - static_cast<float>( src_style.pad_x_offset );
+                    float py1_scaled = py1_padded - static_cast<float>( src_style.pad_y_offset );
                     // (width/height remain scaled, offset doesn't change size)
 
                     // Reverse scaling to get coordinates in original image space
@@ -305,8 +305,8 @@ namespace MGEN
 
                     // Recalculate ratios relative to the destination (original) dimensions
                     // Avoid division by zero for destination dimensions
-                    float inv_dst_w = 1.0f / dst_style.width;
-                    float inv_dst_h = 1.0f / dst_style.height;
+                    float inv_dst_w = 1.0f / static_cast<float>( dst_style.width );
+                    float inv_dst_h = 1.0f / static_cast<float>( dst_style.height );
 
                     ratio_ltx_x = x1_orig_f * inv_dst_w; // dst_style.width == src_style.original_width
                     ratio_ltx_y = y1_orig_f * inv_dst_h; // dst_style.height == src_style.original_height
@@ -335,10 +335,10 @@ namespace MGEN
                 else
                 {
                     // Convert intermediate ratios (relative to original src) to pixels in original src
-                    float x1_orig_f = ratio_ltx_x * src_style.width; // src_style.width == dst_style.original_width
-                    float y1_orig_f = ratio_ltx_y * src_style.height; // src_style.height == dst_style.original_height
-                    float w_orig_f  = ratio_w * src_style.width;
-                    float h_orig_f  = ratio_h * src_style.height;
+                    float x1_orig_f = ratio_ltx_x * static_cast<float>( src_style.width ); // src_style.width == dst_style.original_width
+                    float y1_orig_f = ratio_ltx_y * static_cast<float>( src_style.height ); // src_style.height == dst_style.original_height
+                    float w_orig_f  = ratio_w * static_cast<float>( src_style.width );
+                    float h_orig_f  = ratio_h * static_cast<float>( src_style.height );
 
                     // Apply scaling
                     float px1_scaled = x1_orig_f * dst_style.scale_factor_from_original;
@@ -347,14 +347,14 @@ namespace MGEN
                     float ph_scaled  = h_orig_f * dst_style.scale_factor_from_original;
 
                     // Add padding offset
-                    float px1_padded = px1_scaled + dst_style.pad_x_offset;
-                    float py1_padded = py1_scaled + dst_style.pad_y_offset;
+                    float px1_padded = px1_scaled + static_cast<float>( dst_style.pad_x_offset );
+                    float py1_padded = py1_scaled + static_cast<float>( dst_style.pad_y_offset );
                     // (width/height remain scaled, offset doesn't change size)
 
                     // Recalculate ratios relative to the destination (padded) dimensions
                     // Avoid division by zero for destination dimensions
-                    float inv_dst_w = 1.0f / dst_style.width;
-                    float inv_dst_h = 1.0f / dst_style.height;
+                    float inv_dst_w = 1.0f / static_cast<float>( dst_style.width );
+                    float inv_dst_h = 1.0f / static_cast<float>( dst_style.height );
 
                     ratio_ltx_x = px1_padded * inv_dst_w;
                     ratio_ltx_y = py1_padded * inv_dst_h;

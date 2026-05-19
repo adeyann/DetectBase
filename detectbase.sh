@@ -174,64 +174,68 @@ cmd_all() {
 }
 
 # -----------------------------------------------------------------------------
-# audit — 자동화 도구 5종 (cppcheck + clang-tidy + ASan + UBSan + TSan) 실행
-#  - --with-tsan : TSan 추가 (운영 정지 + smoke test 환경 자동 실행)
-#  - 결과: logs/audit_<timestamp>/ (cppcheck.log / clangtidy.log / asan_run.log / tsan_run.log + summary.txt)
-#  - ASan/TSan 실행 시 운영 detectbase_service 가 자동 graceful 정지/재시작됨
+# audit — 정적 + 동적 분석 도구 (5종, 단계별 분리 실행 가능)
+#  도구별 모드 (각 도구만 독립 실행):
+#   ./detectbase.sh audit --only cppcheck    # 정적
+#   ./detectbase.sh audit --only clang-tidy  # 정적
+#   ./detectbase.sh audit --only asan        # 동적 (ASan+UBSan, 운영 정지)
+#   ./detectbase.sh audit --only ubsan       # 동적 (asan 과 동일 빌드, alias)
+#   ./detectbase.sh audit --only tsan        # 동적 (TSan, 운영 정지)
+#  묶음 모드:
+#   ./detectbase.sh audit                    # 전체 (1+2+3+5)
+#   ./detectbase.sh audit --no-tsan          # cppcheck + clang-tidy + asan/ubsan
+#   ./detectbase.sh audit --with-tsan        # = 전체 (backward compat)
+#  결과: logs/audit_<timestamp>/ (실행한 stage 의 *.log + summary.txt)
+#  ASan/TSan 실행 시 운영 detectbase_service 가 자동 graceful 정지/재시작됨
 # -----------------------------------------------------------------------------
-cmd_audit() {
-    local with_tsan=false
-    [[ "$1" == "--with-tsan" ]] && with_tsan=true
 
-    local STAMP="$(date +%Y%m%d_%H%M%S)"
-    local OUT_DIR="${SCRIPT_PATH}/logs/audit_${STAMP}"
-    local ANALYSIS_IMG="detectbase:analysis"
-    local LIBRKNN_HOST="${SCRIPT_PATH}/code/Engine/NPU/librknn_api/aarch64/librknnrt.so"
-    local FRAME_HOST="${IMAGE_ROOT_PATH:-/hdd_ext/images}/frame"
-    local CROP_HOST="${IMAGE_ROOT_PATH:-/hdd_ext/images}/crop"
+# 공통 변수 setter — 모든 stage 가 공유. cmd_audit 가 호출 전 set.
+_audit_set_paths() {
+    AUDIT_ANALYSIS_IMG="detectbase:analysis"
+    AUDIT_LIBRKNN_HOST="${SCRIPT_PATH}/code/Engine/NPU/librknn_api/aarch64/librknnrt.so"
+    AUDIT_FRAME_HOST="${IMAGE_ROOT_PATH:-/hdd_ext/images}/frame"
+    AUDIT_CROP_HOST="${IMAGE_ROOT_PATH:-/hdd_ext/images}/crop"
+}
 
-    log_info "DetectBase 자동화 audit 시작 (5종 도구)"
-    log_info "  도구: cppcheck + clang-tidy + ASan + UBSan$( ${with_tsan} && echo ' + TSan' )"
-    log_info "  결과: ${OUT_DIR}"
-    mkdir -p "${OUT_DIR}"
-
-    # 1. 분석 이미지 확인 (없으면 빌드)
-    if ! docker image inspect "${ANALYSIS_IMG}" >/dev/null 2>&1; then
-        log_info "분석 이미지 ${ANALYSIS_IMG} 빌드 중..."
-        docker build -f "${SCRIPT_PATH}/Dockerfile.analysis" -t "${ANALYSIS_IMG}" "${SCRIPT_PATH}"
+# 분석 image 존재 확인 + 없으면 build
+_audit_ensure_analysis_image() {
+    if ! docker image inspect "${AUDIT_ANALYSIS_IMG}" >/dev/null 2>&1; then
+        log_info "분석 이미지 ${AUDIT_ANALYSIS_IMG} 빌드 중..."
+        docker build -f "${SCRIPT_PATH}/Dockerfile.analysis" -t "${AUDIT_ANALYSIS_IMG}" "${SCRIPT_PATH}"
     fi
+}
 
-    # ── [1/4] cppcheck ─────────────────────────────────────────────────────────
-    log_info "[1/4] cppcheck (자체 코드, 외부 RTSP 제외)..."
+# stage 1: cppcheck
+_audit_run_cppcheck() {
+    local OUT_DIR="$1"
+    log_info "[cppcheck] 자체 코드 정적 분석 (외부 RTSP 제외)..."
     docker run --rm \
         -v "${SCRIPT_PATH}/code:/code:ro" \
-        "${ANALYSIS_IMG}" \
+        "${AUDIT_ANALYSIS_IMG}" \
         bash -c 'cppcheck --enable=warning,style,performance,portability \
             --suppress=missingIncludeSystem --inline-suppr --std=c++17 \
             --error-exitcode=0 -j 4 \
             /code/Main /code/Engine /code/Management /code/BasicLibs \
             /code/AbnormalActions /code/Tracker /code/VisionCommon /code/Protocol/GRPC 2>&1' \
         > "${OUT_DIR}/cppcheck.log"
-    local CPPCHECK_COUNT
     CPPCHECK_COUNT=$(grep -cE "^/code/" "${OUT_DIR}/cppcheck.log" 2>/dev/null || echo 0)
-    log_done "cppcheck: 자체 코드 ${CPPCHECK_COUNT}건 → cppcheck.log"
+    log_done "[cppcheck] 자체 코드 ${CPPCHECK_COUNT}건 → cppcheck.log"
+}
 
-    # ── [2/4] clang-tidy ───────────────────────────────────────────────────────
-    log_info "[2/4] clang-tidy (자체 cmake configure → 100% file 분석)..."
+# stage 2: clang-tidy
+_audit_run_clangtidy() {
+    local OUT_DIR="$1"
+    log_info "[clang-tidy] 자체 cmake configure → 100% file 분석..."
     docker run --rm \
         -v "${SCRIPT_PATH}/code:/work/code:ro" \
-        "${ANALYSIS_IMG}" \
+        "${AUDIT_ANALYSIS_IMG}" \
         bash -c '
             set -e
-            # 자체 build 디렉토리 만들어서 fresh compile_commands.json 생성 (path 일치 보장).
-            # cmake configure 만 (빌드 안 함, ~5-10s).
             rsync -a --delete /work/code/ /tmp/src/
             mkdir -p /tmp/tidy-build && cd /tmp/tidy-build
             cmake /tmp/src \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_EXPORT_COMPILE_COMMANDS=ON >/dev/null 2>&1
-
-            # 자체 코드 .cpp 파일 추출 (RTSP 외부 제외)
             FILES=$(grep -oE "\"file\":[[:space:]]*\"/tmp/src/(Main|Engine|Management|BasicLibs|AbnormalActions|Tracker|VisionCommon|Protocol/GRPC)/[^\"]*\.cpp\"" \
                 /tmp/tidy-build/compile_commands.json | grep -oE "/tmp/src/[^\"]*\.cpp" | sort -u)
             echo "분석 대상 파일: $(echo "$FILES" | wc -l)"
@@ -243,19 +247,22 @@ cmd_audit() {
                     "$f" 2>/dev/null
             done
         ' > "${OUT_DIR}/clangtidy.log" 2>&1
-    local TIDY_WARN TIDY_ERR
     TIDY_WARN=$(grep -cE "warning:" "${OUT_DIR}/clangtidy.log" 2>/dev/null || echo 0)
     TIDY_ERR=$(grep -cE "clang-diagnostic-error" "${OUT_DIR}/clangtidy.log" 2>/dev/null || echo 0)
-    log_done "clang-tidy: warning ${TIDY_WARN}건, diagnostic-error ${TIDY_ERR}건 → clangtidy.log"
+    log_done "[clang-tidy] warning ${TIDY_WARN}건, diagnostic-error ${TIDY_ERR}건 → clangtidy.log"
+}
 
-    # ── [3/4] ASan + UBSan ─────────────────────────────────────────────────────
-    log_info "[3/4] ASan + UBSan 빌드 + 실행 (~5-10분 + 운영 90초 정지)..."
-    log_warn "  → 운영 컨테이너 ${CONTAINER_NAME} 가 graceful 정지됩니다 (audit 후 자동 재시작)"
+# stage 3: asan + ubsan (한 빌드, 같이 실행)
+_audit_run_asan_ubsan() {
+    local OUT_DIR="$1"
+    local STAMP="$2"
+    log_info "[asan/ubsan] 빌드 + 실행 (운영 정지 동반)..."
+    log_warn "  → 운영 컨테이너 ${CONTAINER_NAME} 가 graceful 정지됩니다 (stage 후 자동 재시작)"
     mkdir -p "${OUT_DIR}/asan_pkg"
     docker run --rm \
         -v "${SCRIPT_PATH}/code:/work/code:ro" \
         -v "${OUT_DIR}/asan_pkg:/work/out:rw" \
-        "${ANALYSIS_IMG}" \
+        "${AUDIT_ANALYSIS_IMG}" \
         bash -c '
             set -e
             mkdir -p /tmp/asan && cd /tmp/asan
@@ -272,106 +279,196 @@ cmd_audit() {
         ' > "${OUT_DIR}/asan_build.log" 2>&1
 
     if [[ -x "${OUT_DIR}/asan_pkg/DetectBase" ]]; then
-        log_info "  ASan binary 빌드 완료. 운영 정지 + 90초 실행..."
+        # ASan run duration. ASAN_DURATION_MIN env var override (default 240 min = 4h).
+        # SIGUSR1 시점: T+5min, T+15min, T+30min, T+60min, T+120min, T+240min (interval mid-run leak check)
+        local ASAN_DURATION_MIN="${ASAN_DURATION_MIN:-240}"
+        local ASAN_DURATION_SEC=$(( ASAN_DURATION_MIN * 60 ))
+        log_info "  ASan binary OK. 운영 정지 + ${ASAN_DURATION_MIN}분 실행 (interval SIGUSR1 leak check)..."
         docker-compose -f "${DOCKER_COMPOSE_FILE}" stop >/dev/null 2>&1
+
+        (
+            for t_sec in 300 900 1800 3600 7200; do
+                if [[ $t_sec -ge $ASAN_DURATION_SEC ]]; then break; fi
+                sleep $t_sec
+                docker exec detectbase_asan sh -c 'kill -USR1 1' 2>/dev/null \
+                    && echo "===== SIGUSR1 sent at t+${t_sec}s =====" >> "${OUT_DIR}/asan_run.log" \
+                    || echo "SIGUSR1 send failed at t+${t_sec}s" >> "${OUT_DIR}/asan_run.log"
+            done
+        ) &
+        local SIGUSR1_BG_PID=$!
 
         docker run --rm --name detectbase_asan \
             --privileged --network host \
             --device /dev/dri/renderD129:/dev/dri/renderD129 \
             -v "${SCRIPT_PATH}":/DetectBase:rw \
-            -v "${LIBRKNN_HOST}":/usr/local/lib/librknnrt.so:ro \
+            -v "${AUDIT_LIBRKNN_HOST}":/usr/local/lib/librknnrt.so:ro \
             -v /etc/localtime:/etc/localtime:ro \
-            -v "${FRAME_HOST}":/frame:rw \
-            -v "${CROP_HOST}":/crop:rw \
+            -v "${AUDIT_FRAME_HOST}":/frame:rw \
+            -v "${AUDIT_CROP_HOST}":/crop:rw \
             -e ASAN_OPTIONS="halt_on_error=0:print_stats=1:detect_leaks=1:malloc_context_size=20" \
             -e UBSAN_OPTIONS="halt_on_error=0:print_stacktrace=1" \
             -e LD_LIBRARY_PATH="/DetectBase/logs/audit_${STAMP}/asan_pkg:/usr/local/lib" \
             -e TZ=Asia/Seoul --shm-size=512m \
-            "${ANALYSIS_IMG}" \
-            timeout --signal=SIGINT 90s "/DetectBase/logs/audit_${STAMP}/asan_pkg/DetectBase" \
-            > "${OUT_DIR}/asan_run.log" 2>&1 || true
+            "${AUDIT_ANALYSIS_IMG}" \
+            timeout --signal=SIGINT "${ASAN_DURATION_SEC}s" "/DetectBase/logs/audit_${STAMP}/asan_pkg/DetectBase" \
+            >> "${OUT_DIR}/asan_run.log" 2>&1 || true
+
+        kill "$SIGUSR1_BG_PID" 2>/dev/null || true
 
         log_info "  운영 재시작..."
         docker-compose -f "${DOCKER_COMPOSE_FILE}" up -d >/dev/null 2>&1
     else
         log_error "  ASan binary 빌드 실패 → asan_build.log 참조"
     fi
-    local ASAN_LEAK
     ASAN_LEAK=$(grep -m1 "SUMMARY: AddressSanitizer" "${OUT_DIR}/asan_run.log" 2>/dev/null || echo "(no leak)")
-    log_done "ASan/UBSan: ${ASAN_LEAK}"
+    log_done "[asan/ubsan] ${ASAN_LEAK}"
+}
 
-    # ── [4/4] TSan (옵션) ──────────────────────────────────────────────────────
-    if ${with_tsan}; then
-        log_info "[4/4] TSan 빌드 + 실행 (~5-10분 + 운영 30초 정지)..."
-        log_warn "  → TSan 100x 느림. 정상 운영 환경에서 packet drop hang 발생 정상 (race report 는 stderr 즉시 출력)"
-        log_warn "  → 깊이 검증 시: NetworkSettings.json 의 카메라 1대 + fps_limit 1~2 로 임시 변경 권고 (.DOCS/REVIEW3/AUTOMATED_AUDIT.md §5.4 참조)"
-        mkdir -p "${OUT_DIR}/tsan_pkg"
-        docker run --rm \
-            -v "${SCRIPT_PATH}/code:/work/code:ro" \
-            -v "${OUT_DIR}/tsan_pkg:/work/out:rw" \
-            "${ANALYSIS_IMG}" \
-            bash -c '
-                set -e
-                mkdir -p /tmp/tsan && cd /tmp/tsan
-                rsync -a --delete /work/code/ /tmp/src/
-                cmake /tmp/src \
-                    -DCMAKE_BUILD_TYPE=Debug \
-                    -DCMAKE_CXX_FLAGS="-fsanitize=thread -fno-omit-frame-pointer -fPIE" \
-                    -DCMAKE_C_FLAGS="-fsanitize=thread -fno-omit-frame-pointer -fPIE" \
-                    -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread -pie" \
-                    -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=thread" >/dev/null 2>&1
-                make -j$(nproc) >/dev/null 2>&1
-                cp /tmp/tsan/Main/DetectBase /work/out/
-                find /tmp/tsan -name "*.so" -exec cp {} /work/out/ \;
-            ' > "${OUT_DIR}/tsan_build.log" 2>&1
+# stage 4: tsan
+_audit_run_tsan() {
+    local OUT_DIR="$1"
+    local STAMP="$2"
+    local TSAN_DURATION_SEC="${TSAN_DURATION_SEC:-300}"
+    log_info "[tsan] 빌드 + 실행 (~5-10분 + 운영 ${TSAN_DURATION_SEC}s 정지)..."
+    log_warn "  → TSan 100x 느림. race report 는 stderr 즉시 출력 (timeout 후 SIGKILL)"
+    log_warn "  → 깊이 검증 시 SettingData.cpp 의 __SANITIZE_THREAD__ guard 로 fps=1 강제 적용됨"
+    mkdir -p "${OUT_DIR}/tsan_pkg"
+    docker run --rm \
+        -v "${SCRIPT_PATH}/code:/work/code:ro" \
+        -v "${OUT_DIR}/tsan_pkg:/work/out:rw" \
+        "${AUDIT_ANALYSIS_IMG}" \
+        bash -c '
+            set -e
+            mkdir -p /tmp/tsan && cd /tmp/tsan
+            rsync -a --delete /work/code/ /tmp/src/
+            cmake /tmp/src \
+                -DCMAKE_BUILD_TYPE=Debug \
+                -DCMAKE_CXX_FLAGS="-fsanitize=thread -fno-omit-frame-pointer -fPIE" \
+                -DCMAKE_C_FLAGS="-fsanitize=thread -fno-omit-frame-pointer -fPIE" \
+                -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread -pie" \
+                -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=thread" >/dev/null 2>&1
+            make -j$(nproc) >/dev/null 2>&1
+            cp /tmp/tsan/Main/DetectBase /work/out/
+            find /tmp/tsan -name "*.so" -exec cp {} /work/out/ \;
+        ' > "${OUT_DIR}/tsan_build.log" 2>&1
 
-        if [[ -x "${OUT_DIR}/tsan_pkg/DetectBase" ]]; then
-            log_info "  TSan binary 빌드 완료. 운영 정지 + 30초 실행 + SIGKILL..."
-            docker-compose -f "${DOCKER_COMPOSE_FILE}" stop >/dev/null 2>&1
+    if [[ -x "${OUT_DIR}/tsan_pkg/DetectBase" ]]; then
+        log_info "  TSan binary OK. 운영 정지 + ${TSAN_DURATION_SEC}s 실행 + SIGKILL..."
+        docker-compose -f "${DOCKER_COMPOSE_FILE}" stop >/dev/null 2>&1
 
-            docker run --rm --name detectbase_tsan \
-                --privileged --network host \
-                --device /dev/dri/renderD129:/dev/dri/renderD129 \
-                -v "${SCRIPT_PATH}":/DetectBase:rw \
-                -v "${LIBRKNN_HOST}":/usr/local/lib/librknnrt.so:ro \
-                -v /etc/localtime:/etc/localtime:ro \
-                -v "${FRAME_HOST}":/frame:rw \
-                -v "${CROP_HOST}":/crop:rw \
-                -e TSAN_OPTIONS="halt_on_error=0:second_deadlock_stack=1:history_size=4" \
-                -e LD_LIBRARY_PATH="/DetectBase/logs/audit_${STAMP}/tsan_pkg:/usr/local/lib" \
-                -e TZ=Asia/Seoul --shm-size=512m \
-                "${ANALYSIS_IMG}" \
-                timeout --signal=SIGKILL 30s "/DetectBase/logs/audit_${STAMP}/tsan_pkg/DetectBase" \
-                > "${OUT_DIR}/tsan_run.log" 2>&1 || true
+        docker run --rm --name detectbase_tsan \
+            --privileged --network host \
+            --device /dev/dri/renderD129:/dev/dri/renderD129 \
+            -v "${SCRIPT_PATH}":/DetectBase:rw \
+            -v "${AUDIT_LIBRKNN_HOST}":/usr/local/lib/librknnrt.so:ro \
+            -v /etc/localtime:/etc/localtime:ro \
+            -v "${AUDIT_FRAME_HOST}":/frame:rw \
+            -v "${AUDIT_CROP_HOST}":/crop:rw \
+            -e TSAN_OPTIONS="halt_on_error=0:second_deadlock_stack=1:history_size=4" \
+            -e LD_LIBRARY_PATH="/DetectBase/logs/audit_${STAMP}/tsan_pkg:/usr/local/lib" \
+            -e TZ=Asia/Seoul --shm-size=512m \
+            "${AUDIT_ANALYSIS_IMG}" \
+            timeout --signal=SIGKILL "${TSAN_DURATION_SEC}s" "/DetectBase/logs/audit_${STAMP}/tsan_pkg/DetectBase" \
+            > "${OUT_DIR}/tsan_run.log" 2>&1 || true
 
-            log_info "  운영 재시작..."
-            docker-compose -f "${DOCKER_COMPOSE_FILE}" up -d >/dev/null 2>&1
-        else
-            log_error "  TSan binary 빌드 실패 → tsan_build.log 참조"
-        fi
-        local TSAN_WARN
-        TSAN_WARN=$(grep -cE "WARNING: ThreadSanitizer" "${OUT_DIR}/tsan_run.log" 2>/dev/null || echo 0)
-        log_done "TSan: WARNING ${TSAN_WARN}건"
+        log_info "  운영 재시작..."
+        docker-compose -f "${DOCKER_COMPOSE_FILE}" up -d >/dev/null 2>&1
+    else
+        log_error "  TSan binary 빌드 실패 → tsan_build.log 참조"
     fi
+    TSAN_WARN=$(grep -cE "WARNING: ThreadSanitizer" "${OUT_DIR}/tsan_run.log" 2>/dev/null || echo 0)
+    log_done "[tsan] WARNING ${TSAN_WARN}건"
+}
 
-    # ── summary ────────────────────────────────────────────────────────────────
+# summary writer — 실행된 stage 만 표시
+_audit_write_summary() {
+    local OUT_DIR="$1"
+    local STAGES="$2"   # space-separated: "cppcheck clangtidy asan tsan"
     {
         echo "===== Audit Summary $(date '+%Y-%m-%d %H:%M:%S KST') ====="
         echo "결과 위치: ${OUT_DIR}"
+        echo "실행 stage: ${STAGES}"
         echo
-        echo "[1] cppcheck (자체 코드 결함):                ${CPPCHECK_COUNT:-?}"
-        echo "[2] clang-tidy (warning):                     ${TIDY_WARN:-?}"
-        echo "[3] ASan/UBSan:                               ${ASAN_LEAK:-?}"
-        if ${with_tsan}; then
-            echo "[4] TSan (WARNING):                       ${TSAN_WARN:-?}"
-        else
-            echo "[4] TSan:                                 (--with-tsan 옵션으로 추가 가능)"
-        fi
+        [[ " ${STAGES} " == *" cppcheck "*  ]] && echo "[cppcheck]   자체 코드 결함: ${CPPCHECK_COUNT:-?}"
+        [[ " ${STAGES} " == *" clangtidy "* ]] && echo "[clang-tidy] warning:        ${TIDY_WARN:-?}"
+        [[ " ${STAGES} " == *" asan "*      ]] && echo "[asan/ubsan] ${ASAN_LEAK:-?}"
+        [[ " ${STAGES} " == *" tsan "*      ]] && echo "[tsan]       WARNING:        ${TSAN_WARN:-?}"
         echo
         echo "각 raw log 는 ${OUT_DIR}/ 안 *.log 참조"
     } | tee "${OUT_DIR}/summary.txt"
+}
 
-    log_done "Audit 완료"
+# CLI dispatch
+cmd_audit() {
+    local mode="all"   # all | no-tsan | only
+    local only_tool=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --with-tsan) mode="all" ;;          # backward compat
+            --no-tsan)   mode="no-tsan" ;;
+            --only)
+                mode="only"
+                only_tool="$2"
+                shift
+                ;;
+            *)
+                log_error "Unknown audit option: $1"
+                log_info  "Usage: ./detectbase.sh audit [--with-tsan|--no-tsan|--only <cppcheck|clang-tidy|asan|ubsan|tsan>]"
+                return 1
+                ;;
+        esac
+        shift
+    done
+
+    local STAMP="$(date +%Y%m%d_%H%M%S)"
+    local OUT_DIR="${SCRIPT_PATH}/logs/audit_${STAMP}"
+    mkdir -p "${OUT_DIR}"
+
+    _audit_set_paths
+    _audit_ensure_analysis_image
+
+    log_info "DetectBase audit 시작 — mode=${mode}${only_tool:+ tool=${only_tool}}"
+    log_info "  결과: ${OUT_DIR}"
+
+    local STAGES_DONE=""
+    case "${mode}" in
+        all)
+            _audit_run_cppcheck    "${OUT_DIR}";          STAGES_DONE+="cppcheck "
+            _audit_run_clangtidy   "${OUT_DIR}";          STAGES_DONE+="clangtidy "
+            _audit_run_asan_ubsan  "${OUT_DIR}" "${STAMP}"; STAGES_DONE+="asan "
+            _audit_run_tsan        "${OUT_DIR}" "${STAMP}"; STAGES_DONE+="tsan "
+            ;;
+        no-tsan)
+            _audit_run_cppcheck    "${OUT_DIR}";          STAGES_DONE+="cppcheck "
+            _audit_run_clangtidy   "${OUT_DIR}";          STAGES_DONE+="clangtidy "
+            _audit_run_asan_ubsan  "${OUT_DIR}" "${STAMP}"; STAGES_DONE+="asan "
+            ;;
+        only)
+            case "${only_tool}" in
+                cppcheck)
+                    _audit_run_cppcheck "${OUT_DIR}"; STAGES_DONE="cppcheck "
+                    ;;
+                clang-tidy|clangtidy)
+                    _audit_run_clangtidy "${OUT_DIR}"; STAGES_DONE="clangtidy "
+                    ;;
+                asan|ubsan)
+                    # asan/ubsan 은 같은 빌드 (alias)
+                    _audit_run_asan_ubsan "${OUT_DIR}" "${STAMP}"; STAGES_DONE="asan "
+                    ;;
+                tsan)
+                    _audit_run_tsan "${OUT_DIR}" "${STAMP}"; STAGES_DONE="tsan "
+                    ;;
+                *)
+                    log_error "Unknown --only tool: ${only_tool} (cppcheck|clang-tidy|asan|ubsan|tsan)"
+                    return 1
+                    ;;
+            esac
+            ;;
+    esac
+
+    _audit_write_summary "${OUT_DIR}" "${STAGES_DONE}"
+    log_done "Audit 완료 — ${OUT_DIR}"
 }
 
 cmd_help() {
@@ -390,8 +487,14 @@ DetectBase 서비스 통합 관리 스크립트
   logs      서비스 로그 follow (docker logs -f)
   prune     사용 안 하는 도커 리소스 정리 (docker system prune -a, 확인 프롬프트)
   all       build + init + compile + start (전체 파이프라인)
-  audit     자동화 audit (cppcheck + clang-tidy + ASan + UBSan, 운영 90초 정지)
-            --with-tsan 옵션 추가 시 TSan 도 실행 (운영 30초 정지)
+  audit     정적/동적 분석 도구 (cppcheck + clang-tidy + ASan/UBSan + TSan).
+            기본 = 전체 실행. 옵션으로 부분 실행 가능:
+              --no-tsan                cppcheck + clang-tidy + ASan/UBSan (TSan 제외)
+              --with-tsan              = 전체 (backward compat)
+              --only cppcheck          cppcheck 만 (정적)
+              --only clang-tidy        clang-tidy 만 (정적)
+              --only asan|ubsan        ASan+UBSan 만 (동적, 운영 정지)
+              --only tsan              TSan 만 (동적, 운영 정지)
             결과: logs/audit_<timestamp>/
   help      이 도움말 출력
 
@@ -427,7 +530,7 @@ case "$1" in
     logs)     cmd_logs ;;
     prune)    cmd_prune ;;
     all)      cmd_all ;;
-    audit)    cmd_audit "$2" ;;
+    audit)    shift; cmd_audit "$@" ;;
     help|"")  cmd_help ;;
     *)
         log_error "알 수 없는 명령: $1"

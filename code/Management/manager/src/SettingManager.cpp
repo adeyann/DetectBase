@@ -213,9 +213,6 @@ namespace MGEN
         if( initialization_succeeded.load() == true )
             return true;
 
-        // Local variable to capture success within the lambda for *this specific call*
-        bool current_call_success = false;
-
         std::string error_message {}; // Capture error message
         error_message.reserve(64);
 
@@ -225,6 +222,9 @@ namespace MGEN
             // double-check: 다른 thread 가 락 획득 직전 init 완료했을 가능성
             if( initialization_succeeded.load() == true )
                 return true;
+
+            // Local variable to capture success within the lambda for *this specific call*
+            bool current_call_success = false;
 
             if( init_data.service_tag == std::string { EntireServiceTag::DETECTOR } )
             {

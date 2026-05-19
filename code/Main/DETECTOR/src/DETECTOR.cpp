@@ -493,7 +493,7 @@ namespace MGEN
         return false;
     }
 
-    static std::string GetAPICommandFromJson( const nlohmann::json& json, std::string target_url = std::string { "" } )
+    static std::string GetAPICommandFromJson( const nlohmann::json& json, const std::string& target_url = std::string { "" } )
     {
         /* [INPUT] ----------------------------------------------------
         * {
@@ -633,7 +633,7 @@ namespace MGEN
                 },
                 // 요청 정보를 담은 JSON를 이용해서 실제 URL을 만들어 반환하는 람다식
                 []( const nlohmann::json& json ){
-                    const std::string url = GetAPICommandFromJson( json );
+                    std::string url = GetAPICommandFromJson( json );
                     MLOG_INFO("ExceptionUpdate::GetAPICommandFromJson() => %s", url.c_str() );
                     return url;
                 }
@@ -644,7 +644,7 @@ namespace MGEN
             // SIO를 통해서 받은 요청 정보를 담은 JSON에서 UnitID 추출
             // 해당 unit에 해당하는 SettingData 들을 Update() 할 예정
             [] ( const nlohmann::json& json ){
-                const auto units = ExtractUnitFromJson( json, "camera_id" );
+                auto units = ExtractUnitFromJson( json, "camera_id" );
                 MLOG_INFO("ExceptionUpdate::ExtractUnitFromJson( camera_id ):");
                 for( const auto unit : units ) {
                     MLOG_INFO("  * %d", unit);
@@ -683,7 +683,7 @@ namespace MGEN
                 },
                 // 요청 정보를 담은 JSON를 이용해서 실제 URL을 만들어 반환하는 람다식
                 []( const nlohmann::json& json ){
-                    const std::string url = GetAPICommandFromJson( json );
+                    std::string url = GetAPICommandFromJson( json );
                     MLOG_INFO("ScheduleUpdate::GetAPICommandFromJson() => %s", url.c_str() );
                     return url;
                 }
@@ -694,7 +694,7 @@ namespace MGEN
             // SIO를 통해서 받은 요청 정보를 담은 JSON에서 UnitID 추출
             // 해당 unit에 해당하는 SettingData 들을 Update() 할 예정
             [] ( const nlohmann::json& json ){
-                const auto units = ExtractUnitFromJson( json, "camera_id" );
+                auto units = ExtractUnitFromJson( json, "camera_id" );
                 MLOG_INFO("ScheduleUpdate::ExtractUnitFromJson( camera_id ):");
                 for( const auto unit : units ) {
                     MLOG_INFO("  * %d", unit);

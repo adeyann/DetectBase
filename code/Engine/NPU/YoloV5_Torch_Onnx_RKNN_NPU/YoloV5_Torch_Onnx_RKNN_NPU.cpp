@@ -37,18 +37,18 @@ namespace MGEN
         return true;
     }
 
-    cv::Rect YoloV5_Torch_Onnx_RKNN_NPU::GetRect( cv::Mat& img, float bbox[4] )
+    cv::Rect YoloV5_Torch_Onnx_RKNN_NPU::GetRect( const cv::Mat& img, float bbox[4] )
     {
         float l, r, t, b;
-        float r_w = YOLOV5_RKNN::INPUT_W / (img.cols * 1.0);
-        float r_h = YOLOV5_RKNN::INPUT_H / (img.rows * 1.0);
+        float r_w = YOLOV5_RKNN::INPUT_W / ( static_cast<float>( img.cols ) * 1.0f );
+        float r_h = YOLOV5_RKNN::INPUT_H / ( static_cast<float>( img.rows ) * 1.0f );
 
         if( r_h > r_w )
         {
             l = bbox[0] - bbox[2] / 2.f;
             r = bbox[0] + bbox[2] / 2.f;
-            t = bbox[1] - bbox[3] / 2.f - (YOLOV5_RKNN::INPUT_H - r_w * img.rows) / 2;
-            b = bbox[1] + bbox[3] / 2.f - (YOLOV5_RKNN::INPUT_H - r_w * img.rows) / 2;
+            t = bbox[1] - bbox[3] / 2.f - (YOLOV5_RKNN::INPUT_H - r_w * img.rows) / 2.0f;
+            b = bbox[1] + bbox[3] / 2.f - (YOLOV5_RKNN::INPUT_H - r_w * img.rows) / 2.0f;
             l = l / r_w;
             r = r / r_w;
             t = t / r_w;
@@ -56,8 +56,8 @@ namespace MGEN
         }
         else
         {
-            l = bbox[0] - bbox[2] / 2.f - (YOLOV5_RKNN::INPUT_W - r_h * img.cols) / 2;
-            r = bbox[0] + bbox[2] / 2.f - (YOLOV5_RKNN::INPUT_W - r_h * img.cols) / 2;
+            l = bbox[0] - bbox[2] / 2.f - (YOLOV5_RKNN::INPUT_W - r_h * img.cols) / 2.0f;
+            r = bbox[0] + bbox[2] / 2.f - (YOLOV5_RKNN::INPUT_W - r_h * img.cols) / 2.0f;
             t = bbox[1] - bbox[3] / 2.f;
             b = bbox[1] + bbox[3] / 2.f;
             l = l / r_h;
@@ -66,7 +66,7 @@ namespace MGEN
             b = b / r_h;
         }
 
-        return cv::Rect(round(l), round(t), round(r - l), round(b - t));
+        return cv::Rect( static_cast<int>( round(l) ), static_cast<int>( round(t) ), static_cast<int>( round(r - l) ), static_cast<int>( round(b - t) ) );
     }
 
     static const float CalculateOverlap( float xmin0, float ymin0, float xmax0, float ymax0, float xmin1, float ymin1, float xmax1, float ymax1 )
@@ -78,7 +78,7 @@ namespace MGEN
         return u <= 0.f ? 0.f : (i / u);
     }
 
-    static const int nms( int validCount, std::vector<float>& outputLocations, const std::vector<int>& classIds, std::vector<int>& order, int filterId, float threshold )
+    static const int nms( int validCount, const std::vector<float>& outputLocations, const std::vector<int>& classIds, std::vector<int>& order, int filterId, float threshold )
     {
         for( int i = 0; i < validCount; ++i )
         {
@@ -164,7 +164,7 @@ namespace MGEN
     */
     static int8_t qnt_f32_to_affine( float f32, int32_t zp, float scale )
     {
-        float  dst_val = ( f32 / scale ) + zp;
+        float  dst_val = ( f32 / scale ) + static_cast<float>( zp );
         int8_t res = static_cast<int8_t>( clip_value( dst_val, -128.0f, 127.0f ) );
         return res;
     }
@@ -197,29 +197,32 @@ namespace MGEN
             {
                 for( int j = 0; j < grid_w; j++ )
                 {
-                    int8_t box_confidence = input[ (base_offset * a + 4) * grid_len + i * grid_w + j ];
+                    // bugprone-implicit-widening: int*int 결과를 ptrdiff_t/size_t 로 widening 전 명시 cast.
+                    // 큰 grid_len (예: 1280x1280 input) 환경 대비 방어. 현재 640x640 에서 overflow X.
+                    const size_t grid_len_sz = static_cast<size_t>( grid_len );
+                    int8_t box_confidence = input[ (static_cast<size_t>(base_offset) * a + 4) * grid_len_sz + static_cast<size_t>(i) * grid_w + j ];
 
                     if( box_confidence >= thres_i8 )
                     {
-                        int     offset = ( base_offset * a ) * grid_len + i * grid_w + j;
+                        size_t  offset = ( static_cast<size_t>(base_offset) * a ) * grid_len_sz + static_cast<size_t>(i) * grid_w + j;
                         int8_t* in_ptr = input + offset;
 
-                        float box_x = (deqnt_affine_to_f32( *in_ptr,              zp, scale )) * 2.0 - 0.5;
-                        float box_y = (deqnt_affine_to_f32( in_ptr[grid_len],     zp, scale )) * 2.0 - 0.5;
-                        float box_w = (deqnt_affine_to_f32( in_ptr[2 * grid_len], zp, scale )) * 2.0;
-                        float box_h = (deqnt_affine_to_f32( in_ptr[3 * grid_len], zp, scale )) * 2.0;
+                        float box_x = (deqnt_affine_to_f32( *in_ptr,                          zp, scale )) * 2.0f - 0.5f;
+                        float box_y = (deqnt_affine_to_f32( in_ptr[grid_len_sz],              zp, scale )) * 2.0f - 0.5f;
+                        float box_w = (deqnt_affine_to_f32( in_ptr[2 * grid_len_sz],          zp, scale )) * 2.0f;
+                        float box_h = (deqnt_affine_to_f32( in_ptr[3 * grid_len_sz],          zp, scale )) * 2.0f;
 
-                        box_x = (box_x + j) * static_cast<float>( stride );
-                        box_y = (box_y + i) * static_cast<float>( stride );
-                        box_w = box_w * box_w * static_cast<float>( anchor[a * 2] );
-                        box_h = box_h * box_h * static_cast<float>( anchor[a * 2 + 1] );
+                        box_x = (box_x + static_cast<float>( j )) * static_cast<float>( stride );
+                        box_y = (box_y + static_cast<float>( i )) * static_cast<float>( stride );
+                        box_w = box_w * box_w * static_cast<float>( anchor[static_cast<size_t>(a) * 2] );
+                        box_h = box_h * box_h * static_cast<float>( anchor[static_cast<size_t>(a) * 2 + 1] );
 
-                        box_x -= (box_w / 2.0);
-                        box_y -= (box_h / 2.0);
+                        box_x -= (box_w / 2.0f);
+                        box_y -= (box_h / 2.0f);
 
                         // k=0 은 maxClassProbs / maxClassId 의 초깃값과 동일 → 자기 비교 redundant.
                         // k=1 부터 비교.
-                        int8_t maxClassProbs = in_ptr[5 * grid_len];
+                        int8_t maxClassProbs = in_ptr[5 * grid_len_sz];
                         int    maxClassId    = 0;
 
                         for( size_t k = 1; k < class_num; ++k )
@@ -302,6 +305,7 @@ namespace MGEN
         }
 
         std::vector<int> indexArray;
+        indexArray.reserve( static_cast<size_t>( validCount ) );
         for( int i = 0; i < validCount; ++i ) {
             indexArray.push_back(i);
         }
@@ -506,15 +510,15 @@ namespace MGEN
             input.fmt          = rknn_app_ctx_.input_attrs[i].fmt;
             input.pass_through = 0;
 
-            // push back first
-            rknn_inputs_.push_back( std::move( input ) );
+            // push back first (rknn_input 은 trivially-copyable POD → copy)
+            rknn_inputs_.push_back( input );
 
             const size_t curr_idx = rknn_inputs_.size() - 1;
 
             // alloc memory
             rknn_input& target_input = rknn_inputs_[curr_idx];
 
-            target_input.buf = malloc( input.size );
+            target_input.buf = malloc( target_input.size );
 
             if( target_input.buf == nullptr ){
                 MLOG_ERROR("RKNN Input<%d> set error, memory alloc failed", i);
@@ -568,7 +572,8 @@ namespace MGEN
         // 각 픽셀 (3바이트)을 순회하며 Blue와 Red 채널을 교체합니다.
         for (int i = 0; i < num_pixels; ++i) {
             // i번째 픽셀의 시작 주소
-            unsigned char* pixel_ptr = data + i * 3;
+            // bugprone-implicit-widening: i * 3 (int*int) → ptrdiff_t. 큰 image 대비 방어.
+            unsigned char* pixel_ptr = data + static_cast<size_t>(i) * 3;
 
             // pixel_ptr[0] (Blue)와 pixel_ptr[2] (Red)를 교환합니다.
             std::swap(pixel_ptr[0], pixel_ptr[2]);
@@ -593,7 +598,7 @@ namespace MGEN
 
         bgrToRgbInPlace( input.image_data->data(), static_cast<int>(rknn_model_w), static_cast<int>(rknn_model_h) );
 
-        rknn_input& target_rknn_input = rknn_inputs_[curr_batch_input_idx];
+        const rknn_input& target_rknn_input = rknn_inputs_[curr_batch_input_idx];
         memset( target_rknn_input.buf, 0, target_rknn_input.size );
         memcpy( target_rknn_input.buf, input.image_data->data(), target_rknn_input.size );
 
@@ -650,14 +655,14 @@ namespace MGEN
                 static_cast<int8_t*>( rknn_outputs_[0].buf ),
                 static_cast<int8_t*>( rknn_outputs_[1].buf ),
                 static_cast<int8_t*>( rknn_outputs_[2].buf ),
-                rknn_model_h, rknn_model_w, out_zps, out_scales, raw_results );
+                static_cast<int>( rknn_model_h ), static_cast<int>( rknn_model_w ), out_zps, out_scales, raw_results );
         }
         else if( output_index_num_ == 2 ){
             PostProcessImplRKNN(
                 static_cast<int8_t*>( rknn_outputs_[0].buf ),
                 static_cast<int8_t*>( rknn_outputs_[1].buf ),
                 nullptr,
-                rknn_model_h, rknn_model_w, out_zps, out_scales, raw_results );
+                static_cast<int>( rknn_model_h ), static_cast<int>( rknn_model_w ), out_zps, out_scales, raw_results );
         }
         else {
             MLOG_ERROR("output_index_num_ = %d, PostProcessImplRKNN not in case", output_index_num_);
@@ -683,7 +688,7 @@ namespace MGEN
                 infer_object.xy_ref_type     = BBoxReferenceType::ltx_type;
                 infer_object.coord_format    = BBoxCoordinateFormat::pixel_int;
                 infer_object.score           = raw_result.conf;
-                infer_object.class_id        = raw_result.class_id;
+                infer_object.class_id        = static_cast<MGEN::InferClassID>( raw_result.class_id );
                 infer_object.infer_engine_id = profile_.GetProfileUUID();
                 infer_object.track_id        = INFER_TRACK_ID_NOT_SET;
 

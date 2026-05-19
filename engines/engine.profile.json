@@ -1,5 +1,5 @@
 {
-    "ProfileName": "YoloV5s_Airockchip_RKNN",
+    "ProfileName": "YoloV5_Airockchip_RKNN",
     "ModelMajorType": "Detection",
     "ModelMinorType": "YoloV5",
     "ModelMagicType": "DetectionEngine",

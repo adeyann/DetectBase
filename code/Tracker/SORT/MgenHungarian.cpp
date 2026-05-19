@@ -46,7 +46,7 @@ namespace MGEN
 	}
 
 	MgenHungarianAlgorithm::MgenHungarianAlgorithm( const size_t max_tracking_num )
-		: memory_unit( new HungarianMemoryUnit( max_tracking_num ) )
+		: memory_unit( new HungarianMemoryUnit( static_cast<int>( max_tracking_num ) ) )
 	{
 		//
 	}
@@ -85,7 +85,7 @@ namespace MGEN
 				( memory_unit->dist_matrix_in )[i + nRows * j] = DistMatrix[i][j];
 
 		// call solving function
-		AssignmentOptimal( nRows, nCols );
+		AssignmentOptimal( static_cast<int>( nRows ), static_cast<int>( nCols ) );
 
 		Assignment.clear();
 		// set result : assignment
@@ -172,7 +172,8 @@ namespace MGEN
 
 			for( col = 0; col < nOfColumns; col++ ) {
 				/* find the smallest element in the column */
-				ptrDistMatrixCur = memory_unit->dist_matrix + nOfRows * col;
+				// bugprone-implicit-widening: int*int → ptrdiff_t cast 명시 (큰 matrix 대비 방어).
+				ptrDistMatrixCur = memory_unit->dist_matrix + static_cast<size_t>( nOfRows ) * col;
 				ptrColumnEnd = ptrDistMatrixCur + nOfRows;
 
 				minValue = *ptrDistMatrixCur++;
@@ -183,7 +184,7 @@ namespace MGEN
 				}
 
 				/* subtract the smallest element from each element of the column */
-				ptrDistMatrixCur = memory_unit->dist_matrix + nOfRows * col;
+				ptrDistMatrixCur = memory_unit->dist_matrix + static_cast<size_t>( nOfRows ) * col;
 				while( ptrDistMatrixCur < ptrColumnEnd )
 					*ptrDistMatrixCur++ -= minValue;
 			}
@@ -226,14 +227,13 @@ namespace MGEN
 	/********************************************************/
 	void MgenHungarianAlgorithm::step2a( int* assignment, double* distMatrix, bool* starMatrix, bool* newStarMatrix, bool* primeMatrix, bool* coveredColumns, bool* coveredRows, int nOfRows, int nOfColumns, int minDim )
 	{
-		bool* starMatrixTemp;
-		bool* ptrColumnEnd;
-		int   col;
+		int col;
 
 		/* cover every column containing a starred zero */
 		for( col = 0; col < nOfColumns; col++ ) {
-			starMatrixTemp = starMatrix + nOfRows * col;
-			ptrColumnEnd = starMatrixTemp + nOfRows;
+			// bugprone-implicit-widening: int*int → ptrdiff_t cast 명시.
+			bool* starMatrixTemp = starMatrix + static_cast<size_t>( nOfRows ) * col;
+			const bool* const ptrColumnEnd = starMatrixTemp + nOfRows;
 			while( starMatrixTemp < ptrColumnEnd ) {
 				if( *starMatrixTemp++ ) {
 					coveredColumns[col] = true;
@@ -314,8 +314,6 @@ namespace MGEN
 		int n;
 		int starRow;
 		int starCol;
-		int primeRow;
-		int primeCol;
 		int nOfElements = nOfRows * nOfColumns;
 
 		/* generate temporary copy of starMatrix */
@@ -337,7 +335,8 @@ namespace MGEN
 			newStarMatrix[starRow + nOfRows * starCol] = false;
 
 			/* find primed zero in current row */
-			primeRow = starRow;
+			const int primeRow = starRow;
+			int       primeCol;
 			for( primeCol = 0; primeCol < nOfColumns; primeCol++ )
 				if( primeMatrix[primeRow + nOfRows * primeCol] )
 					break;

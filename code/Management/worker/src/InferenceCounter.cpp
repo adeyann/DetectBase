@@ -38,6 +38,7 @@ namespace MGEN
     {
         const int target_id = unit_id;
 
+        std::lock_guard<std::mutex> lck { this->mutex_ };
         if( this->counters_.find( target_id ) == this->counters_.end() )
             this->counters_[target_id] = 0;
     }
@@ -46,6 +47,7 @@ namespace MGEN
     {
         const int target_id = unit_id;
 
+        std::lock_guard<std::mutex> lck { this->mutex_ };
         if( this->counters_.find( target_id ) != this->counters_.end() )
             this->counters_.erase( target_id );
     }
@@ -54,10 +56,14 @@ namespace MGEN
     {
         const int target_id = unit_id;
 
-        if( this->counters_.find( target_id ) == this->counters_.end() )
+        // TSan: counters_ (unordered_map) 의 rehash/erase 가 Regist/Unregist 와 race.
+        // mutex 로 보호. AddCount 호출 빈도 ~120/s (frame×engines) 라 lock contention 무시 가능.
+        std::lock_guard<std::mutex> lck { this->mutex_ };
+        auto it = this->counters_.find( target_id );
+        if( it == this->counters_.end() )
             return;
 
-        ( this->counters_[target_id] ).fetch_add(1);
+        it->second.fetch_add(1);
     }
 
     void InferenceCounter::InferenceCounterThreadRunner( void )
@@ -65,10 +71,18 @@ namespace MGEN
         auto&  running = this->thread_.GetRunningFlag();
         while( running.load() == true )
         {
-            // 1. 전체 등록된 카메라 ID 목록 확보 (Undetected 계산을 위해 필요)
-            std::set<int> all_regist_ids;
-            for( auto& [ unit_id, each_counter ] : this->counters_ ){
-                all_regist_ids.insert( GetPureIDFromInferenceRequesterID( unit_id ) );
+            // 1. 전체 등록된 카메라 ID 목록 확보 + 카운터 snapshot (lock 안에서 한 번에).
+            // counters_ 순회 중 다른 thread 의 Regist/Unregist 가 rehash 일으키면 iterator 무효화 → race.
+            std::set<int>                                   all_regist_ids;
+            std::vector<std::pair<MGEN::Type::UnitID, unsigned int>> snapshot;
+            {
+                std::lock_guard<std::mutex> lck { this->mutex_ };
+                snapshot.reserve( this->counters_.size() );
+                for( auto& [ unit_id, each_counter ] : this->counters_ ){
+                    all_regist_ids.insert( GetPureIDFromInferenceRequesterID( unit_id ) );
+                    // load + store(0) atomic operation (lock 안에서 호출 — Regist/Unregist 와 직렬화)
+                    snapshot.emplace_back( unit_id, each_counter.exchange(0) );
+                }
             }
 
             const size_t total_regist_cam_count = all_regist_ids.size();
@@ -82,12 +96,9 @@ namespace MGEN
             unsigned int           main_total_frames = 0;
             std::set<Type::UnitID> main_active_cam_ids;
 
-            // 3. 카운터 순회 및 데이터 수집
-            for( auto& [ unit_id, each_counter ] : this->counters_ )
+            // 3. 카운터 순회 및 데이터 수집 (lock 풀고 snapshot 만 처리)
+            for( const auto& [ unit_id, count ] : snapshot )
             {
-                // load + store(0) atomic operation
-                const auto count = each_counter.exchange(0);
-
                 // 처리 건수 없으면 스킵
                 if( count == 0 )
                     continue;

@@ -21,6 +21,7 @@ logs/*.log
 logs/*.out
 logs/*.log.*
 logs/*.gz
+logs/*.sh
 logs/test_*/
 logs/audit_*/
 logs/gst_*/

@@ -72,7 +72,7 @@ namespace MGEN
          */
         bool Init(
             const MGEN::Type::UnitID                          my_unit_id,
-            std::shared_ptr<EngineLoadBalancer>               lb,
+            const std::shared_ptr<EngineLoadBalancer>&        lb,
             std::string_view                                  target_magic_name,
             const MGEN::Type::UnitID                          magic_code,
             const std::vector<std::string>&                   target_class_names,

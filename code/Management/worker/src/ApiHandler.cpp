@@ -83,12 +83,12 @@ namespace MGEN
         return this->setting.my_local_ip;
     }
 
-    InterProtocolFunc ApiHandler::BuildCallback_GET( InterProtocolInputChecker checker, UrlBuilderFunc url_builder )
+    InterProtocolFunc ApiHandler::BuildCallback_GET( const InterProtocolInputChecker& checker, const UrlBuilderFunc& url_builder )
     {
         return std::bind( &ApiHandler::_BC_GET_Internal, this, std::placeholders::_1, checker, url_builder );
     }
 
-    std::optional<nlohmann::json> ApiHandler::_BC_GET_Internal( const nlohmann::json& req_data, InterProtocolInputChecker checker, UrlBuilderFunc url_builder )
+    std::optional<nlohmann::json> ApiHandler::_BC_GET_Internal( const nlohmann::json& req_data, const InterProtocolInputChecker& checker, const UrlBuilderFunc& url_builder )
     {
         if( checker( req_data ) == false )
             return std::nullopt;

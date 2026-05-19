@@ -33,7 +33,7 @@ namespace MGEN
          * @param frame    입력 원본 프레임 (원본 해상도 체크용)
          * @return FrameFormattingContext* 생성되거나 캐싱된 컨텍스트 포인터
          */
-        FrameFormattingContext* GetContext( int target_w, int target_h, std::shared_ptr<AVFrame> frame );
+        FrameFormattingContext* GetContext( int target_w, int target_h, const std::shared_ptr<AVFrame>& frame );
 
         /**
          * @brief 관리 중인 모든 컨텍스트 리소스를 해제하고 초기화합니다.

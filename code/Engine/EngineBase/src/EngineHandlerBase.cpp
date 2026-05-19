@@ -249,8 +249,8 @@ namespace MGEN
                     std::this_thread::get_id(), profile_.GetProfileName().c_str(), device_id_);
 
                 // 추론 실패 시 배치 관련 데이터 정리
-                for( const auto& input_data : current_batch_inputs_ ) {
-                    respond_q_->enqueue_move( std::move( this->BuildInferenceFailureRespond( input_data ) ) );
+                for( const auto& batch_input : current_batch_inputs_ ) {
+                    respond_q_->enqueue_move( std::move( this->BuildInferenceFailureRespond( batch_input ) ) );
                 }
                 current_batch_inputs_.clear();
                 continue; // 다음 입력 처리
@@ -277,8 +277,8 @@ namespace MGEN
                     std::this_thread::get_id(), profile_.GetProfileName().c_str(), device_id_);
 
                 // 추론 실패 시 배치 관련 데이터 정리
-                for( const auto& input_data : current_batch_inputs_ ) {
-                    respond_q_->enqueue_move( std::move( this->BuildInferenceFailureRespond( input_data ) ) );
+                for( const auto& batch_input : current_batch_inputs_ ) {
+                    respond_q_->enqueue_move( std::move( this->BuildInferenceFailureRespond( batch_input ) ) );
                 }
                 current_batch_inputs_.clear();
                 continue; // 다음 입력 처리
@@ -305,7 +305,7 @@ namespace MGEN
         if( request_q_ )
         {
             request_q_->terminate();
-            request_q_->clear_with_action( [this]( InputLayerWrapper in ) {
+            request_q_->clear_with_action( [this]( const InputLayerWrapper& in ) {
                 if( this->respond_q_ ) {
                     respond_q_->enqueue_move( std::move( this->BuildInferenceFailureRespond( in ) ) );
                 }

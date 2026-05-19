@@ -18,7 +18,7 @@ namespace MGEN
 		// Default Constructor
 		explicit MgenKalmanTracker(
 			const InferTrackID       uuid,
-			const InferObject        init_object,
+			const InferObject&       init_object,
 			const ImageExpressStyle& track_in_style,
 			const ImageExpressStyle& track_out_style );
 
@@ -72,7 +72,7 @@ namespace MGEN
 
 	private:
 		// initialize Kalman filter
-		void InitKf( StateXYWH stateMat );
+		void InitKf( const StateXYWH& stateMat );
 
 	private:
 		const InferTrackID  track_id;

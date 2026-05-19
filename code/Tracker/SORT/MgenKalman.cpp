@@ -12,7 +12,7 @@ namespace MGEN
 
 	MgenKalmanTracker::MgenKalmanTracker(
 		const InferTrackID       uuid,
-		const InferObject        init_object,
+		const InferObject&       init_object,
 		const ImageExpressStyle& track_in_style,
 		const ImageExpressStyle& track_out_style )
 		: track_id          ( uuid )
@@ -180,7 +180,7 @@ namespace MGEN
 		);
 	}
 
-	void MgenKalmanTracker::InitKf( StateXYWH stateMat )
+	void MgenKalmanTracker::InitKf( const StateXYWH& stateMat )
 	{
 		int stateNum   = 7;
 		int measureNum = 4;

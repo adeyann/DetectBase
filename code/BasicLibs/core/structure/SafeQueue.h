@@ -1,6 +1,7 @@
 #ifndef _MGEN_SAFE_QUEUE_H_
 #define _MGEN_SAFE_QUEUE_H_
 
+#include <atomic>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -57,6 +58,7 @@ namespace MGEN
             std::lock_guard<std::mutex> lck { m };
             if( max_size_ > 0 && q.size() >= max_size_ ) {
                 q.pop_front(); // drop oldest — 메모리 무한 증가 차단
+                drop_count_.fetch_add( 1, std::memory_order_relaxed );
             }
             q.push_back( t ); // copy
             c.notify_one();
@@ -68,10 +70,14 @@ namespace MGEN
             std::lock_guard<std::mutex> lck { m };
             if( max_size_ > 0 && q.size() >= max_size_ ) {
                 q.pop_front(); // drop oldest
+                drop_count_.fetch_add( 1, std::memory_order_relaxed );
             }
             q.push_back( std::move(t) ); // move
             c.notify_one();
         }
+
+        // drop_oldest 누적 카운터 (cap 도달 시 oldest item 제거).
+        uint64_t GetDropCount() const noexcept { return drop_count_.load( std::memory_order_relaxed ); }
 
         // dequeue() throw-기반 함수는 제거됨 (CLAUDE.md "C++ exceptions 사용 금지" 준수).
         // 사용처는 모두 dequeue_wait_for(timeout) 으로 마이그레이션 — 종료/타임아웃 시 std::nullopt 반환.
@@ -195,6 +201,7 @@ namespace MGEN
         std::condition_variable c;
         bool                    b_terminate = false;
         size_t                  max_size_   = 0; // 0 = 무제한
+        std::atomic<uint64_t>   drop_count_ { 0 };
     };
 
     template <class T>
