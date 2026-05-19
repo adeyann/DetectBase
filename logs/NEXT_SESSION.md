@@ -44,13 +44,6 @@
 - 비용: ~3~4시간
 - 빌드 branch: `refactor/audit-cleanup`
 
-### C. Frame ordering 진짜 fix (조건부)
-- 방어 카운터 `detectbase_correlation_mismatch_total{cam_id}` 며칠 운영 후 발생 빈도 측정
-- 발생 빈도 > 0 시 옵션:
-  - per-correlation_id lookup (`cam_result_qs_` → `map<correlation_id, OutputLayerWrapper>`)
-  - handler affinity (cam → 고정 handler, round-robin 포기)
-- 발생 빈도 0 시 보류 가능
-
 ### D. MAIA RTSP URL 정정
 - 별도 PR: port 555 + mount `/<id>` (현재 `/cam<id>`)
 - NetworkSettings.json 의 `RTSP_Proxy_Port` 추가
@@ -95,6 +88,14 @@
 - 마이그레이션: RspProf/InfProf/EvtProf → Sample 호출 (~5줄/thread) + RegisterPullSource Init (~15줄)
 - 비용: ~4시간 (구현 + 마이그레이션 + 검증)
 - 빌드 branch: `refactor/thread-profiler` (develop fork)
+
+### C. Frame ordering 진짜 fix (조건부)
+- 방어 카운터 `detectbase_correlation_mismatch_total{cam_id}` 며칠 운영 후 발생 빈도 측정
+- 3시간 sanity (2026-05-19) 결과: mismatch=0 일관. 발생 빈도 0 추정.
+- 발생 빈도 > 0 시 옵션:
+  - per-correlation_id lookup (`cam_result_qs_` → `map<correlation_id, OutputLayerWrapper>`)
+  - handler affinity (cam → 고정 handler, round-robin 포기)
+- 발생 빈도 0 시 보류
 
 ---
 
