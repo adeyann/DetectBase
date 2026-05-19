@@ -1,5 +1,7 @@
 # DetectBase
 
+**Version**: `0.1.4` (cmake `code/CMakeLists.txt`. master tag `v0.1.0`, develop 누적 patch.)
+
 Odroid M2 NPU 기반 RTSP 비디오 분석 베이스 프로젝트. 객체 탐지 + 트래킹 + 침입 감지 + 이벤트 송신을 통합한 production-ready 시스템.
 
 > **이 README 는 프로젝트 전체 문서**. 빌드/실행/운영/구조/기법/검증까지 한 곳에서 파악 가능.
@@ -504,7 +506,7 @@ code/
 ### RTSP Proxy
 
 - 분석 결과 (탐지 박스 overlay 등) 를 video stream 으로 출력
-- 외부 viewer (예: VLC) 가 `rtsp://<host>:556/<cam_id>` 로 접근
+- 외부 viewer (예: VLC) 가 `rtsp://<host>:555/<cam_id>` 로 접근 (2026-05-19 PR #12 로 mount path `/cam<id>` → `/<id>`, port 8554 → 555 변경)
 - 외부 라이브러리 호환성 패턴 (rua_proxy_init 등) — 변경 안 함
 
 ### gRPC (선택, 분기 프로젝트용)
@@ -787,14 +789,14 @@ grep -n "DEBUG VIRTUAL LINES" code/Main/DETECTOR/src/RtspDetectorUnit.cpp
 | **UBSan** | 런타임 sanitizer | UB (overflow, null deref) | -fsanitize=undefined (ASan 과 같이) |
 | **ThreadSanitizer (TSan)** | 런타임 sanitizer | data race, lock-order-inversion, double lock | -fsanitize=thread (별도 빌드) |
 
-### 결과 기준 (production-ready baseline) — 2026-05-19 갱신
+### 결과 기준 (production-ready baseline) — 2026-05-19 갱신 (PR #9 audit cleanup + PR #13 H fix 후)
 
-| 도구 | 자체 코드 결함 (audit 2026-05-19) |
+| 도구 | 자체 코드 결함 (audit_20260519_222710) |
 |---|---|
-| cppcheck | 79건 → 12건 fix, 18건 false positive (`_` dummy), 11건 needs-review (v0.1.0 후 cleanup PR), 9건 자연 정리 예정 (ThreadProfiler 마이그레이션 시) |
-| clang-tidy | 166건 → 잠재 14 + safe 137 fix, 21건 needs-review (v0.1.0 후 cleanup PR) |
-| ASan / UBSan | **startup leak 0건** (외부 librknnrt.so / glib init), **runtime leak 1건** (GStreamer rtpmanager — 외부 lib 내부, 수용) |
-| TSan | **우리 코드 진짜 race 0건 ✅** (5분 run 기준). 144 WARNING 중 우리 코드 race 는 SioHandler UAF / InferenceCounter map / RegisterMetricsOnce / SafeQueue shared_ptr ref count 4종 모두 fix. 잔여 ~140 건은 SIGKILL `mutex destroyed` false positive (~506 mention, graceful shutdown 안 거침) + GStreamer 내부 callback race (외부 lib) + SafeQueue happens-before 추적 한계 (mutex 정상 작동) |
+| cppcheck | **59건** — 18건 false positive (`_` dummy + structured binding unused), 9건 자연 정리 예정 (ThreadProfiler 마이그레이션 시 t_xxx_set), 나머지는 unreadVariable/useStlAlgorithm 등 NOLINT (cppcheck syntax quirk 로 일부 effective 안 됨, FP/intent 보존) |
+| clang-tidy | **0건 ✅** — PR #9 (audit cleanup, NOLINT 24건) + PR #13 (EngineHandlerBase dtor pure virtual UB 진짜 fix) 으로 30 → 0 도달 |
+| ASan / UBSan | **startup leak 0건** (외부 librknnrt.so / glib init), **runtime leak 1건 ~1.2MB** (GStreamer rtpmanager — 외부 lib 내부, 수용. 5분 run 기준) |
+| TSan | **우리 코드 진짜 race 0건 ✅** (5분 run 기준, **137 건** WARNING). 우리 코드 race 4종 (SioHandler UAF / InferenceCounter map / RegisterMetricsOnce / SafeQueue shared_ptr ref count) 모두 fix. 잔여는 SIGKILL `mutex destroyed` false positive + GStreamer 내부 callback race (외부 lib) + SafeQueue happens-before 추적 한계 (mutex 정상 작동) |
 
 자체 코드 결함 추가 검출 시 `audit_<timestamp>/summary.txt` 보고서 비교.
 
@@ -950,7 +952,7 @@ grep "PROGRAM QUIT SUCCESS" logs/DetectBase.log
 | TSan 카메라 1대 환경 검증 | 분기 시 1회 |
 | Debug Virtual Lines 제거 | 분기 시 |
 | **GStreamer 1.24+ upgrade (Ubuntu 24.04 base)** | **v1.0.0 후** — rtpmanager runtime leak (~340 MB/year) fix 시도. Dockerfile.build 22.04 → 24.04, GStreamer 1.20.3 → 1.24.x, ASan long-run 재검증 |
-| audit cleanup PR (clang-tidy 21 + cppcheck 11) | v0.1.0 후 별도 refactor PR (swappable-parameters 16, branch-clone 4, useStlAlgorithm 5 등 needs-review 항목) |
+| ~~audit cleanup PR (clang-tidy 21 + cppcheck 11)~~ | ✅ 완료 (2026-05-19, PR #9 + #13). clang-tidy 30 → 0, cppcheck 63 → 59. |
 
 ---
 
