@@ -135,11 +135,27 @@ Direct leak of 3808 byte(s) in 119 object(s) × 2 (다른 path)
 - v3 세션 의심 ("매 reconn 5 MB") = 잘못. 실제 ~320 byte / reconn.
 - v8 12h monitor 의 RSS plateau (range ±55 MB) noise 안 — 진짜 leak 신호 안 드러남.
 - long-term: 24/7 × 1년 = ~340 MB / year (acceptable but real)
-- **fix 옵션**:
-  - A. 수용 (long-term acceptable, plateau 영향 X)
-  - B. in-place reset 강화 (이미 ResetSourceOnly 가 시도, fully unref 안 됨)
-  - C. GStreamer 업데이트 (rtpmanager bug fix 버전)
-  - D. EOS reconnect 빈도 줄이기
+
+#### 사용자 결정 (2026-05-19): **A 수용**
+
+추가 검증:
+- `TeardownPipeline` (GstRtspReceiver.cpp:178) 코드 직접 검토 → `gst_element_set_state(NULL) → 5초 대기 → 정확한 unref` 모두 정상
+- BuildPipeline 의 `gst_parse_launch` + `gst_bin_get_by_name` 으로 획득한 ref 와 TeardownPipeline 의 `gst_object_unref` 짝 맞음
+- ASan call stack: 우리 책임 frame 은 #15 (TeardownPipeline) 까지. #5~#11 은 GStreamer 내부 finalize chain (`g_list_free_full → g_object_unref → libgstrtpmanager.so internal`)
+- **결론**: rtpmanager plugin 자체 finalize 코드의 메모리 회수 누락. 외부 lib 내부 leak 확정. 우리 코드 수정 불가.
+
+| 옵션 | 결정 | 사유 |
+|------|------|------|
+| A. 수용 | ✅ 채택 | 340 MB/year 운영 영향 0, 외부 lib leak 수정 불가 |
+| B. in-place reset 강화 | reject | 외부 lib 내부 leak — 효과 없음 |
+| C. GStreamer 1.24+ upgrade | v1.0.0 후 시도 | 1.22/1.24/1.26 changelog 본 케이스 fix 단서 없음. Ubuntu 24.04 base + librknnrt ABI 위험 |
+| D. EOS reconnect 빈도 ↓ | reject | 회피, 운영 영향 |
+
+후속 작업:
+- README §15 갱신 (Known long-running leak sub-section)
+- README §17 분기 트리거 보류 항목 추가 (v1.0.0 후 GStreamer 1.24+ upgrade)
+- CLAUDE.md Known Issues 명시
+- RSS watch metric 은 v0.1.0 alert dashboard 작업 시 동반
 
 ## 4. TSan
 - audit `--with-tsan` 옵션 (미실행)

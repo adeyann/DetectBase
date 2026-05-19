@@ -158,14 +158,27 @@ Direct leak of 3808 byte(s) in 119 object(s) × 2 (다른 path)
 - v8 12h monitor 의 RSS plateau (602~657 MB range, ±55 MB oscillating) 안 noise 수준 — 진짜 leak 가 있어도 plateau 깨지지 않음.
 - **External lib (GStreamer rtpmanager)** 측 — feedback_leak_in_my_code.md 의 "release lib leak 없음" 전제 위반 사례. 그러나 *known GStreamer issue* 가능성 검토 필요.
 
-#### 다음 단계 — runtime leak fix 옵션
+#### 사용자 결정 (2026-05-19): **A 수용**
 
-| 옵션 | 효과 | 비용 |
-|------|------|------|
-| A. 수용 (long-term ~340 MB/year acceptable) | 0 | 0 |
-| B. ResetSourceOnly 의 in-place reset (TeardownPipeline 안 호출) — 이미 시도되어 있음 (`mppvideodec 보존` 주석) | 만약 in-place 가능하면 TeardownPipeline 안 거치고 leak 회피 | code 검토 |
-| C. GStreamer 업데이트 (rtpmanager bug 가 fix 된 버전) | external lib 의존 | dependency 영향 |
-| D. EOS reconnect 빈도 줄이기 (camera mp4 5분 cycle 외 대처) | 12 reconn/h → 적은 빈도 | 운영 정책 변경 |
+ASan call stack 추가 검증 (TeardownPipeline 코드 직접 검토 + offset 분석):
+- 우리 코드는 `gst_element_set_state(NULL) → 5초 대기 → 정확한 unref 순서` 모두 정상
+- call stack 의 #5~#11 (`libgstrtpmanager.so` 내부 finalize chain) 은 우리 책임 범위 밖
+- `gst_element_change_state` 의 child cleanup 시 rtpmanager 자체 finalize 코드에서 g_malloc 메모리 회수 누락 — **GStreamer rtpmanager plugin 자체 leak 확정**
+
+GStreamer 1.22/1.24/1.26 changelog WebSearch 결과: 명확한 본 케이스 fix 단서 없음. 1.20.3 → 1.24 upgrade 시도 비용 (Ubuntu 22.04 → 24.04 base 변경, librknnrt ABI 호환 위험, protobuf/grpc source rebuild) 1.5~2시간 + 위험 → **v1.0.0 후 별도 phase 로 보류**.
+
+**A 결정 후속 작업**:
+- README §15 결과 기준 표 갱신 + "Known long-running leak" sub-section 추가
+- README §17 분기 트리거 보류 항목에 "v1.0.0 후 GStreamer 1.24+ upgrade" 추가
+- CLAUDE.md Known Issues 에 명시 (do not attempt to fix in our code)
+- RSS watch metric 추가는 v0.1.0 alert dashboard 작업 시 동반
+
+| 옵션 | 효과 | 비용 | 결정 |
+|------|------|------|------|
+| **A. 수용** (long-term ~340 MB/year acceptable) | 0 | 0 + 문서화 | **✅ 채택** |
+| B. ResetSourceOnly 의 in-place reset | 부분 효과 (외부 lib 내부 leak 이라 한계) | code 검토 + 위험 | reject (root cause 아님) |
+| C. GStreamer 업데이트 | 진짜 fix 가능성 (불확실) | 1.5~2시간 + ABI 위험 | v1.0.0 후 시도 |
+| D. EOS reconnect 빈도 ↓ | leak 발생률 ↓ (회피) | 운영 영향 (복구 지연) | reject (feedback_root_cause_fix 위배) |
 
 ### clang-tidy 166 warning 분류
 

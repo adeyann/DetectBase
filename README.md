@@ -775,16 +775,28 @@ grep -n "DEBUG VIRTUAL LINES" code/Main/DETECTOR/src/RtspDetectorUnit.cpp
 | **UBSan** | 런타임 sanitizer | UB (overflow, null deref) | -fsanitize=undefined (ASan 과 같이) |
 | **ThreadSanitizer (TSan)** | 런타임 sanitizer | data race, lock-order-inversion, double lock | -fsanitize=thread (별도 빌드) |
 
-### 결과 기준 (production-ready baseline)
+### 결과 기준 (production-ready baseline) — 2026-05-19 갱신
 
-| 도구 | 자체 코드 결함 |
+| 도구 | 자체 코드 결함 (audit 2026-05-19) |
 |---|---|
-| cppcheck | 50건 (모두 style, 외부 SORT 알고리즘) |
-| clang-tidy | 327 warning (대부분 false positive 또는 외부 tinyxml) |
-| ASan / UBSan | **0건** (외부 librknnrt.so init leak 만) |
-| TSan | **자체 코드 진짜 race 0건** (cv_any 패턴 false positive 18건 + 외부 RTSP) |
+| cppcheck | 79건 → 12건 fix, 18건 false positive (`_` dummy), 11건 needs-review (v0.1.0 후 cleanup PR), 9건 자연 정리 예정 (ThreadProfiler 마이그레이션 시) |
+| clang-tidy | 166건 → 잠재 14 + safe 137 fix, 21건 needs-review (v0.1.0 후 cleanup PR) |
+| ASan / UBSan | **startup leak 0건** (외부 librknnrt.so / glib init), **runtime leak 1건** (GStreamer rtpmanager — 외부 lib 내부, 수용) |
+| TSan | 미실행 (v0.1.0 후 별도 phase 예정) |
 
 자체 코드 결함 추가 검출 시 `audit_<timestamp>/summary.txt` 보고서 비교.
+
+### Known long-running leak: GStreamer rtpmanager (수용)
+
+ASan 1시간 long-run + interval `__lsan_do_recoverable_leak_check()` 검출 결과:
+
+- **위치**: `libgstrtpmanager.so` 내부 cleanup 코드 (외부 release lib)
+- **호출 경로**: `GstRtspReceiver::TeardownPipeline` → `gst_element_set_state(NULL)` → rtspsrc → rtpbin → rtpsession sources `g_list_free_full` → 각 source `g_object_unref` → rtpmanager 내부 finalize 시 g_malloc 메모리 회수 누락
+- **크기**: ~320 byte / EOS reconnect cycle (5분 cycle 기준 ~3.8 KB/h ≈ **~340 MB/year**)
+- **영향**: Odroid M2 8GB RAM 기준 plateau noise 안 (12h v8 monitor: RSS 602~657 MB ±55 MB stable)
+- **우리 코드 책임**: 없음 — TeardownPipeline 의 state NULL 전환 + 대기 + 정확한 unref 검증 완료. call stack 의 #5~#11 은 GStreamer 내부 finalize chain, #15 (TeardownPipeline) 까지가 우리 책임 범위
+- **결정 (2026-05-19)**: **수용**. 외부 lib 내부 leak 으로 우리 코드 수정 불가. ~340 MB/year 는 운영 영향 0
+- **v1.0.0 후 재시도 예정**: GStreamer 1.24+ 업그레이드 시도 (현 1.20.3, Ubuntu 22.04 jammy default). 1.22/1.24/1.26 changelog 에서 본 케이스 fix 가 명시 안 됐으나 시도 가치 있음
 
 ### TSan 주의
 
@@ -909,6 +921,8 @@ grep "PROGRAM QUIT SUCCESS" logs/DetectBase.log
 | F-I2-01 rknn_run async | 성능 최적화 필요 시 |
 | TSan 카메라 1대 환경 검증 | 분기 시 1회 |
 | Debug Virtual Lines 제거 | 분기 시 |
+| **GStreamer 1.24+ upgrade (Ubuntu 24.04 base)** | **v1.0.0 후** — rtpmanager runtime leak (~340 MB/year) fix 시도. Dockerfile.build 22.04 → 24.04, GStreamer 1.20.3 → 1.24.x, ASan long-run 재검증 |
+| audit cleanup PR (clang-tidy 21 + cppcheck 11) | v0.1.0 후 별도 refactor PR (swappable-parameters 16, branch-clone 4, useStlAlgorithm 5 등 needs-review 항목) |
 
 ---
 
