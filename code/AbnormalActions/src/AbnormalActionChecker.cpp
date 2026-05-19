@@ -22,7 +22,7 @@ namespace MGEN::Abnormal // MgenSolution's abnormal event namespace
     }
 
     // Declare inner static functions
-    static DataLayer LineIntrusionBase ( const DataLayer& in_layer, Schedule* const schedule, const std::string class_name ) noexcept;
+    static DataLayer LineIntrusionBase ( const DataLayer& in_layer, Schedule* const schedule, const std::string& class_name ) noexcept;
 
 
     DataLayer VehicleParking( const DataLayer& in_layer, Schedule* const schedule ) noexcept
@@ -84,7 +84,7 @@ namespace MGEN::Abnormal // MgenSolution's abnormal event namespace
             if( ( duration_if_enough_interval > 0 ) && schedule->GetEnoughEventInterval() )
             {
                 MGEN::InferObject parking_object = object;
-                parking_object.extend_data.push_back( duration_if_enough_interval ); // Duration
+                parking_object.extend_data.push_back( static_cast<float>( duration_if_enough_interval ) ); // Duration
 
                 results.push_back( std::move(parking_object) );
             }
@@ -124,7 +124,7 @@ namespace MGEN::Abnormal // MgenSolution's abnormal event namespace
         return Abnormal::LineOrientation::NotCrossed;
     }
 
-    DataLayer LineIntrusionBase( const DataLayer& in_layer, Schedule* const schedule, const std::string class_name ) noexcept
+    DataLayer LineIntrusionBase( const DataLayer& in_layer, Schedule* const schedule, const std::string& class_name ) noexcept
     {
     	DataLayer results {};
 
@@ -181,7 +181,7 @@ namespace MGEN::Abnormal // MgenSolution's abnormal event namespace
                 // Update ClassID to AbnormalEventID
                 MGEN::InferObject cross_box  = object;
                 // Direction
-                cross_box.extend_data.push_back( static_cast<int>( line_direction ) * 1.0f ); // Direction
+                cross_box.extend_data.push_back( static_cast<float>( static_cast<int>( line_direction ) ) ); // Direction
 
                 // Add result
                 results.push_back( std::move( cross_box ) );
@@ -262,7 +262,7 @@ namespace MGEN::Abnormal // MgenSolution's abnormal event namespace
 
                     // Update ClassID to AbnormalEventID
                     MGEN::InferObject Intrusion_object = object;
-                    Intrusion_object.extend_data.push_back( duration.count() ); // Duration
+                    Intrusion_object.extend_data.push_back( static_cast<float>( duration.count() ) ); // Duration
 
                     // Add Result
                     results.push_back( std::move( Intrusion_object ) );

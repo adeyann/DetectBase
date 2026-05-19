@@ -304,9 +304,9 @@ namespace MGEN
         std::shared_ptr<EngineLoadBalancer> load_balancer
     )
         : id_              ( service_unit_id   )
-        , load_balancer_   ( load_balancer     )
-        , network_manager_ ( network_manager   )
-        , iostream_manager_( io_stream_manager )
+        , load_balancer_   ( std::move( load_balancer )     )
+        , network_manager_ ( std::move( network_manager )   )
+        , iostream_manager_( std::move( io_stream_manager ) )
     {
         //
     }
@@ -537,7 +537,7 @@ namespace MGEN
         auto        ms    = std::chrono::duration_cast<std::chrono::milliseconds>( now.time_since_epoch() ) % 1000;
         std::time_t now_c = std::chrono::system_clock::to_time_t( now );
 
-        struct tm tstruct;
+        struct tm tstruct {};
         localtime_r(&now_c, &tstruct); // Thread-Safe한 localtime_r 사용
 
         char time_buf[80];
@@ -593,7 +593,7 @@ namespace MGEN
                         + "</tt:Class>"
                     + "</tt:Appearance>"
                 + "</tt:Object>";
-            metadata_string += std::move( objectxml );
+            metadata_string += objectxml;
         }
         metadata_string += postXml;
 
@@ -623,7 +623,7 @@ namespace MGEN
 
     std::optional<std::string> RtspDetectorUnit::MakeImageSavePath( const std::string& root_path ) const
     {
-        struct tm tstruct;
+        struct tm tstruct {};
         auto  curr_time = std::time( nullptr );
         auto* time_info = localtime_r( &curr_time, &tstruct );
 
@@ -684,7 +684,7 @@ namespace MGEN
 
     json RtspDetectorUnit::BuildNotifyJsonImpl_Analysis
     (
-        std::shared_ptr<Abnormal::Schedule>   sch,
+        const std::shared_ptr<Abnormal::Schedule>& sch,
         const std::vector<MGEN::InferObject>& abnormal_results,
         const tm*                             time_info,
         const std::string&                    image_path
@@ -696,7 +696,7 @@ namespace MGEN
         const int         LevelCode  = sch->sch_info.level_code;
         const int         ScheduleId = sch->sch_info.schedule_id;
         const int         ServerId   = this->socket_io_server_id_;
-        const std::string ImagePath  = image_path;
+        const std::string& ImagePath = image_path;
         const std::string StrUUID    = UUID::GetGenerator()->generate();
         const int         TrackId    = ( abnormal_results.size() ) ? abnormal_results.front().track_id : NON_TRACKING_IDX;
 
@@ -1506,7 +1506,7 @@ namespace MGEN
                         tracker_seqs_[ class_id ] = 1;
                     }
                     auto& seq = tracker_seqs_[ class_id ];
-                    auto  res = trackers_[ class_id ]->TrackObjects( objects, seq++ );
+                    auto  res = trackers_[ class_id ]->TrackObjects( objects, static_cast<int>( seq++ ) );
                     if( res ) {
                         entire_track_results.insert( entire_track_results.end(), res->begin(), res->end() );
                     }
@@ -1877,7 +1877,7 @@ namespace MGEN
                 continue;
             }
 
-            struct tm tstruct;
+            struct tm tstruct {};
             auto      curr_time = std::time( nullptr );
             auto*     time_info = localtime_r( &curr_time, &tstruct );
 

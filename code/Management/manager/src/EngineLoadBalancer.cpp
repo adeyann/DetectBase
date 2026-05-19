@@ -170,7 +170,7 @@ namespace MGEN
             return nullptr;
         }
 
-        this->engine_input_qs_[ handle_uuid ] = input_q;
+        this->engine_input_qs_[ handle_uuid ] = std::move( input_q );
         this->engine_handles_.push_back( handle_uuid );
 
         MLOG_INFO("Engine handler (%d, %d) linked successfully. Total handlers: %zu",

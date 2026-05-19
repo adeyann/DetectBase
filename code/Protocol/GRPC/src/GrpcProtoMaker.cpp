@@ -87,7 +87,7 @@ namespace MGEN
         std::string encoded_image_data( encoded_img_buffer.begin(), encoded_img_buffer.end() );
 
         proto.set_data  ( std::move( encoded_image_data ) );
-        proto.set_size  ( encoded_img_buffer.size() );
+        proto.set_size  ( static_cast<int32_t>( encoded_img_buffer.size() ) );
         proto.set_width ( image_w );
         proto.set_height( image_h );
 

@@ -47,7 +47,7 @@ namespace MGEN
         rtsp_proxy_frame_internal_q_map_.clear();
     }
 
-    std::set<MGEN::Type::UnitID> IOStreamManager::RegisterRtspProxies( std::set<MGEN::Type::UnitID> unit_set )
+    std::set<MGEN::Type::UnitID> IOStreamManager::RegisterRtspProxies( const std::set<MGEN::Type::UnitID>& unit_set )
     {
         std::set<MGEN::Type::UnitID> success_set;
         for( const auto unit_id : unit_set ) {
@@ -57,7 +57,7 @@ namespace MGEN
         return success_set;
     }
 
-    std::set<MGEN::Type::UnitID> IOStreamManager::UnregisterRtspProxies( std::set<MGEN::Type::UnitID> unit_set )
+    std::set<MGEN::Type::UnitID> IOStreamManager::UnregisterRtspProxies( const std::set<MGEN::Type::UnitID>& unit_set )
     {
         std::set<MGEN::Type::UnitID> success_set;
         for( const auto unit_id : unit_set ) {

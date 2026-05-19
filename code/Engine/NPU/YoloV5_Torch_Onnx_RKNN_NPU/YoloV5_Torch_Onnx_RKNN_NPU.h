@@ -156,7 +156,7 @@ namespace MGEN
         size_t                  rknn_model_h = 0;
         mutable std::mutex      rknn_input_lock_;
 
-        cv::Rect GetRect( cv::Mat& img, float bbox[4] );
+        cv::Rect GetRect( const cv::Mat& img, float bbox[4] );
 
         int PostProcessImplRKNN(
             int8_t* input_0, int8_t* input_1, int8_t* input_2, const int model_in_h, const int model_in_w,

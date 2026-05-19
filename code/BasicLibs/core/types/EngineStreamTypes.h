@@ -124,7 +124,7 @@ namespace MGEN
         InferRequestRequirements                    requirements { };         // 엔진 요구사항
         std::shared_ptr<std::vector<unsigned char>> image_data   { nullptr }; // 공유 이미지 데이터
 
-        static InputLayerWrapper Build( const EngineStreamMetaData meta_data, InferRequestRequirements requirements, std::shared_ptr<std::vector<unsigned char>> image_data )
+        static InputLayerWrapper Build( const EngineStreamMetaData& meta_data, InferRequestRequirements requirements, std::shared_ptr<std::vector<unsigned char>> image_data )
         {
             return InputLayerWrapper{ meta_data, requirements, std::move( image_data ) };
         }
@@ -140,7 +140,7 @@ namespace MGEN
         EngineHandleUUID         engine_handle_uuid { };       // 실제 처리를 담당한 엔진/장치 정보
         std::vector<InferObject> infer_objects      { };       // 탐색된 객체 리스트
 
-        static OutputLayerWrapper Build( const EngineStreamMetaData meta_data, const EngineHandleUUID& uuid, std::vector<InferObject>&& object )
+        static OutputLayerWrapper Build( const EngineStreamMetaData& meta_data, const EngineHandleUUID& uuid, std::vector<InferObject>&& object )
         {
             return OutputLayerWrapper{ meta_data, uuid, std::move( object ) };
         }

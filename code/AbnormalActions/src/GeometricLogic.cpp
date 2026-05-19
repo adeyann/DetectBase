@@ -44,11 +44,11 @@ namespace MGEN::Abnormal
 
 	const double getDistance( const MGEN::InferObject& first_box, const MGEN::InferObject& last_box ) noexcept
 	{
-		const int pre_x = first_box.bbox.x + static_cast<int>( first_box.bbox.w / 2 );
-		const int pre_y = first_box.bbox.y + static_cast<int>( first_box.bbox.h / 2 );
+		const int pre_x = static_cast<int>( first_box.bbox.x ) + static_cast<int>( first_box.bbox.w / 2.0f );
+		const int pre_y = static_cast<int>( first_box.bbox.y ) + static_cast<int>( first_box.bbox.h / 2.0f );
 
-		const int cur_x = last_box.bbox.x + static_cast<int>( last_box.bbox.w / 2 );
-		const int cur_y = last_box.bbox.y + static_cast<int>( last_box.bbox.h / 2 );
+		const int cur_x = static_cast<int>( last_box.bbox.x ) + static_cast<int>( last_box.bbox.w / 2.0f );
+		const int cur_y = static_cast<int>( last_box.bbox.y ) + static_cast<int>( last_box.bbox.h / 2.0f );
 
 		const double x = abs(pre_x - cur_x);
 		const double y = abs(pre_y - cur_y);

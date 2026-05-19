@@ -159,10 +159,10 @@ namespace MGEN
 
         // For Socket.io message - 선별(Analysis) 부분 ( Detection )
         nlohmann::json BuildNotifyJsonImpl_Analysis(
-            std::shared_ptr<Abnormal::Schedule>   event_occured_schedule,
-            const std::vector<MGEN::InferObject>& on_event_results,
-            const tm*                             event_occur_time_info,
-            const std::string&                    frame_image_path
+            const std::shared_ptr<Abnormal::Schedule>& event_occured_schedule,
+            const std::vector<MGEN::InferObject>&      on_event_results,
+            const tm*                                  event_occur_time_info,
+            const std::string&                         frame_image_path
         );
 
         // Internal Helper - for release & reset

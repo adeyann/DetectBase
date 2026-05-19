@@ -87,8 +87,8 @@ namespace MGEN
 
             scale_factor = std::min( w_ratio, h_ratio );
 
-            scale_w = static_cast<int>( std::round( src_w * scale_factor ) );
-            scale_h = static_cast<int>( std::round( src_h * scale_factor ) );
+            scale_w = static_cast<int>( std::round( static_cast<float>( src_w ) * scale_factor ) );
+            scale_h = static_cast<int>( std::round( static_cast<float>( src_h ) * scale_factor ) );
 
             float total_pad_w = static_cast<float>( target_w - scale_w );
             float total_pad_h = static_cast<float>( target_h - scale_h );
@@ -144,9 +144,9 @@ namespace MGEN
      */
     bool FrameFormattingContext::Convert
     (
-        std::shared_ptr<AVFrame> frame,
-        bool                     capture_save_image,
-        bool                     generate_inference_blob
+        const std::shared_ptr<AVFrame>& frame,
+        bool                            capture_save_image,
+        bool                            generate_inference_blob
     )
     {
         if( is_initialized == false || sws_scale_ctx == nullptr || frame == nullptr ){

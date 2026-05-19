@@ -109,9 +109,9 @@ namespace MGEN
         static bool IsKnownResponseCode( const API_RSP_CODE code ) noexcept;
 
         // Build callback function use api_handler instance
-        InterProtocolFunc BuildCallback_GET( InterProtocolInputChecker checker, UrlBuilderFunc url_builder );
+        InterProtocolFunc BuildCallback_GET( const InterProtocolInputChecker& checker, const UrlBuilderFunc& url_builder );
         // internal BuildCallback_GET
-        std::optional<nlohmann::json> _BC_GET_Internal( const nlohmann::json& req_data, InterProtocolInputChecker checker, UrlBuilderFunc url_builder );
+        std::optional<nlohmann::json> _BC_GET_Internal( const nlohmann::json& req_data, const InterProtocolInputChecker& checker, const UrlBuilderFunc& url_builder );
 
     protected:
         static std::once_flag init_flag;

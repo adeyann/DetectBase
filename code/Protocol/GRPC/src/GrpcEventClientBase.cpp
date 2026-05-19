@@ -8,7 +8,7 @@
 namespace MGEN
 {
     GrpcEventClientBase::GrpcEventClientBase( std::shared_ptr<grpc::Channel> channel )
-        : channel_ ( channel )
+        : channel_ ( std::move( channel ) )
         , stub_    ( DETECTBASE_GRPC::NewStub( channel_ ) )
     {
         this->RegistGrpcClientThreadFunctions();

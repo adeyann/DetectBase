@@ -25,7 +25,7 @@ namespace MGEN::Abnormal
     {
         SelectChecker( this->sch_info.event_code );
 
-        if( this->SetClassEqualChecker( cec ) == false ){
+        if( this->SetClassEqualChecker( std::move( cec ) ) == false ){
             MLOG_WARN("Schedule { %s } set class equal checker failed.", this->GetEventName(info.event_code).c_str() );
         }
     }
@@ -76,7 +76,7 @@ namespace MGEN::Abnormal
         if( !cec )
             return false;
 
-        this->class_equal_checker = cec;
+        this->class_equal_checker = std::move( cec );
         return true;
     }
 
@@ -181,7 +181,7 @@ namespace MGEN::Abnormal
         const auto now_time = chrono::system_clock::now();
         const auto duration = chrono::duration_cast<chrono::milliseconds>( now_time - event_start_time );
         const int  interval = this->abnormal_require_seconds * 1000;
-        return ( ( duration.count() > interval ) ? duration.count() / 1000 : 0 );
+        return ( ( duration.count() > interval ) ? static_cast<int>( duration.count() / 1000 ) : 0 );
     }
 
     const bool Schedule::IsWithinBlackList( const vector<string>& black_list ) const noexcept
@@ -254,7 +254,7 @@ namespace MGEN::Abnormal
 
         // get minute diff
         const auto duration     = chrono::duration_cast<chrono::minutes>( tp_current_time - tp_start_time );
-        const int  dur_count    = duration.count();
+        const int  dur_count    = static_cast<int>( duration.count() );
         const int  minutes_diff = ( dur_count > 0 ) ? dur_count : dur_count + total_day_minutes;
 
         return ( minutes_diff <= rangeInMinute );
@@ -265,10 +265,11 @@ namespace MGEN::Abnormal
         vector<vector<cv::Point>> results {};
         for( const auto& roi_points : rois ) {
             vector<cv::Point> scaled_roi {};
+            scaled_roi.reserve( roi_points.size() );
             for( const auto& [xpos_ratio, ypos_ratio] : roi_points ) {
                 scaled_roi.emplace_back(
-                    clamp( 0, static_cast<int>( std::round( frame_w * xpos_ratio ) ), frame_w ),
-                    clamp( 0, static_cast<int>( std::round( frame_h * ypos_ratio ) ), frame_h )
+                    clamp( 0, static_cast<int>( std::round( static_cast<float>( frame_w ) * xpos_ratio ) ), frame_w ),
+                    clamp( 0, static_cast<int>( std::round( static_cast<float>( frame_h ) * ypos_ratio ) ), frame_h )
                 );
             }
             results.push_back( std::move( scaled_roi ) );

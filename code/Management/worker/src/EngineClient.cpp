@@ -12,12 +12,12 @@
 namespace MGEN
 {
     bool EngineClient::Init(
-        const MGEN::Type::UnitID                          my_unit_id,
-        std::shared_ptr<EngineLoadBalancer>               lb,
-        std::string_view                                  target_magic_name,
-        const MGEN::Type::UnitID                          magic_code,
-        const std::vector<std::string>&                   target_class_names,
-        std::function<bool( const EngineActiveContext& )> condition
+        const MGEN::Type::UnitID                                 my_unit_id,
+        const std::shared_ptr<EngineLoadBalancer>&               lb,
+        std::string_view                                         target_magic_name,
+        const MGEN::Type::UnitID                                 magic_code,
+        const std::vector<std::string>&                          target_class_names,
+        std::function<bool( const EngineActiveContext& )>        condition
     )
     {
         if( lb == nullptr )
@@ -42,11 +42,11 @@ namespace MGEN
         const EngineProfile& profile = *profile_opt;
 
         this->magic_name        = std::string{ target_magic_name };
-        this->input_width       = profile.GetInputImageWidth();
-        this->input_height      = profile.GetInputImageHeight();
+        this->input_width       = static_cast<int>( profile.GetInputImageWidth() );
+        this->input_height      = static_cast<int>( profile.GetInputImageHeight() );
         this->task_type         = profile.GetModelMajorType();
         this->optimize_type     = profile.GetModelOptimizeType();
-        this->is_active_condition = condition;
+        this->is_active_condition = std::move( condition );
 
         // 3. 엔진 구독을 위한 Subscribe ID 생성 (Jump Offset 규칙 적용)
         this->subscribe_id = GetInferenceRequesterID(
@@ -83,7 +83,7 @@ namespace MGEN
 
             for( size_t i = 0; i < total_classes; ++i )
             {
-                if( checker_func( i, upper_target ) == true )
+                if( checker_func( static_cast<int>( i ), upper_target ) == true )
                 {
                     this->target_class_ids[upper_target] = static_cast<MGEN::InferClassID>( i );
                     break;

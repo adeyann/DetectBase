@@ -169,7 +169,7 @@ namespace MGEN
         b_terminated_instance = true;
     }
 
-    void SioHandler::RegistEvent( std::shared_ptr<SioEventBinder> event_binder )
+    void SioHandler::RegistEvent( const std::shared_ptr<SioEventBinder>& event_binder )
     {
         // register event binder
         std::string event_name = event_binder->GetEventName();
@@ -326,27 +326,27 @@ namespace MGEN
 
     void SioEventBinder::SetInterProtocolFunc( InterProtocolFunc func )
     {
-        this->inter_proc = func;
+        this->inter_proc = std::move( func );
     }
 
     void SioEventBinder::SetTargetUnitsExtractor( TargetUnitsExtractor func )
     {
-        this->update_units_extractor = func;
+        this->update_units_extractor = std::move( func );
     }
 
     void SioEventBinder::SetInScopeDirectProcessor( InScopeDirectProcessor func )
     {
-        this->in_scope_direct_processor = func;
+        this->in_scope_direct_processor = std::move( func );
     }
 
     void SioEventBinder::SetMultiUintsSettingManager( std::shared_ptr<ISettingManager> ptr )
     {
-        this->multi_unit_setting_manager = ptr;
+        this->multi_unit_setting_manager = std::move( ptr );
     }
 
     void SioEventBinder::SetInternalQueue( sptrSafeQueue<nlohmann::json> q )
     {
-        this->internal_queue = q;
+        this->internal_queue = std::move( q );
     }
 
     bool SioEventBinder::IsRunnable( const bool need_error_log )

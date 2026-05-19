@@ -10,7 +10,7 @@ namespace MGEN
     /**
      * @brief 타겟 해상도에 맞는 전처리 컨텍스트를 반환하며, 원본 해상도 변경 시 캐시를 초기화합니다.
      */
-    FrameFormattingContext* SwsContextManager::GetContext( int target_w, int target_h, std::shared_ptr<AVFrame> frame )
+    FrameFormattingContext* SwsContextManager::GetContext( int target_w, int target_h, const std::shared_ptr<AVFrame>& frame )
     {
         /**
          * @details 방어적 코딩: 입력 프레임이 유효하지 않으면 컨텍스트를 제공할 수 없습니다.

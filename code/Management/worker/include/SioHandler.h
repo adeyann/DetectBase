@@ -111,7 +111,7 @@ namespace MGEN
         // Initialize must be exec when program initialize
         bool Initialize();
 
-        void RegistEvent( std::shared_ptr<SioEventBinder> event_binder );
+        void RegistEvent( const std::shared_ptr<SioEventBinder>& event_binder );
 
         /** Function that is identified as an event and send
          * @param event_name : Bind Nmae about target event notify ( default : "Message" )

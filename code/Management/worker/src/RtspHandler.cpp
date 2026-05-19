@@ -13,7 +13,7 @@ namespace MGEN
     //   RtspHandler — GStreamer 기반 (Phase 2: receiver + proxy server + ONVIF metadata)
     // ==================================================================================================================
 
-    RtspHandler::RtspHandler( const RtspSetting setting ) noexcept
+    RtspHandler::RtspHandler( const RtspSetting& setting ) noexcept
         : my_local_ip_                    ( setting.my_local_ip )
         , is_init_done_                   ( false )
         , is_rtsp_proxy_static_with_init_ ( setting.is_rtsp_proxy_static_with_init )

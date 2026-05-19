@@ -124,7 +124,7 @@ namespace MGEN
             track_case_.clearAll();
             if( det_num_ > trk_num_ ) {
                 for( uint n = 0; n < det_num_; ++n )
-                    track_case_.allItems.insert( n );
+                    track_case_.allItems.insert( static_cast<int>( n ) );
 
                 for( uint m = 0; m < trk_num_; ++m )
                     track_case_.matchedItems.insert( assignment_[m] );
