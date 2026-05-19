@@ -31,18 +31,6 @@
 
 ## 다음 세션 작업 후보 (우선순위 순)
 
-### A. ThreadProfiler module 신규 작성
-- 현재: RspProf/InfProf/EvtProf inline struct + 100 cycle 마다 직접 MLOG_INFO + SetGauge
-- 목표: 별도 thread 가 모든 stage timing + queue size 일괄 수집
-- 구조:
-  - **PUSH API**: 각 thread 가 `Sample(stage_name, us)` 호출 → atomic accumulator 누적
-  - **PULL API**: queue size / metric 등 외부 source 는 `RegisterPullSource(name, getter)` 등록 → ThreadProfiler thread 가 N초마다 drain
-- 효과: 측정 빈도/필드 변경 시 ThreadProfiler interval 만 수정. 신규 stage 추가는 Sample 한 줄. log format 일관.
-- 위치: `code/Profile/ThreadProfiler.h+cpp` 신규
-- 마이그레이션: RspProf/InfProf/EvtProf → Sample 호출 (~5줄/thread) + RegisterPullSource Init (~15줄)
-- 비용: ~4시간 (구현 + 마이그레이션 + 검증)
-- 빌드 branch: `refactor/thread-profiler` (develop fork)
-
 ### B. audit cleanup PR (refactor/audit-cleanup)
 - v0.1.0 후 별도 PR 로 보류한 needs-review + 누락 항목:
   - clang-tidy needs-review 24:
@@ -95,6 +83,18 @@
 - normal path: `DETECTOR.cpp:410` 명시 `TerminateEngine()` 호출 → fallback path 진입 0 (실 운영 안전)
 - 비용: ~1시간 (derived dtor 1개 추가 + base 단순화 + 검증)
 - 빌드 branch: `fix/engine-dtor-pure-virtual-call`
+
+### A. ThreadProfiler module 신규 작성
+- 현재: RspProf/InfProf/EvtProf inline struct + 100 cycle 마다 직접 MLOG_INFO + SetGauge
+- 목표: 별도 thread 가 모든 stage timing + queue size 일괄 수집
+- 구조:
+  - **PUSH API**: 각 thread 가 `Sample(stage_name, us)` 호출 → atomic accumulator 누적
+  - **PULL API**: queue size / metric 등 외부 source 는 `RegisterPullSource(name, getter)` 등록 → ThreadProfiler thread 가 N초마다 drain
+- 효과: 측정 빈도/필드 변경 시 ThreadProfiler interval 만 수정. 신규 stage 추가는 Sample 한 줄. log format 일관.
+- 위치: `code/Profile/ThreadProfiler.h+cpp` 신규
+- 마이그레이션: RspProf/InfProf/EvtProf → Sample 호출 (~5줄/thread) + RegisterPullSource Init (~15줄)
+- 비용: ~4시간 (구현 + 마이그레이션 + 검증)
+- 빌드 branch: `refactor/thread-profiler` (develop fork)
 
 ---
 
