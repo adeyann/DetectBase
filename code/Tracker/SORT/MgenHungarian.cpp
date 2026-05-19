@@ -102,12 +102,15 @@ namespace MGEN
 		double* ptrDistMatrixEnd = nullptr;
 		double* ptrColumnEnd     = nullptr;
 
+		// C-style 변수 일괄 init pattern (재할당 전 default 0).
+		// cppcheck-suppress-begin unreadVariable
 		double curValue    = 0.0f;
 		double minValue    = 0.0f;
 		int    nOfElements = 0;
 		int    minDim      = 0;
 		int    row         = 0;
 		int    col         = 0;
+		// cppcheck-suppress-end unreadVariable
 
 		/* initialization */
 		for( row = 0; row < nOfRows; row++ )
@@ -213,6 +216,7 @@ namespace MGEN
 	}
 
 	/********************************************************/
+	// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 	void MgenHungarianAlgorithm::BuildAssignmentVector( int* assignment, bool* starMatrix, int nOfRows, int nOfColumns )
 	{
 		int row, col;
@@ -309,6 +313,7 @@ namespace MGEN
 	}
 
 	/********************************************************/
+	// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 	void MgenHungarianAlgorithm::step4( int* assignment, double* distMatrix, bool* starMatrix, bool* newStarMatrix, bool* primeMatrix, bool* coveredColumns, bool* coveredRows, int nOfRows, int nOfColumns, int minDim, int row, int col )
 	{
 		int n;

@@ -24,6 +24,7 @@ namespace MGEN
         return MakeEventOnlyJsonProto( uuid, json_data.dump() );
     }
 
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     EventDataOnlyJson MakeEventOnlyJsonProto( const std::string& uuid, const std::string& json_data_string_fmt )
     {
         EventDataOnlyJson proto;
@@ -62,6 +63,7 @@ namespace MGEN
         return MakeEventDataWithRawImagesProto( uuid, json_data.dump(), std::move( images ) );
     }
 
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     EventDataWithRawImages MakeEventDataWithRawImagesProto( const std::string& uuid, const std::string& json_data_string_fmt, std::vector<RawImageData>&& images )
     {
         EventDataWithRawImages proto;

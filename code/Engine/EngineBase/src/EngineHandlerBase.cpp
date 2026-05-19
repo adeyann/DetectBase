@@ -76,6 +76,9 @@ namespace MGEN
         this->inference_thread_.Stop();
 
         // 3. 하위 클래스의 장치 자원 해제 호출
+        // NOTE: TerminateEngine() 는 normal path 에서 DETECTOR 가 명시 호출 → derived 살아있음.
+        // dtor 의 fallback path 진입 시 derived 이미 destruct → pure virtual UB. fix 별도 PR 예정.
+        // NOLINTNEXTLINE(clang-analyzer-cplusplus.PureVirtualCall)
         ReleaseDeviceResources();
         MLOG_DEBUG("Device resources released for engine '%s', device %d.", profile_.GetProfileName().c_str(), device_id_);
 

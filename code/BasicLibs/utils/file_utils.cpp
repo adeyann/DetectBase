@@ -26,6 +26,7 @@ namespace MGEN
         return fs::absolute(path).string();
     }
 
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     std::string ConcatPath(const std::string& dir, const std::string& file)
     {
         fs::path base(dir);

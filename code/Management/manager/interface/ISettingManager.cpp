@@ -3,6 +3,8 @@
 
 namespace MGEN
 {
+    // std::string_view (16B) 는 by-value pass 가 권장.
+    // cppcheck-suppress passedByValue
     ISettingManager::ISettingManager( std::string_view unit_key_name )
         : unit_key_name_( std::string { unit_key_name } )
     {

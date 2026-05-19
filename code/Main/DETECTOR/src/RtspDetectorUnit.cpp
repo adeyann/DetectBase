@@ -80,18 +80,6 @@ namespace MGEN
                 static_cast<double>( s.f_blocks );
         }
 
-        // /frame 디스크 used / capacity bytes. 실패 시 둘 다 0.
-        struct FrameDiskBytes { double used; double capacity; };
-        FrameDiskBytes GetFrameDiskBytes() noexcept
-        {
-            struct statvfs s {};
-            if( ::statvfs( FRAME_DISK_PATH, &s ) != 0 ) return { 0.0, 0.0 };
-            const double frsize = static_cast<double>( s.f_frsize );
-            const double cap    = static_cast<double>( s.f_blocks ) * frsize;
-            const double avail  = static_cast<double>( s.f_bavail ) * frsize;
-            return { cap - avail, cap };
-        }
-
         // /frame/<YYYY>/<MM>/<DD>/ 형태의 일자 폴더 중 cutoff 보다 오래된 것 삭제.
         // 빈 월/년 폴더도 함께 정리. 삭제된 일자 폴더 수 반환.
         // statvfs / filesystem 에러는 silently 무시 (다음 주기에 재시도).
@@ -201,6 +189,8 @@ namespace MGEN
             // case 2: 폴더 1개만 남고 (당일) 여전히 high — 그 안 파일의 오래된 절반 삭제.
             if( day_dirs.size() == 1 && pct >= FRAME_DISK_EMERGENCY_PCT ) {
                 std::vector<fs::directory_entry> files;
+                // raw loop 가독성 우선.
+                // cppcheck-suppress useStlAlgorithm
                 for( const auto& f : fs::directory_iterator( day_dirs.front(), ec ) ) {
                     if( f.is_regular_file( ec ) ) files.push_back( f );
                 }
@@ -559,7 +549,7 @@ namespace MGEN
         const static std::string postXml =
             "</tt:Frame>"
             "</tt:VideoAnalytics>"
-            "</tt:MetadataStream>\0\0";
+            "</tt:MetadataStream>";
 
         metadata_string.reserve( 2048 );
         metadata_string = "";
@@ -1034,6 +1024,7 @@ namespace MGEN
                 consecutive_mismatch_count_ = 0;
             }
 
+            // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores) — Phase 2 placeholder
             int  last_realtime_fps = realtime_fps_;
             bool need_update_fps   = false;
 
@@ -1299,10 +1290,6 @@ namespace MGEN
         // Response thread 자체 origin_ctx — cam thread 의 origin_ctx 와 분리.
         // 이벤트 발생 시 1080p frame 의 cv::Mat 변환 + cv::imwrite 위해 io_work_queue 에 넘김.
         FrameFormattingContext resp_origin_ctx;
-
-        // Response thread 자체 timing.
-        EventTime last_interval_log_print_time = std::chrono::system_clock::now();
-        const auto long_timelapse_log_interval = 10min;
 
         // ResponseThread stage profile — 모든 단계 us 단위 평균.
         struct RspProf {
