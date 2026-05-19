@@ -172,7 +172,8 @@ namespace MGEN
 
 			for( col = 0; col < nOfColumns; col++ ) {
 				/* find the smallest element in the column */
-				ptrDistMatrixCur = memory_unit->dist_matrix + nOfRows * col;
+				// bugprone-implicit-widening: int*int → ptrdiff_t cast 명시 (큰 matrix 대비 방어).
+				ptrDistMatrixCur = memory_unit->dist_matrix + static_cast<size_t>( nOfRows ) * col;
 				ptrColumnEnd = ptrDistMatrixCur + nOfRows;
 
 				minValue = *ptrDistMatrixCur++;
@@ -183,7 +184,7 @@ namespace MGEN
 				}
 
 				/* subtract the smallest element from each element of the column */
-				ptrDistMatrixCur = memory_unit->dist_matrix + nOfRows * col;
+				ptrDistMatrixCur = memory_unit->dist_matrix + static_cast<size_t>( nOfRows ) * col;
 				while( ptrDistMatrixCur < ptrColumnEnd )
 					*ptrDistMatrixCur++ -= minValue;
 			}
@@ -232,7 +233,8 @@ namespace MGEN
 
 		/* cover every column containing a starred zero */
 		for( col = 0; col < nOfColumns; col++ ) {
-			starMatrixTemp = starMatrix + nOfRows * col;
+			// bugprone-implicit-widening: int*int → ptrdiff_t cast 명시.
+			starMatrixTemp = starMatrix + static_cast<size_t>( nOfRows ) * col;
 			ptrColumnEnd = starMatrixTemp + nOfRows;
 			while( starMatrixTemp < ptrColumnEnd ) {
 				if( *starMatrixTemp++ ) {

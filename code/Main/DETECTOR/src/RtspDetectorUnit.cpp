@@ -872,7 +872,8 @@ namespace MGEN
             cfg.rtsp_url        = cam_setting_opt->url;
             cfg.user_id         = cam_setting_opt->access_id;
             cfg.user_pw         = cam_setting_opt->access_pw;
-            cfg.queue_max_size  = static_cast<size_t>( 2 * detect_fps_limit_ );
+            // bugprone-misplaced-widening-cast: 2 * detect_fps_limit_ (int*int) 후 cast → cast 먼저 후 곱셈.
+            cfg.queue_max_size  = 2 * static_cast<size_t>( detect_fps_limit_ );
             cfg.fps_limit       = detect_fps_limit_;  // happytimesoft 호환 frame skip (큐 size>0 drop + interval drop)
             cfg.enable_raw_passthrough = true;        // Phase 2: raw H.264 byte-stream → RtspHandler → proxy server video forward
 

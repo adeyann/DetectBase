@@ -341,17 +341,27 @@ namespace MGEN
     }
 
     // CameraSettingData
+    //   bugprone-exception-escape (audit 2026-05-19) — noexcept ctor 안 SetUpdater/UpdateFromJson 가
+    //   throw 가능 → std::terminate. CLAUDE.md "외부 lib throw 흡수" 패턴으로 catch(...).
     CameraSettingData::CameraSettingData() noexcept
         : ISettingData( UpdateMode::FirstOnly )
     {
-        this->SetUpdater( Impl_CameraSettingData_UpdateFromJsonObject );
+        try {
+            this->SetUpdater( Impl_CameraSettingData_UpdateFromJsonObject );
+        } catch( ... ) {
+            // noexcept ctor 안 throw 흡수. ctor 실패 시 객체는 default state (Updater 미설정).
+        }
     }
 
     CameraSettingData::CameraSettingData( const nlohmann::json& init_json_data ) noexcept
         : ISettingData( UpdateMode::FirstOnly )
     {
-        this->SetUpdater( Impl_CameraSettingData_UpdateFromJsonObject );
-        this->UpdateFromJson( init_json_data );
+        try {
+            this->SetUpdater( Impl_CameraSettingData_UpdateFromJsonObject );
+            this->UpdateFromJson( init_json_data );
+        } catch( ... ) {
+            // noexcept ctor 안 throw 흡수. JSON parse 실패 시 객체는 partial state.
+        }
     }
 
     // ExcludeCamSettingData

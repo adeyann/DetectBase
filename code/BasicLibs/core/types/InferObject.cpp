@@ -36,7 +36,7 @@ namespace MGEN
         , class_id        ( other.class_id )
         , track_id        ( other.track_id )
         , score           ( other.score )
-        , bbox            ( std::move(other.bbox) ) // Call InferBBox move constructor (defaulted, noexcept)
+        , bbox            ( other.bbox ) // performance-move-const-arg: InferBBox 는 trivially-copyable → move 무효
         , xy_ref_type     ( other.xy_ref_type )
         , coord_format    ( other.coord_format )
         , extend_data     ( std::move(other.extend_data) ) // Call std::vector move constructor (resource transfer, noexcept)
@@ -62,7 +62,7 @@ namespace MGEN
             class_id        = other.class_id;
             track_id        = other.track_id;
             score           = other.score;
-            bbox            = std::move(other.bbox); // Call InferBBox move assignment (defaulted, noexcept)
+            bbox            = other.bbox; // performance-move-const-arg: InferBBox 는 trivially-copyable → move 무효
             xy_ref_type     = other.xy_ref_type;
             coord_format    = other.coord_format;
             extend_data     = std::move(other.extend_data); // Call std::vector move assignment (resource transfer, noexcept)

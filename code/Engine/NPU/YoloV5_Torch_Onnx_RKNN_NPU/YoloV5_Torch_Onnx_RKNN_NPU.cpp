@@ -197,29 +197,32 @@ namespace MGEN
             {
                 for( int j = 0; j < grid_w; j++ )
                 {
-                    int8_t box_confidence = input[ (base_offset * a + 4) * grid_len + i * grid_w + j ];
+                    // bugprone-implicit-widening: int*int 결과를 ptrdiff_t/size_t 로 widening 전 명시 cast.
+                    // 큰 grid_len (예: 1280x1280 input) 환경 대비 방어. 현재 640x640 에서 overflow X.
+                    const size_t grid_len_sz = static_cast<size_t>( grid_len );
+                    int8_t box_confidence = input[ (static_cast<size_t>(base_offset) * a + 4) * grid_len_sz + static_cast<size_t>(i) * grid_w + j ];
 
                     if( box_confidence >= thres_i8 )
                     {
-                        int     offset = ( base_offset * a ) * grid_len + i * grid_w + j;
+                        size_t  offset = ( static_cast<size_t>(base_offset) * a ) * grid_len_sz + static_cast<size_t>(i) * grid_w + j;
                         int8_t* in_ptr = input + offset;
 
-                        float box_x = (deqnt_affine_to_f32( *in_ptr,              zp, scale )) * 2.0 - 0.5;
-                        float box_y = (deqnt_affine_to_f32( in_ptr[grid_len],     zp, scale )) * 2.0 - 0.5;
-                        float box_w = (deqnt_affine_to_f32( in_ptr[2 * grid_len], zp, scale )) * 2.0;
-                        float box_h = (deqnt_affine_to_f32( in_ptr[3 * grid_len], zp, scale )) * 2.0;
+                        float box_x = (deqnt_affine_to_f32( *in_ptr,                          zp, scale )) * 2.0 - 0.5;
+                        float box_y = (deqnt_affine_to_f32( in_ptr[grid_len_sz],              zp, scale )) * 2.0 - 0.5;
+                        float box_w = (deqnt_affine_to_f32( in_ptr[2 * grid_len_sz],          zp, scale )) * 2.0;
+                        float box_h = (deqnt_affine_to_f32( in_ptr[3 * grid_len_sz],          zp, scale )) * 2.0;
 
                         box_x = (box_x + j) * static_cast<float>( stride );
                         box_y = (box_y + i) * static_cast<float>( stride );
-                        box_w = box_w * box_w * static_cast<float>( anchor[a * 2] );
-                        box_h = box_h * box_h * static_cast<float>( anchor[a * 2 + 1] );
+                        box_w = box_w * box_w * static_cast<float>( anchor[static_cast<size_t>(a) * 2] );
+                        box_h = box_h * box_h * static_cast<float>( anchor[static_cast<size_t>(a) * 2 + 1] );
 
                         box_x -= (box_w / 2.0);
                         box_y -= (box_h / 2.0);
 
                         // k=0 은 maxClassProbs / maxClassId 의 초깃값과 동일 → 자기 비교 redundant.
                         // k=1 부터 비교.
-                        int8_t maxClassProbs = in_ptr[5 * grid_len];
+                        int8_t maxClassProbs = in_ptr[5 * grid_len_sz];
                         int    maxClassId    = 0;
 
                         for( size_t k = 1; k < class_num; ++k )
@@ -514,7 +517,8 @@ namespace MGEN
             // alloc memory
             rknn_input& target_input = rknn_inputs_[curr_idx];
 
-            target_input.buf = malloc( input.size );
+            // input 은 std::move 된 후 valid-but-unspecified 상태 → target_input.size 사용 (벡터 안 복사본).
+            target_input.buf = malloc( target_input.size );
 
             if( target_input.buf == nullptr ){
                 MLOG_ERROR("RKNN Input<%d> set error, memory alloc failed", i);
@@ -568,7 +572,8 @@ namespace MGEN
         // 각 픽셀 (3바이트)을 순회하며 Blue와 Red 채널을 교체합니다.
         for (int i = 0; i < num_pixels; ++i) {
             // i번째 픽셀의 시작 주소
-            unsigned char* pixel_ptr = data + i * 3;
+            // bugprone-implicit-widening: i * 3 (int*int) → ptrdiff_t. 큰 image 대비 방어.
+            unsigned char* pixel_ptr = data + static_cast<size_t>(i) * 3;
 
             // pixel_ptr[0] (Blue)와 pixel_ptr[2] (Red)를 교환합니다.
             std::swap(pixel_ptr[0], pixel_ptr[2]);

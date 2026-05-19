@@ -62,7 +62,8 @@ namespace MGEN::Abnormal // MgenSolution's abnormal event namespace
                 // clear if over threshold
                 if( history_objects.size() > DATA_LAYER_HIST_MAX )
                 {
-                    const auto back_up_object = history_objects.front();
+                    // performance-move-const-arg: const 변수에 std::move 무효 → const 제거.
+                    auto back_up_object = history_objects.front();
                     history_objects.clear();
                     history_objects.push_back( std::move( back_up_object ) );
                 }
