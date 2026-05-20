@@ -74,9 +74,13 @@ cam 659 가 8시간 운영 (05-19 13:13 ~ 05-20 05:42 KST) 후 stuck. TCP ESTAB 
 - `detectbase_gst_rtsp_reset_attempt_total{cam_id, result}` — reset 시도 결과 (enter/ok/build_fail/playing_fail/no_pipeline)
 - `detectbase_gst_rtsp_last_frame_age_sec{cam_id}` — last frame 부터 경과 시간 gauge (InferenceThread timeout 마다 update)
 
-## 부수 발견 (PR #9 결함, fix PR 2026-05-20)
+## 부수 발견 (PR #9 결함, PR #17 에서 fix)
 
-`detectbase_correlation_mismatch_total` 가 IncrementCounter 만 호출되고 `RegisterCounter` 누락 → `/metrics` 노출 안 됨 + measure 항상 0. log 직접 count 결과 실제는 658:1290 / 659:1263 / 660:976 / 661:1353 발생. 본 PR 에서 `std::call_once + RegisterCounter` 추가.
+`detectbase_correlation_mismatch_total` 가 IncrementCounter 만 호출되고 `RegisterCounter` 누락 → `/metrics` 노출 안 됨 + measure 항상 0. log 직접 count 결과 실제는 658:1290 / 659:1263 / 660:976 / 661:1353 발생. PR #17 에서 `std::call_once + RegisterCounter` 추가.
+
+## 부수 발견 (PR #16+#17 binary 의 부작용, 별도 추적)
+
+PR #17 binary restart 후 mismatch 폭증 (~70×, T+60 부터 stable plateau). 모든 cam, 모든 mismatch 의 delta = **정확히 10 frame** (cam 내부 NPU response stable backlog). 진단 binary 의 cache line contention 이 InferenceThread push 시간 증가 → result_q backlog 형성 추정. cam stuck 과 다른 issue (시간 패턴 다름, 운영 영향 다름). 자세한 분석: [MISMATCH_SURGE_ANALYSIS_20260520.md](MISMATCH_SURGE_ANALYSIS_20260520.md).
 
 ## 다음 stuck 재발 시 확인 항목
 
