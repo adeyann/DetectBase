@@ -1,6 +1,6 @@
 # DetectBase
 
-**Version**: `0.1.7` (cmake `code/CMakeLists.txt`. master tag `v0.1.0`, develop 누적 patch PR #9~#17 — audit cleanup, RTSP URL fix, engine dtor UB fix, version sync, README sync, gst-rtsp stale 진단, correlation_mismatch metric fix.)
+**Version**: `0.1.8` (cmake `code/CMakeLists.txt`. master tag `v0.1.0`, develop 누적 patch PR #9~#18 — audit cleanup, RTSP URL fix, engine dtor UB fix, version sync, README sync, gst-rtsp stale 진단, correlation_mismatch metric fix, docs full sync.)
 
 Odroid M2 NPU 기반 RTSP 비디오 분석 베이스 프로젝트. 객체 탐지 + 트래킹 + 침입 감지 + 이벤트 송신을 통합한 production-ready 시스템.
 
