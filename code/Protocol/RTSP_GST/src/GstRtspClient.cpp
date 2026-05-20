@@ -108,11 +108,24 @@ namespace MGEN
         rcfg.latency_ms    = cfg_.latency_ms;
         rcfg.enable_raw_passthrough = cfg_.enable_raw_passthrough;
 
+        // 진단 (debug/gst-rtsp-stale-trace 2026-05-20) — cam_id 전달
+        rcfg.cam_id = cfg_.cam_id;
+
         // bus 스레드 콜백 → 비동기 reconnect 요청 (deadlock 회피)
-        rcfg.on_error   = [this]{ RequestReconnect(); };
-        rcfg.on_timeout = [this]{ RequestReconnect(); };
+        rcfg.on_error   = [this]{
+            MLOG_WARN( "GstRtspClient[%d] on_error trigger → RequestReconnect", cfg_.cam_id );
+            RequestReconnect();
+        };
+        rcfg.on_timeout = [this]{
+            MLOG_WARN( "GstRtspClient[%d] on_timeout trigger → RequestReconnect", cfg_.cam_id );
+            RequestReconnect();
+        };
         // BISECTION 복구: EOS reconnect 재활성
-        rcfg.on_eos     = [this]{ eos_reconnect_pending_.store( true ); RequestReconnect(); };
+        rcfg.on_eos     = [this]{
+            MLOG_WARN( "GstRtspClient[%d] on_eos trigger → RequestReconnect (eos_pending=true)", cfg_.cam_id );
+            eos_reconnect_pending_.store( true );
+            RequestReconnect();
+        };
 
         auto frame_cb = [this]( std::shared_ptr<AVFrame> frame ) {
             if( !frame || !queue_ ) return;
@@ -168,10 +181,18 @@ namespace MGEN
 
     void GstRtspClient::RequestReconnect() noexcept
     {
-        if( shutdown_.load() ) return;
+        if( shutdown_.load() ) {
+            MLOG_DEBUG( "GstRtspClient[%d] RequestReconnect ignored (shutdown)", cfg_.cam_id );
+            return;
+        }
         bool expected = false;
         if( reconnect_pending_.compare_exchange_strong( expected, true ) ) {
+            MLOG_INFO( "GstRtspClient[%d] reconnect_pending set → notify worker (eos_pending=%d)",
+                cfg_.cam_id, eos_reconnect_pending_.load() ? 1 : 0 );
             cv_.notify_one();
+        } else {
+            MLOG_INFO( "GstRtspClient[%d] RequestReconnect ignored (already pending, eos_pending=%d)",
+                cfg_.cam_id, eos_reconnect_pending_.load() ? 1 : 0 );
         }
     }
 
@@ -187,6 +208,8 @@ namespace MGEN
             }
             if( shutdown_.load() ) break;
 
+            const bool is_eos_at_wake = eos_reconnect_pending_.load();
+            MLOG_INFO( "GstRtspClient[%d] reconnect worker wake — eos_pending=%d", cfg_.cam_id, is_eos_at_wake ? 1 : 0 );
             reconnect_pending_.store( false );
 
             // EOS 인 경우 — 카메라 mp4 5분 cycle 등 정상 stream 종료.
@@ -260,6 +283,12 @@ namespace MGEN
     {
         std::lock_guard<std::mutex> lk( const_cast<std::mutex&>( receiver_mtx_ ) );
         return receiver_ ? receiver_->GetResetSourceCount() : 0;
+    }
+
+    int64_t GstRtspClient::GetLastFrameNs() const noexcept
+    {
+        std::lock_guard<std::mutex> lk( const_cast<std::mutex&>( receiver_mtx_ ) );
+        return receiver_ ? receiver_->GetLastFrameNs() : 0;
     }
 
 } // namespace MGEN

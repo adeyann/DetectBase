@@ -21,28 +21,37 @@ extern "C" {
 #include <libavutil/pixfmt.h>
 }
 
+#include <chrono>
 #include <cstring>
+#include <mutex>
 
 namespace MGEN
 {
     namespace
     {
-        constexpr const char* METRIC_FRAMES_TOTAL    = "detectbase_gst_rtsp_frames_total";
-        constexpr const char* METRIC_RECONNECT_TOTAL = "detectbase_gst_rtsp_reconnect_total";
-        constexpr const char* METRIC_ERRORS_TOTAL    = "detectbase_gst_rtsp_errors_total";
+        constexpr const char* METRIC_FRAMES_TOTAL       = "detectbase_gst_rtsp_frames_total";
+        constexpr const char* METRIC_RECONNECT_TOTAL    = "detectbase_gst_rtsp_reconnect_total";
+        constexpr const char* METRIC_ERRORS_TOTAL       = "detectbase_gst_rtsp_errors_total";
+        // 진단 (debug/gst-rtsp-stale-trace 2026-05-20)
+        constexpr const char* METRIC_BUS_MSG_TOTAL      = "detectbase_gst_rtsp_bus_message_total";
+        constexpr const char* METRIC_RESET_ATTEMPT      = "detectbase_gst_rtsp_reset_attempt_total";
+        constexpr const char* METRIC_LAST_FRAME_AGE_SEC = "detectbase_gst_rtsp_last_frame_age_sec";
 
         const std::map<std::string, std::string> NO_LABELS;
 
-        bool g_metrics_registered = false;
+        std::once_flag g_recv_metrics_once;
 
         void RegisterMetricsOnce() noexcept
         {
-            if( g_metrics_registered ) return;
-            auto& reg = MetricsRegistry::Instance();
-            reg.RegisterCounter( METRIC_FRAMES_TOTAL,    "GStreamer RTSP frames received and decoded" );
-            reg.RegisterCounter( METRIC_RECONNECT_TOTAL, "GStreamer RTSP reconnect attempts" );
-            reg.RegisterCounter( METRIC_ERRORS_TOTAL,    "GStreamer RTSP bus error events" );
-            g_metrics_registered = true;
+            std::call_once( g_recv_metrics_once, []{
+                auto& reg = MetricsRegistry::Instance();
+                reg.RegisterCounter( METRIC_FRAMES_TOTAL,    "GStreamer RTSP frames received and decoded" );
+                reg.RegisterCounter( METRIC_RECONNECT_TOTAL, "GStreamer RTSP reconnect attempts" );
+                reg.RegisterCounter( METRIC_ERRORS_TOTAL,    "GStreamer RTSP bus error events" );
+                reg.RegisterCounter( METRIC_BUS_MSG_TOTAL,   "GStreamer RTSP bus message count by cam_id and type (debug trace)" );
+                reg.RegisterCounter( METRIC_RESET_ATTEMPT,   "GstRtspReceiver::ResetSourceOnly attempt count by cam_id and result (debug trace)" );
+                reg.RegisterGauge  ( METRIC_LAST_FRAME_AGE_SEC, "Seconds since last frame received per cam_id (debug trace)" );
+            } );
         }
     } // anonymous
 
@@ -51,7 +60,8 @@ namespace MGEN
         , cb_ ( std::move( cb ) )
     {
         RegisterMetricsOnce();
-        MLOG_INFO( "GstRtspReceiver 생성 — url=%s latency=%dms (single-pipeline)", cfg_.url.c_str(), cfg_.latency_ms );
+        MLOG_INFO( "GstRtspReceiver[%d] 생성 — url=%s latency=%dms (single-pipeline)",
+            cfg_.cam_id, cfg_.url.c_str(), cfg_.latency_ms );
     }
 
     GstRtspReceiver::~GstRtspReceiver()
@@ -247,24 +257,39 @@ namespace MGEN
 
     bool GstRtspReceiver::ResetSourceOnly() noexcept
     {
-        if( !pipeline_ ) return false;
+        const auto t_start = std::chrono::steady_clock::now();
+        auto& reg = MetricsRegistry::Instance();
+        const std::string cam_id_str = std::to_string( cfg_.cam_id );
+
+        if( !pipeline_ ) {
+            MLOG_WARN( "ResetSourceOnly[%d] — pipeline_ is nullptr (skipped)", cfg_.cam_id );
+            reg.IncrementCounter( METRIC_RESET_ATTEMPT, { { "cam_id", cam_id_str }, { "result", "no_pipeline" } }, 1.0 );
+            return false;
+        }
 
         reset_source_count_.fetch_add( 1, std::memory_order_relaxed );
-        MLOG_INFO( "ResetSourceOnly — pipeline destroy/rebuild (single)" );
+        MLOG_INFO( "ResetSourceOnly[%d] 진입 — pipeline destroy/rebuild (single), reset_cnt=%lu",
+            cfg_.cam_id, (unsigned long) reset_source_count_.load() );
+        reg.IncrementCounter( METRIC_RESET_ATTEMPT, { { "cam_id", cam_id_str }, { "result", "enter" } }, 1.0 );
 
         TeardownPipeline();
 
         if( !BuildPipeline() ) {
-            MLOG_ERROR( "ResetSourceOnly — BuildPipeline 실패" );
+            MLOG_ERROR( "ResetSourceOnly[%d] — BuildPipeline 실패", cfg_.cam_id );
+            reg.IncrementCounter( METRIC_RESET_ATTEMPT, { { "cam_id", cam_id_str }, { "result", "build_fail" } }, 1.0 );
             return false;
         }
         GstStateChangeReturn r = gst_element_set_state( pipeline_, GST_STATE_PLAYING );
         if( r == GST_STATE_CHANGE_FAILURE ) {
-            MLOG_ERROR( "ResetSourceOnly — PLAYING 실패" );
+            MLOG_ERROR( "ResetSourceOnly[%d] — PLAYING 실패", cfg_.cam_id );
+            reg.IncrementCounter( METRIC_RESET_ATTEMPT, { { "cam_id", cam_id_str }, { "result", "playing_fail" } }, 1.0 );
             TeardownPipeline();
             return false;
         }
-        MLOG_INFO( "ResetSourceOnly OK" );
+        const auto t_end = std::chrono::steady_clock::now();
+        const int64_t dur_us = std::chrono::duration_cast<std::chrono::microseconds>( t_end - t_start ).count();
+        MLOG_INFO( "ResetSourceOnly[%d] OK — duration=%ldus", cfg_.cam_id, (long) dur_us );
+        reg.IncrementCounter( METRIC_RESET_ATTEMPT, { { "cam_id", cam_id_str }, { "result", "ok" } }, 1.0 );
         return true;
     }
 
@@ -283,6 +308,11 @@ namespace MGEN
 
         self->frame_count_.fetch_add( 1 );
         MetricsRegistry::Instance().IncrementCounter( METRIC_FRAMES_TOTAL, NO_LABELS, 1.0 );
+
+        // 진단 (debug/gst-rtsp-stale-trace 2026-05-20) — last_frame timestamp 기록
+        const int64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                  std::chrono::steady_clock::now().time_since_epoch() ).count();
+        self->last_frame_ns_.store( now_ns, std::memory_order_relaxed );
 
         if( self->cb_ ) {
             try {
@@ -388,30 +418,85 @@ namespace MGEN
     gboolean GstRtspReceiver::OnBusMessage( GstBus* /*bus*/, GstMessage* msg, void* user_data )
     {
         auto* self = static_cast<GstRtspReceiver*>( user_data );
+        const GstMessageType mtype = GST_MESSAGE_TYPE( msg );
+        const char* mtype_name = GST_MESSAGE_TYPE_NAME( msg );
+        const char* src_name = GST_OBJECT_NAME( GST_MESSAGE_SRC( msg ) );
+        auto& reg = MetricsRegistry::Instance();
+        const std::string cam_id_str = std::to_string( self->cfg_.cam_id );
 
-        switch( GST_MESSAGE_TYPE( msg ) )
+        // 진단 (debug/gst-rtsp-stale-trace 2026-05-20) — 모든 bus message type 카운트
+        reg.IncrementCounter( METRIC_BUS_MSG_TOTAL,
+            { { "cam_id", cam_id_str }, { "type", mtype_name ? mtype_name : "?" } }, 1.0 );
+
+        switch( mtype )
         {
             case GST_MESSAGE_ERROR:
             {
                 GError* err = nullptr;
                 gchar*  dbg = nullptr;
                 gst_message_parse_error( msg, &err, &dbg );
-                MLOG_ERROR( "GstRtspReceiver bus ERROR: %s (debug=%s)",
+                MLOG_ERROR( "GstRtspReceiver[%d] bus ERROR src=%s: %s (debug=%s)",
+                    self->cfg_.cam_id, src_name ? src_name : "?",
                     err ? err->message : "?",
                     dbg ? dbg : "?" );
                 self->error_count_.fetch_add( 1 );
-                MetricsRegistry::Instance().IncrementCounter( METRIC_ERRORS_TOTAL, NO_LABELS, 1.0 );
+                reg.IncrementCounter( METRIC_ERRORS_TOTAL, NO_LABELS, 1.0 );
                 if( err ) g_error_free( err );
                 if( dbg ) g_free( dbg );
-                if( self->cfg_.on_error ) self->cfg_.on_error();
+                if( self->cfg_.on_error ) {
+                    MLOG_WARN( "GstRtspReceiver[%d] on_error 콜백 호출", self->cfg_.cam_id );
+                    self->cfg_.on_error();
+                }
+                break;
+            }
+            case GST_MESSAGE_WARNING:
+            {
+                GError* err = nullptr;
+                gchar*  dbg = nullptr;
+                gst_message_parse_warning( msg, &err, &dbg );
+                MLOG_WARN( "GstRtspReceiver[%d] bus WARNING src=%s: %s (debug=%s)",
+                    self->cfg_.cam_id, src_name ? src_name : "?",
+                    err ? err->message : "?",
+                    dbg ? dbg : "?" );
+                if( err ) g_error_free( err );
+                if( dbg ) g_free( dbg );
                 break;
             }
             case GST_MESSAGE_EOS:
-                MLOG_WARN( "GstRtspReceiver EOS received (stream 종료)" );
+                MLOG_WARN( "GstRtspReceiver[%d] EOS received src=%s (stream 종료)",
+                    self->cfg_.cam_id, src_name ? src_name : "?" );
                 self->reconnect_count_.fetch_add( 1 );
-                MetricsRegistry::Instance().IncrementCounter( METRIC_RECONNECT_TOTAL, NO_LABELS, 1.0 );
-                if( self->cfg_.on_eos ) self->cfg_.on_eos();
+                reg.IncrementCounter( METRIC_RECONNECT_TOTAL, NO_LABELS, 1.0 );
+                if( self->cfg_.on_eos ) {
+                    MLOG_WARN( "GstRtspReceiver[%d] on_eos 콜백 호출", self->cfg_.cam_id );
+                    self->cfg_.on_eos();
+                }
                 break;
+            case GST_MESSAGE_STATE_CHANGED:
+            {
+                // pipeline element 의 state 변경만 (모든 element 의 변경은 너무 verbose).
+                if( GST_MESSAGE_SRC( msg ) == GST_OBJECT( self->pipeline_ ) ) {
+                    GstState old_st, new_st, pend_st;
+                    gst_message_parse_state_changed( msg, &old_st, &new_st, &pend_st );
+                    MLOG_INFO( "GstRtspReceiver[%d] pipeline STATE_CHANGED: %s → %s (pending=%s)",
+                        self->cfg_.cam_id,
+                        gst_element_state_get_name( old_st ),
+                        gst_element_state_get_name( new_st ),
+                        gst_element_state_get_name( pend_st ) );
+                }
+                break;
+            }
+            case GST_MESSAGE_STREAM_STATUS:
+            {
+                GstStreamStatusType ssm_type;
+                GstElement* owner = nullptr;
+                gst_message_parse_stream_status( msg, &ssm_type, &owner );
+                // verbose, debug 만. cam stuck 분석 시 stream 의 enter/leave 패턴 보기.
+                MLOG_DEBUG( "GstRtspReceiver[%d] STREAM_STATUS type=%d owner=%s",
+                    self->cfg_.cam_id, (int) ssm_type,
+                    owner ? GST_OBJECT_NAME( owner ) : "?" );
+                break;
+            }
             case GST_MESSAGE_ELEMENT:
             {
                 const GstStructure* s = gst_message_get_structure( msg );
@@ -426,19 +511,41 @@ namespace MGEN
                     if( cause_int == RTSPSRC_TIMEOUT_CAUSE_RTCP ) {
                         static thread_local bool logged_once = false;
                         if( !logged_once ) {
-                            MLOG_INFO( "GstRTSPSrcTimeout cause=RTCP — stream 정상, reconnect 안 함 (이후 silent)" );
+                            MLOG_INFO( "GstRtspReceiver[%d] GstRTSPSrcTimeout cause=RTCP — stream 정상, reconnect 안 함 (이후 silent)",
+                                self->cfg_.cam_id );
                             logged_once = true;
                         }
                     } else {
-                        MLOG_WARN( "GstRTSPSrcTimeout cause=%d — reconnect 트리거", cause_int );
+                        MLOG_WARN( "GstRtspReceiver[%d] GstRTSPSrcTimeout cause=%d — reconnect 트리거",
+                            self->cfg_.cam_id, cause_int );
                         self->reconnect_count_.fetch_add( 1 );
-                        MetricsRegistry::Instance().IncrementCounter( METRIC_RECONNECT_TOTAL, NO_LABELS, 1.0 );
-                        if( self->cfg_.on_timeout ) self->cfg_.on_timeout();
+                        reg.IncrementCounter( METRIC_RECONNECT_TOTAL, NO_LABELS, 1.0 );
+                        if( self->cfg_.on_timeout ) {
+                            MLOG_WARN( "GstRtspReceiver[%d] on_timeout 콜백 호출", self->cfg_.cam_id );
+                            self->cfg_.on_timeout();
+                        }
                     }
+                } else if( s ) {
+                    // 다른 element message 도 진단 — cam stuck 시 어떤 element 가 message 보내는지 확인.
+                    const gchar* name = gst_structure_get_name( s );
+                    MLOG_DEBUG( "GstRtspReceiver[%d] ELEMENT msg src=%s structure=%s",
+                        self->cfg_.cam_id, src_name ? src_name : "?", name ? name : "?" );
                 }
                 break;
             }
+            case GST_MESSAGE_BUFFERING:
+            case GST_MESSAGE_LATENCY:
+            case GST_MESSAGE_ASYNC_DONE:
+            case GST_MESSAGE_NEW_CLOCK:
+                // 일반적 — 1회 log 만.
+                MLOG_DEBUG( "GstRtspReceiver[%d] bus msg type=%s src=%s",
+                    self->cfg_.cam_id, mtype_name ? mtype_name : "?", src_name ? src_name : "?" );
+                break;
             default:
+                // unknown message type — 진단 시 cam stuck 의 단서일 수 있음.
+                MLOG_INFO( "GstRtspReceiver[%d] bus msg UNKNOWN type=%s(%d) src=%s",
+                    self->cfg_.cam_id, mtype_name ? mtype_name : "?",
+                    (int) mtype, src_name ? src_name : "?" );
                 break;
         }
         return TRUE;
