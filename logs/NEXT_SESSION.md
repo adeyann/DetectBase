@@ -5,27 +5,45 @@
 
 ---
 
-## 현 상태 (2026-05-19 기준)
+## 현 상태 (2026-05-20 기준)
 
 ### Git
 - **master**: `d9ab212` — v0.1.0 tagged
-- **develop**: `90eee99` — master 와 동기화 (no-ff merge commit `merge: master v0.1.0 sync to develop`)
-- 모든 feature 브랜치 정리됨 (squash merge 후 자동 삭제)
-- Git workflow 변경: **squash merge → no-ff merge commit** (memory rule 갱신, feedback_git_workflow.md)
-- Co-Authored-By trailer 제거 (memory rule feedback_no_coauthor_trailer.md)
+- **develop**: PR #18 (`a2e6bc3`) — PR #9~#18 누적 (cmake 0.1.7)
+- 모든 feature 브랜치 정리됨 (no-ff merge commit 정책 + `--delete-branch`)
+- Git workflow: no-ff merge commit, cmake VERSION = git tag, develop 머지 patch +1 auto
+- Co-Authored-By trailer 금지 (feedback_no_coauthor_trailer.md)
 
-### 운영
-- `detectbase_service` 정상 가동 중
-- 4 cam × ~29 fps/cam, RSS 602~657 MB ±55 MB plateau, q_drop 0
-- jemalloc 활성 (background_thread:true)
+### 운영 (2026-05-20)
+- `detectbase_service` Up (PR #16+#17 진단 binary)
+- 4 cam × ~29 fps/cam, plateau 정상
+- cam 659 1회 stuck (05:42 KST) → restart 후 복구 + 진단 binary 적용. stuck 재발 대기 중.
+- Monitor `b97mx4ehw` persistent (30min cycle, T+0 = 10:44)
 
-### Audit baseline (audit_20260519_145745)
-- cppcheck **63** (false positive 20 + Profiler 자연정리 9 + needs-review 11)
-- clang-tidy **30** (needs-review 24 + 누락 narrowing 4 + exception-escape FP 2)
-- ASan/UBSan: startup leak 0 + runtime leak 1 (GStreamer rtpmanager, 수용)
-- TSan: **우리 코드 진짜 race 0 ✅**, 잔여 139 (SIGKILL FP + 외부 lib + 추적 한계)
+### Audit baseline (audit_20260519_222710 — PR #13 H fix 검증)
+- cppcheck **59** (이전 63 → PR #9 dead code 제거 -2 + em-dash suppress fix -2)
+- clang-tidy **0 ✅** (이전 30 → PR #9 NOLINT 24 + PR #13 진짜 fix)
+- ASan/UBSan: startup leak 0 + runtime leak ~1.2MB (GStreamer rtpmanager, 5분 run, 수용)
+- TSan: **우리 코드 진짜 race 0 ✅**, 잔여 137 (SIGKILL FP + 외부 lib + 추적 한계)
 
-자세한 결과: [AUDIT_REPORT_20260519.md](AUDIT_REPORT_20260519.md), [SESSION_DFPS_B3_B4_PLATEAU_20260519.md](SESSION_DFPS_B3_B4_PLATEAU_20260519.md).
+자세한 결과:
+- [AUDIT_REPORT_20260519.md](AUDIT_REPORT_20260519.md) (v0.1.0 baseline, historical)
+- [SESSION_DFPS_B3_B4_PLATEAU_20260519.md](SESSION_DFPS_B3_B4_PLATEAU_20260519.md) (v0.1.0 직전 세션)
+- [STUCK_ANALYSIS_cam659_20260520.md](STUCK_ANALYSIS_cam659_20260520.md) (GstRtsp stale 추적)
+
+### PR 누적 (v0.1.0 → develop)
+| PR | 변경 | 목적 |
+|---|---|---|
+| #9 | refactor/audit-cleanup | NOLINT 24 + safe fix 7 + future PR §H 분리 |
+| #10 | docs/next-session-reorder | NEXT_SESSION §A 를 §H 뒤로 |
+| #11 | docs/next-session-c-reorder | §C 를 §A 뒤로 (mismatch=0 확인 후) |
+| #12 | fix/rtsp-url-port | mount `/<id>` + port 555 + ServerSetting wiring |
+| #13 | fix/engine-dtor-pure-virtual-call | EngineHandlerBase dtor pure virtual UB 진짜 fix (clang-tidy 30 → 0) |
+| #14 | chore/cmake-version-sync-0.1.3 | cmake VERSION 2.2.3 → 0.1.3 (git tag 동기) |
+| #15 | docs/readme-version-sync | README v0.1.4 sync + cmake 0.1.4 |
+| #16 | debug/gst-rtsp-stale-trace | cam stuck root cause 진단 도구 + cmake 0.1.5 |
+| #17 | fix/correlation-mismatch-metric | RegisterCounter 누락 fix + STUCK_ANALYSIS doc + cmake 0.1.6 |
+| #18 | docs/post-pr17-sync | README/OPERATIONS/CLAUDE/code 갱신 + cmake 0.1.7 |
 
 ---
 
