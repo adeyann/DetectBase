@@ -53,6 +53,23 @@ namespace MGEN
         return std::abs(diff) > lapse.count();
     }
 
+    // correlation_mismatch_total metric registration (PR #9 결함 fix 2026-05-20).
+    //   IncrementCounter (line 1442) 는 unregistered metric 호출 시 silently no-op 이라
+    //   PR #9 이후 4882건 발생한 mismatch 가 metric 으로 노출 안 됐었음.
+    //   ctor 에서 std::call_once 로 한 번만 register.
+    namespace
+    {
+        std::once_flag g_correlation_mismatch_metric_once;
+        void RegisterCorrelationMismatchMetricOnce() noexcept
+        {
+            std::call_once( g_correlation_mismatch_metric_once, []{
+                MGEN::MetricsRegistry::Instance().RegisterCounter(
+                    "detectbase_correlation_mismatch_total",
+                    "Correlation ID mismatch between inflight frame and NPU response per cam_id (frame ordering defense counter)" );
+            } );
+        }
+    }
+
     // ============================================================================
     // P54 — /frame 디스크 방어 정책 (3 Layer)
     //   Layer 1: imwrite 직전 사전 차단 (>= 90% 사용 시 skip)
@@ -298,7 +315,7 @@ namespace MGEN
         , network_manager_ ( std::move( network_manager )   )
         , iostream_manager_( std::move( io_stream_manager ) )
     {
-        //
+        RegisterCorrelationMismatchMetricOnce();
     }
 
     RtspDetectorUnit::~RtspDetectorUnit()
