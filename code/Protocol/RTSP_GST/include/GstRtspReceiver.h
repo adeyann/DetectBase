@@ -53,6 +53,9 @@ namespace MGEN
             bool keepalive           = true;
             int  appsink_max_buffers = 2;
 
+            /// 진단용 cam_id (log/metric 에 명시). 0 = 미지정.
+            int  cam_id = 0;
+
             std::function<void()> on_error;
             std::function<void()> on_timeout;
             std::function<void()> on_eos;
@@ -95,6 +98,9 @@ namespace MGEN
         // leak hunt v4 — ResetSourceOnly 호출 누적 카운터 (EOS reconn 빈도 측정 + 매 reconn 시 leak 감시).
         uint64_t GetResetSourceCount() const noexcept { return reset_source_count_.load(); }
 
+        // 진단 (debug/gst-rtsp-stale-trace 2026-05-20) — 마지막 frame 수신 시각 (steady_clock ns).
+        int64_t GetLastFrameNs() const noexcept { return last_frame_ns_.load(); }
+
     private:
         static GstFlowReturn OnNewSample   ( GstAppSink* sink, void* user_data );
         static GstFlowReturn OnNewRawSample( GstAppSink* sink, void* user_data );
@@ -123,6 +129,9 @@ namespace MGEN
 
         // leak hunt v4 — ResetSourceOnly 호출 누적.
         std::atomic<uint64_t> reset_source_count_ { 0 };
+
+        // 진단 (debug/gst-rtsp-stale-trace 2026-05-20) — 마지막 frame 수신 시각 (steady_clock ns).
+        std::atomic<int64_t>  last_frame_ns_      { 0 };
 
         // leak hunt v4 — process-wide AVFrame alive count (ConvertSampleToAVFrame deleter wrap).
         static std::atomic<uint64_t> s_avframe_alive_;

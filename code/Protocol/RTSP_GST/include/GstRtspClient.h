@@ -107,6 +107,13 @@ namespace MGEN
         // leak hunt v4 — receiver 의 ResetSourceOnly 호출 누적 카운터 (EOS reconn 빈도 측정).
         uint64_t GetResetSourceCount() const noexcept;
 
+        // 진단 (debug/gst-rtsp-stale-trace 2026-05-20) — 마지막 frame 수신 시각 (steady_clock ns). 0=아직 없음.
+        int64_t GetLastFrameNs() const noexcept;
+
+        // 진단 — reconnect_pending / eos_pending state 현재 값.
+        bool IsReconnectPending() const noexcept { return reconnect_pending_.load(); }
+        bool IsEosPending()       const noexcept { return eos_reconnect_pending_.load(); }
+
     private:
         /** Receiver 의 on_error/on_timeout/on_eos 콜백에서 호출. 비동기 reconnect 트리거. */
         void RequestReconnect() noexcept;
