@@ -1,7 +1,7 @@
-# NEXT_SESSION — v0.1.0 release 완료 후 진입점
+# NEXT_SESSION — v0.1.0 release 후 진입점
 
-**최종 갱신**: 2026-05-19 16:00 KST
-**현 상태**: `v0.1.0` released. master/develop 동기화 완료. 다음 작업 후보 = ThreadProfiler module 또는 audit cleanup PR.
+**최종 갱신**: 2026-05-20 10:30 KST
+**현 상태**: cmake VERSION `0.1.6` (develop). v0.1.0 master tagged. PR #9~#16 develop 누적 (audit cleanup, RTSP URL fix, engine dtor UB fix, version sync, README sync, gst-rtsp 진단 trace). cam 659 stuck 1회 발생 (분석 진행 중, [STUCK_ANALYSIS_cam659_20260520.md](STUCK_ANALYSIS_cam659_20260520.md)).
 
 ---
 
@@ -31,18 +31,16 @@
 
 ## 다음 세션 작업 후보 (우선순위 순)
 
-### B. audit cleanup PR (refactor/audit-cleanup)
-- v0.1.0 후 별도 PR 로 보류한 needs-review + 누락 항목:
-  - clang-tidy needs-review 24:
-    - `bugprone-easily-swappable-parameters` 16 (struct wrapper 또는 named-arg 패턴)
-    - `bugprone-branch-clone` 4 (의도 vs 버그 검토)
-    - `bugprone-string-literal-with-embedded-nul` 1 (RtspDetectorUnit:560)
-    - 3 기타
-  - clang-tidy 누락 4: YoloV5:50/51/59/60 의 `r_w * img.rows` int→float 명시 cast
-  - clang-tidy false positive 2: SettingData:353/363 base ctor exception-escape (NOLINT 또는 base noexcept)
-  - cppcheck needs-review 11: useStlAlgorithm 5 + unreadVariable 4 + unusedStructMember 2
-- 비용: ~3~4시간
-- 빌드 branch: `refactor/audit-cleanup`
+### B. ~~audit cleanup PR~~ ✅ 완료 (2026-05-19, PR #9 `refactor/audit-cleanup`)
+- clang-tidy 30 → 0 (NOLINT 24 + 진짜 fix PR #13)
+- cppcheck 63 → 59 (em-dash fix + dead code 제거 + suppress)
+
+### NEW. GstRtsp stale state root cause 추적 (진행 중)
+- **상태**: cam 659 stuck 1회 발생 (2026-05-20 05:42 KST), 진단 binary deployed (PR #16, cmake 0.1.5)
+- **진단 추가**: bus_message_total / reset_attempt_total / last_frame_age_sec metric + 모든 bus message type log
+- **다음 단계**: cam stuck 재발생 까지 monitoring 대기. 발생 시 metric/log 로 가설 좁히기.
+- **자동 복구 (watchdog) 금지**: 사용자 정책상 root cause 식별 전 forced restart 안 함.
+- 자세한 분석: [STUCK_ANALYSIS_cam659_20260520.md](STUCK_ANALYSIS_cam659_20260520.md)
 
 ### D. ~~RTSP URL / publish port 정정~~ ✅ 완료 (2026-05-19, `fix/rtsp-url-port`)
 - mount path `/cam<id>` → `/<id>`
