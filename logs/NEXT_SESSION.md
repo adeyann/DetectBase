@@ -44,6 +44,8 @@
 | #16 | debug/gst-rtsp-stale-trace | cam stuck root cause 진단 도구 + cmake 0.1.5 |
 | #17 | fix/correlation-mismatch-metric | RegisterCounter 누락 fix + STUCK_ANALYSIS doc + cmake 0.1.6 |
 | #18 | docs/post-pr17-sync | README/OPERATIONS/CLAUDE/code 갱신 + cmake 0.1.7 |
+| #19 | docs/deep-sync | NEXT_SESSION 현 상태 + PR 누적 표 + cmake 0.1.8 |
+| #20 | docs/preserve-mismatch-analysis | MISMATCH_SURGE_ANALYSIS doc 신규 + STUCK_ANALYSIS 부수 발견 추가 + CLAUDE.md Known Issues mismatch surge 추가 + cmake 0.1.9 |
 
 ---
 
@@ -53,12 +55,24 @@
 - clang-tidy 30 → 0 (NOLINT 24 + 진짜 fix PR #13)
 - cppcheck 63 → 59 (em-dash fix + dead code 제거 + suppress)
 
-### NEW. GstRtsp stale state root cause 추적 (진행 중)
+### NEW-1. GstRtsp stale state root cause 추적 (진행 중)
 - **상태**: cam 659 stuck 1회 발생 (2026-05-20 05:42 KST), 진단 binary deployed (PR #16, cmake 0.1.5)
 - **진단 추가**: bus_message_total / reset_attempt_total / last_frame_age_sec metric + 모든 bus message type log
 - **다음 단계**: cam stuck 재발생 까지 monitoring 대기. 발생 시 metric/log 로 가설 좁히기.
 - **자동 복구 (watchdog) 금지**: 사용자 정책상 root cause 식별 전 forced restart 안 함.
 - 자세한 분석: [STUCK_ANALYSIS_cam659_20260520.md](STUCK_ANALYSIS_cam659_20260520.md)
+
+### NEW-2. `correlation_mismatch` 폭증 root cause 추적 (진행 중)
+- **상태**: PR #16+#17 binary 적용 후 mismatch ~70× 폭증 (0.4/cam/sec → 27.5/cam/sec). 30분당 +200K stable plateau.
+- **핵심 관찰**: 모든 mismatch delta = **정확히 10 frame** (variance 0, cross-cam 아님)
+- **동시 이상**: prof_RSP ifq/resp 분포 반전 (10K/24K → 33K/0.15K), HWM 1GB peak, prof_INF push 16→41us 증가
+- **운영 영향**: frame 시차 ~330ms (10 × 33ms) → bbox / tracking / event detection 정확도 영향. q_drop 0, cam 4/4 OK.
+- **Root cause 가설**: PR #16 의 진단 코드 (`last_frame_ns_` atomic store 매 frame + bus message IncrementCounter 매 호출) 의 cache line contention 으로 InferenceThread push 시간 증가 → result_q backlog 10 frame stable 형성.
+- **다음 단계**:
+  - Phase 1: 진단 항목 비활성 실험 (어느 변경이 trigger 인지 식별)
+  - Phase 2: PR #9 §C 옵션 적용 (per-correlation_id lookup 또는 handler affinity)
+  - Phase 3: 진단 binary light version 또는 제거 검증
+- 자세한 분석: [MISMATCH_SURGE_ANALYSIS_20260520.md](MISMATCH_SURGE_ANALYSIS_20260520.md)
 
 ### D. ~~RTSP URL / publish port 정정~~ ✅ 완료 (2026-05-19, `fix/rtsp-url-port`)
 - mount path `/cam<id>` → `/<id>`
