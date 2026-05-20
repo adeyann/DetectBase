@@ -1,6 +1,6 @@
 # DetectBase
 
-**Version**: `0.1.4` (cmake `code/CMakeLists.txt`. master tag `v0.1.0`, develop 누적 patch.)
+**Version**: `0.1.7` (cmake `code/CMakeLists.txt`. master tag `v0.1.0`, develop 누적 patch PR #9~#17 — audit cleanup, RTSP URL fix, engine dtor UB fix, version sync, README sync, gst-rtsp stale 진단, correlation_mismatch metric fix.)
 
 Odroid M2 NPU 기반 RTSP 비디오 분석 베이스 프로젝트. 객체 탐지 + 트래킹 + 침입 감지 + 이벤트 송신을 통합한 production-ready 시스템.
 
@@ -971,7 +971,8 @@ grep "PROGRAM QUIT SUCCESS" logs/DetectBase.log
 
 | 문서 | 내용 |
 |---|---|
-| **[logs/NEXT_SESSION.md](logs/NEXT_SESSION.md)** | v0.1.0 release 완료 후 진입점 (다음 작업: ThreadProfiler / audit cleanup PR) |
+| **[logs/NEXT_SESSION.md](logs/NEXT_SESSION.md)** | v0.1.0 release 후 진입점 (현 진행: GstRtsp stale root cause 추적, 다음 후보: ThreadProfiler / TSan SafeQueue / GStreamer 1.24+ upgrade 등) |
+| **[logs/STUCK_ANALYSIS_cam659_20260520.md](logs/STUCK_ANALYSIS_cam659_20260520.md)** | cam 659 stuck 사건 분석 (2026-05-20) + 진단 도구 (PR #16) 활용 절차 |
 | [logs/SESSION_DFPS_B3_B4_PLATEAU_20260519.md](logs/SESSION_DFPS_B3_B4_PLATEAU_20260519.md) | v0.1.0 release 직전 세션 전체 진행 (B3/B4 + audit + TSan race fix + 마무리) |
 | [logs/AUDIT_REPORT_20260519.md](logs/AUDIT_REPORT_20260519.md) | audit 결과 + rtpmanager A 결정 |
 | [logs/NPU_MODEL_PERFORMANCE.md](logs/NPU_MODEL_PERFORMANCE.md) | YOLOv5 s/m/l/x 성능 예측 |

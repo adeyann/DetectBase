@@ -108,16 +108,20 @@ GRPC 활성화 / 운영 정책은 [상위 README §"GRPC 통신"](../README.md) 
 - const 정확성 필수
 - 공개 API 에 Doxygen 주석
 
-## 검증 상태 (3차 코드리뷰 후, 2026-05-09)
+## 검증 상태 (2026-05-20 — PR #9 audit cleanup + PR #13 H fix 후, cmake 0.1.7)
 
 | 항목 | 결과 |
 |---|---|
 | 자체 throw | 0건 (CLAUDE.md 100% 준수) |
 | C-style cast 자체 코드 | 0건 |
-| 자체 코드 ASan/UBSan 검출 | 0건 (외부 librknnrt.so init leak 만) |
-| 자체 코드 TSan 진짜 race | 0건 (NEW-8 fix 후 187건 모두 false positive) |
-| 자체 코드 cppcheck 결함 | 0건 (Tracker SORT 외부 알고리즘 7건만) |
+| 자체 코드 ASan/UBSan 검출 | 0건 (외부 librknnrt.so init leak + GStreamer rtpmanager runtime leak — 모두 수용) |
+| 자체 코드 TSan 진짜 race | **0건 ✅** (4 root cause 모두 fix: SioHandler UAF, InferenceCounter map, RegisterMetricsOnce init, SafeQueue shared_ptr ref) |
+| 자체 코드 cppcheck 결함 | **59건** (false positive + Profiler 자연정리 + cppcheck syntax quirk suppress 보존) |
+| 자체 코드 clang-tidy warning | **0건 ✅** (PR #9 NOLINT 24 + PR #13 EngineHandlerBase dtor pure virtual UB 진짜 fix) |
 | graceful shutdown | 10초, PROGRAM QUIT SUCCESS |
-| 운영 leak (RSS/FD/Thread) | 0건 (12분 측정) |
+| 운영 leak (RSS/FD/Thread) | 0건 (10h sanity baseline: RSS plateau ±20MB, FD/Threads stable) |
 
-자세한 내용: [.DOCS/REVIEW3/SUMMARY.md](../.DOCS/REVIEW3/SUMMARY.md) (레거시)
+자세한 내용:
+- [.DOCS/REVIEW3/SUMMARY.md](../.DOCS/REVIEW3/SUMMARY.md) (3차 review baseline, 레거시)
+- [../logs/AUDIT_REPORT_20260519.md](../logs/AUDIT_REPORT_20260519.md) (v0.1.0 audit baseline)
+- [../logs/STUCK_ANALYSIS_cam659_20260520.md](../logs/STUCK_ANALYSIS_cam659_20260520.md) (GstRtsp stale 추적, 진행 중)
