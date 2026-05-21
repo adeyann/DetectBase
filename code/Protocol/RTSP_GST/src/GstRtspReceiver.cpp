@@ -36,6 +36,17 @@ namespace MGEN
         constexpr const char* METRIC_BUS_MSG_TOTAL      = "detectbase_gst_rtsp_bus_message_total";
         constexpr const char* METRIC_RESET_ATTEMPT      = "detectbase_gst_rtsp_reset_attempt_total";
         constexpr const char* METRIC_LAST_FRAME_AGE_SEC = "detectbase_gst_rtsp_last_frame_age_sec";
+        // 측정 (experiment/rtcp-timeout-measure 2026-05-21) — RTCP timeout 발생 빈도 측정용.
+        //   현재 cause=RTCP 는 무시 (reconnect 안 함) — behavior 변경 없이 count 만 추가.
+        constexpr const char* METRIC_RTCP_TIMEOUT_TOTAL = "detectbase_gst_rtsp_rtcp_timeout_total";
+        // 측정 (2026-05-21) — pipeline 단계별 buffer flow per cam (stuck 위치 확정용)
+        constexpr const char* METRIC_DEPAY_BUFFER_TOTAL = "detectbase_gst_rtsp_depay_buffer_total";  // depay src (pre-decode)
+        constexpr const char* METRIC_DECODED_TOTAL      = "detectbase_gst_rtsp_decoded_total";       // appsink (decoded), per cam
+        // 검증 (2026-05-21) — depay sink (rtspsrc → depay 진입) + jitterbuffer stats
+        constexpr const char* METRIC_RTP_IN_TOTAL       = "detectbase_gst_rtsp_rtp_in_total";        // depay sink (rtspsrc 출력)
+        constexpr const char* METRIC_JB_PUSHED          = "detectbase_gst_rtsp_jb_num_pushed";       // jitterbuffer num-pushed (gauge)
+        constexpr const char* METRIC_JB_LOST            = "detectbase_gst_rtsp_jb_num_lost";         // jitterbuffer num-lost (gauge)
+        constexpr const char* METRIC_JB_RTX_COUNT       = "detectbase_gst_rtsp_jb_rtx_count";        // jitterbuffer rtx-count (gauge)
 
         const std::map<std::string, std::string> NO_LABELS;
 
@@ -51,6 +62,13 @@ namespace MGEN
                 reg.RegisterCounter( METRIC_BUS_MSG_TOTAL,   "GStreamer RTSP bus message count by cam_id and type (debug trace)" );
                 reg.RegisterCounter( METRIC_RESET_ATTEMPT,   "GstRtspReceiver::ResetSourceOnly attempt count by cam_id and result (debug trace)" );
                 reg.RegisterGauge  ( METRIC_LAST_FRAME_AGE_SEC, "Seconds since last frame received per cam_id (debug trace)" );
+                reg.RegisterCounter( METRIC_RTCP_TIMEOUT_TOTAL, "GstRTSPSrcTimeout cause=RTCP occurrences per cam_id (measurement — behavior unchanged)" );
+                reg.RegisterCounter( METRIC_DEPAY_BUFFER_TOTAL, "RTP/pre-decode buffers passing rtph264depay src pad per cam_id (stuck-stage trace)" );
+                reg.RegisterCounter( METRIC_DECODED_TOTAL,      "Decoded frames reaching appsink per cam_id (stuck-stage trace)" );
+                reg.RegisterCounter( METRIC_RTP_IN_TOTAL,       "Buffers entering rtph264depay sink pad per cam_id (rtspsrc output — stuck-stage trace)" );
+                reg.RegisterGauge  ( METRIC_JB_PUSHED,          "rtpjitterbuffer num-pushed per cam_id" );
+                reg.RegisterGauge  ( METRIC_JB_LOST,            "rtpjitterbuffer num-lost per cam_id" );
+                reg.RegisterGauge  ( METRIC_JB_RTX_COUNT,       "rtpjitterbuffer rtx-count per cam_id" );
             } );
         }
     } // anonymous
@@ -106,7 +124,7 @@ namespace MGEN
                 "    timeout=%d tcp-timeout=%d do-retransmission=%s "
                 "    keepalive=true udp-buffer-size=2097152 "
                 "    user-id=%s user-pw=%s "
-                "  ! rtph264depay ! h264parse "
+                "  ! rtph264depay name=depay ! h264parse "
                 "  ! tee name=tee_h264 "
                 "tee_h264. ! queue max-size-buffers=4 leaky=downstream "
                 "  ! avdec_h264 ! videoconvert ! video/x-raw,format=I420 "
@@ -128,7 +146,11 @@ namespace MGEN
                 "    timeout=%d tcp-timeout=%d do-retransmission=%s "
                 "    keepalive=true udp-buffer-size=2097152 "
                 "    user-id=%s user-pw=%s "
-                "  ! rtph264depay ! h264parse "
+                "  ! rtph264depay name=depay ! h264parse "
+                // 검증 (2026-05-21): decouple queue 추가. raw 변형엔 있으나 normal 에 누락됐던 것.
+                //   leaky=downstream → decode 지연 시 upstream(udpsrc) backpressure 차단 (frame drop 으로 흡수).
+                //   가설: 이 queue 부재가 cam stuck (udpsrc socket read 중단) 의 원인.
+                "  ! queue name=decodeq max-size-buffers=4 leaky=downstream "
                 "  ! avdec_h264 ! videoconvert ! video/x-raw,format=I420 "
                 "  ! appsink name=sink emit-signals=true sync=false max-buffers=%d drop=true",
                 cfg_.url.c_str(),
@@ -140,6 +162,9 @@ namespace MGEN
                 cfg_.user_pw.c_str(),
                 cfg_.appsink_max_buffers );
         }
+
+        // 측정 (2026-05-21): timeout 값이 실제 pipeline 에 적용되는지 검증용 desc log
+        MLOG_INFO( "GstRtspReceiver[%d] pipeline desc: %s", cfg_.cam_id, desc );
 
         GError* err = nullptr;
         pipeline_ = gst_parse_launch( desc, &err );
@@ -182,12 +207,107 @@ namespace MGEN
         bus_watch_id_ = gst_bus_add_watch( bus, &GstRtspReceiver::OnBusMessage, this );
         gst_object_unref( bus );
 
+        // 측정 (2026-05-21): depay src pad 에 buffer probe 추가 — RTP/pre-decode flow per cam.
+        //   probe 는 pipeline destroy 시 자동 제거됨. element ref 는 즉시 unref.
+        GstElement* depay = gst_bin_get_by_name( GST_BIN( pipeline_ ), "depay" );
+        if( depay ) {
+            GstPad* src_pad = gst_element_get_static_pad( depay, "src" );
+            if( src_pad ) {
+                gst_pad_add_probe( src_pad, GST_PAD_PROBE_TYPE_BUFFER,
+                    &GstRtspReceiver::OnDepayBufferProbe, this, nullptr );
+                gst_object_unref( src_pad );
+            }
+            // 검증 (2026-05-21): depay SINK probe (rtspsrc 출력 = depay 진입)
+            GstPad* sink_pad = gst_element_get_static_pad( depay, "sink" );
+            if( sink_pad ) {
+                gst_pad_add_probe( sink_pad, GST_PAD_PROBE_TYPE_BUFFER,
+                    &GstRtspReceiver::OnRtpInProbe, this, nullptr );
+                gst_object_unref( sink_pad );
+            }
+            gst_object_unref( depay );
+        }
+
+        // 검증 (2026-05-21): rtspsrc 의 rtpbin manager → jitterbuffer 캡처 (stats 추적)
+        jitterbuffer_ = nullptr;
+        GstElement* src = gst_bin_get_by_name( GST_BIN( pipeline_ ), "src" );
+        if( src ) {
+            g_signal_connect( src, "new-manager", G_CALLBACK( &GstRtspReceiver::OnNewManager ), this );
+            gst_object_unref( src );
+        }
+
+        // 검증 (2026-05-21): jitterbuffer stats timer 를 BuildPipeline 에서 추가 (매 EOS rebuild 마다 재등록).
+        //   이전 버그: MainLoopThreadFunc 에서 1회만 추가 → 첫 reset 의 Teardown 이 제거 후 재등록 안 됨 → gauge frozen.
+        jitter_timer_id_ = g_timeout_add( 2000, &GstRtspReceiver::OnJitterStatsTimer, this );
+
         return true;
+    }
+
+    void GstRtspReceiver::OnNewManager( GstElement* /*rtspsrc*/, GstElement* manager, void* user_data )
+    {
+        // rtpbin 의 new-jitterbuffer 신호 연결 → jitterbuffer element 캡처
+        g_signal_connect( manager, "new-jitterbuffer",
+            G_CALLBACK( &GstRtspReceiver::OnNewJitterbuffer ), user_data );
+    }
+
+    void GstRtspReceiver::OnNewJitterbuffer( GstElement* /*rtpbin*/, GstElement* jb, guint session, guint /*ssrc*/, void* user_data )
+    {
+        auto* self = static_cast<GstRtspReceiver*>( user_data );
+        // 첫 session (video) 의 jitterbuffer 만 추적 (weak ref — pipeline 소유)
+        if( !self->jitterbuffer_ ) {
+            self->jitterbuffer_ = jb;
+            MLOG_INFO( "GstRtspReceiver[%d] jitterbuffer 캡처 (session=%u)", self->cfg_.cam_id, session );
+        }
+    }
+
+    gboolean GstRtspReceiver::OnJitterStatsTimer( void* user_data )
+    {
+        auto* self = static_cast<GstRtspReceiver*>( user_data );
+        if( !self->running_.load() || !self->jitterbuffer_ ) return TRUE;
+
+        GstStructure* stats = nullptr;
+        g_object_get( self->jitterbuffer_, "stats", &stats, nullptr );
+        if( stats ) {
+            guint64 pushed = 0, lost = 0, rtx_count = 0, late = 0;
+            gst_structure_get_uint64( stats, "num-pushed", &pushed );
+            gst_structure_get_uint64( stats, "num-lost",   &lost );
+            gst_structure_get_uint64( stats, "num-late",   &late );
+            gst_structure_get_uint64( stats, "rtx-count",  &rtx_count );
+            const std::map<std::string, std::string> labels { { "cam_id", std::to_string( self->cfg_.cam_id ) } };
+            auto& reg = MetricsRegistry::Instance();
+            reg.SetGauge( METRIC_JB_PUSHED,    labels, static_cast<double>( pushed ) );
+            reg.SetGauge( METRIC_JB_LOST,      labels, static_cast<double>( lost ) );
+            reg.SetGauge( METRIC_JB_RTX_COUNT, labels, static_cast<double>( rtx_count ) );
+            gst_structure_free( stats );
+        }
+        return TRUE;  // 반복
+    }
+
+    GstPadProbeReturn GstRtspReceiver::OnDepayBufferProbe( GstPad* /*pad*/, GstPadProbeInfo* /*info*/, void* user_data )
+    {
+        auto* self = static_cast<GstRtspReceiver*>( user_data );
+        MetricsRegistry::Instance().IncrementCounter(
+            METRIC_DEPAY_BUFFER_TOTAL,
+            { { "cam_id", std::to_string( self->cfg_.cam_id ) } }, 1.0 );
+        return GST_PAD_PROBE_OK;
+    }
+
+    GstPadProbeReturn GstRtspReceiver::OnRtpInProbe( GstPad* /*pad*/, GstPadProbeInfo* /*info*/, void* user_data )
+    {
+        auto* self = static_cast<GstRtspReceiver*>( user_data );
+        MetricsRegistry::Instance().IncrementCounter(
+            METRIC_RTP_IN_TOTAL,
+            { { "cam_id", std::to_string( self->cfg_.cam_id ) } }, 1.0 );
+        return GST_PAD_PROBE_OK;
     }
 
     void GstRtspReceiver::TeardownPipeline()
     {
         if( pipeline_ ) {
+            if( jitter_timer_id_ ) {
+                g_source_remove( jitter_timer_id_ );
+                jitter_timer_id_ = 0;
+            }
+            jitterbuffer_ = nullptr;  // weak ref — pipeline 이 곧 destroy
             if( bus_watch_id_ ) {
                 g_source_remove( bus_watch_id_ );
                 bus_watch_id_ = 0;
@@ -308,6 +428,9 @@ namespace MGEN
 
         self->frame_count_.fetch_add( 1 );
         MetricsRegistry::Instance().IncrementCounter( METRIC_FRAMES_TOTAL, NO_LABELS, 1.0 );
+        // 측정 (2026-05-21): per-cam decoded frame count (stuck-stage trace)
+        MetricsRegistry::Instance().IncrementCounter(
+            METRIC_DECODED_TOTAL, { { "cam_id", std::to_string( self->cfg_.cam_id ) } }, 1.0 );
 
         // 진단 (debug/gst-rtsp-stale-trace 2026-05-20) — last_frame timestamp 기록
         const int64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -509,12 +632,12 @@ namespace MGEN
                     }
                     constexpr gint RTSPSRC_TIMEOUT_CAUSE_RTCP = 0;
                     if( cause_int == RTSPSRC_TIMEOUT_CAUSE_RTCP ) {
-                        static thread_local bool logged_once = false;
-                        if( !logged_once ) {
-                            MLOG_INFO( "GstRtspReceiver[%d] GstRTSPSrcTimeout cause=RTCP — stream 정상, reconnect 안 함 (이후 silent)",
-                                self->cfg_.cam_id );
-                            logged_once = true;
-                        }
+                        // 측정 (experiment/rtcp-timeout-measure 2026-05-21):
+                        //   발생 빈도만 카운트. behavior 변경 없음 (여전히 reconnect 안 함).
+                        //   목적: RTCP timeout 이 정상 운영 중 얼마나 자주 발생하는지 → fix 방향 결정.
+                        reg.IncrementCounter( METRIC_RTCP_TIMEOUT_TOTAL, { { "cam_id", cam_id_str } }, 1.0 );
+                        MLOG_WARN( "GstRtspReceiver[%d] GstRTSPSrcTimeout cause=RTCP (측정 — reconnect 안 함)",
+                            self->cfg_.cam_id );
                     } else {
                         MLOG_WARN( "GstRtspReceiver[%d] GstRTSPSrcTimeout cause=%d — reconnect 트리거",
                             self->cfg_.cam_id, cause_int );
