@@ -3,7 +3,7 @@ cmake_minimum_required( VERSION 3.17 )
 # ---------------------------------------------------------------------------
 # Project Information
 # ---------------------------------------------------------------------------
-project( DetectBase VERSION 0.1.9 LANGUAGES C CXX )
+project( DetectBase VERSION 0.1.10 LANGUAGES C CXX )
 
 # ---------------------------------------------------------------------------
 # 고정 빌드 파라미터 (NPU + DETECTOR 단일 구성)
