@@ -69,7 +69,7 @@ For this project specifically: **48h baseline tolerates +47 MB / 48 h** (RtspDet
 
 - Endpoint: `http://localhost:9090/metrics`
 - Key gauges/counters:
-  - `detectbase_dfps_total` (gauge) — target: 13 × cam_count
+  - `detectbase_dfps_total` (gauge) — detection FPS across all cams (no fixed target; track stability/plateau, not an absolute number)
   - `detectbase_camera_count{state="active"}` (gauge) — target: equal to `state="registered"`
   - `detectbase_events_total{type=...,cam=...}` (counter) — should keep increasing in production
   - `detectbase_errors_total{type=...}` (counter) — should stay near 0
