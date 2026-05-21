@@ -51,13 +51,13 @@ git status --short
 git add <specific files>
 git status --short                 # verify staged list
 
-# 4. Commit: heredoc for multi-line
+# 4. Commit: heredoc for multi-line (한국어)
 git commit -m "$(cat <<'EOF'
-<subject line: type: short summary, <70 chars>
+<type>: <한국어 요약, 70자 이내>
 
-<body: what changed and why, wrapped at ~72 chars>
+<본문: 무엇을 왜 바꿨는지, ~72자 줄바꿈, 한국어>
 
-<optional: footer with refs, e.g., "Related: #issue">
+<선택: 참조 footer, 예 "Related: #issue">
 EOF
 )"
 
@@ -68,19 +68,19 @@ git push -u origin <prefix>/<topic>
 #    develop merge:  git checkout develop && git merge --no-ff <prefix>/<topic>
 #    master release: gh pr create --base master --head develop  (merge only on user instruction)
 gh pr create --base master --head develop \
-    --title "<type>: <summary>" \
+    --title "<type>: <한국어 요약>" \
     --body "$(cat <<'EOF'
-## Summary
-<1-3 bullets — why>
+## 요약
+<1-3 bullet — 왜>
 
-## Changes
-- file: what changed
+## 변경 사항
+- 파일: 무엇이 바뀌었나
 - ...
 
-## Test plan
+## 테스트 계획
 - [x] build PASS
 - [x] sanity (DFPS, ERROR 0)
-- [ ] (other checks)
+- [ ] (기타 검증)
 EOF
 )"
 ```
@@ -117,33 +117,35 @@ If the merge command fails (CI required, conflicts, branch protection), report t
 
 ## Commit Message Style
 
+**Language: commit messages are written in Korean** (subject summary + body). The `<type>` prefix stays as a structural tag (docs/fix/feat/...). User reads commits in the GitHub UI — Korean is mandatory (see CLAUDE.md Language policy / memory feedback-language).
+
 Subject line (first line):
-- Format: `<type>: <imperative summary>` (under 70 chars)
-- `<type>` examples: `docs`, `fix`, `feat`, `cleanup`, `chore`, `build`, `test`
-- Imperative mood ("add X", "fix Y") — not past tense
+- Format: `<type>: <한국어 요약>` (70자 이내)
+- `<type>` 종류: `docs`, `fix`, `feat`, `cleanup`, `chore`, `build`, `test`, `refactor`, `perf`
+- 명령형/간결체 ("추가", "수정") — 과거형 지양
 
 Body:
-- Wrap at ~72 chars
-- Bullet list of changes per file/area
-- Explain *why* if non-obvious (the *what* is in the diff)
-- For multi-line messages: always use heredoc, never `-m "..." -m "..."` chaining
+- ~72자 줄바꿈, 한국어
+- 파일/영역별 변경 bullet
+- *왜* 가 비자명하면 설명 (*무엇* 은 diff 에 있음)
+- 여러 줄이면 항상 heredoc 사용, `-m "..." -m "..."` chaining 금지
 
 Example:
 ```
-docs: update AI git workflow rules (branch-only + PR-for-master)
+docs: AI git workflow 규칙 갱신 (develop gate + no-ff merge)
 
-- CLAUDE.md: replace "AI has NO permission to use git" with new rules
-- logs/NEXT_SESSION.md: memory section reflects new git workflow
-- .claude/settings.json: allow git/gh; deny force push and hard reset
+- CLAUDE.md: master 직접 작업 금지 + develop 통합 gate 명시
+- .claude/skills/git-workflow.md: squash 폐기, no-ff merge 기본
+- .claude/settings.json: git/gh 허용; force push / hard reset deny
 ```
 
 ## PR Body Style
 
-Structure:
-- **## Summary** — 1~3 bullets, the *why*
-- **## Changes** — file/area list, the *what*
-- **## Test plan** — checklist (build, sanity, audit)
-- Optional **## Notes** — caveats, follow-ups, related work
+Structure (Korean):
+- **## 요약** — 1~3 bullet, *왜*
+- **## 변경 사항** — 파일/영역 목록, *무엇*
+- **## 테스트 계획** — checklist (build, sanity, audit)
+- Optional **## 비고** — caveat, follow-up, 관련 작업
 
 Do NOT add any Claude/Claude Code footer or `Co-Authored-By` trailer to commits or PR bodies (user policy).
 
