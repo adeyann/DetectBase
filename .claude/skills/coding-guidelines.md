@@ -23,11 +23,12 @@ Report and wait for approval if any of these apply:
 | Item | Rule | Example |
 |------|------|---------|
 | Class | PascalCase | `DataManager` |
-| Function | camelCase | `getData` |
+| Function | PascalCase | `GetData` |
 | Variable | snake_case | `data_count` |
-| Member | m_ prefix | `m_data_count` |
 | Indent | tab | — |
 | Comments | Korean | `// 데이터 초기화` |
+
+(No member-variable naming rule. When editing existing code, match the file's existing member style — see CLAUDE.md A3 Style precedence.)
 
 ## Error Handling
 - Handle errors via return values
