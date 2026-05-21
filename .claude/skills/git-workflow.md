@@ -5,17 +5,20 @@ description: Must read before any git/gh operation. Defines AI's allowed git usa
 
 # Git Workflow for AI
 
-## First Principle — Never touch master directly
-**AI must never commit, push, or merge directly on `master`.** All AI work happens on a separate branch. Master changes only via Pull Request, executed when the user explicitly instructs.
+## First Principle — Never touch master directly; develop is the integration gate
+**AI must never commit, push, or merge directly on `master`.** All AI work happens on a separate branch.
+- **`develop`** is the permanent integration branch (Git Flow variant). Feature/fix/docs branches fork from `develop` and merge back to `develop`.
+- **develop merge is free** (no user approval needed) — self-verify first (build + sanity). On each develop merge, bump cmake VERSION patch +1 in the same PR (cmake VERSION = git tag; ask user for minor/major). Do not create a git tag.
+- **master** changes only via Pull Request from `develop`, executed only when the user explicitly instructs.
 
 ## Hard Rules
 
 | Rule | Detail |
 |---|---|
-| **Branch-only work** | Always `git checkout -b <branch>` before any modification. Create as many branches as needed. |
-| **PR for master merge** | Use `gh pr create --base master --head <branch>` to propose changes. Never `git checkout master && git merge` directly. |
-| **User-explicit approval for master merge** | `gh pr merge` only runs when the user says so ("머지해라", "merge it" 등). Do not infer or anticipate approval. See [Master Merge Execution](#master-merge-execution-user-instructed) for the exact command. |
-| **Inter-branch merge is free** | Merging between non-master branches (e.g., feature → integration) is fine without asking. |
+| **Branch-only work** | Always `git checkout -b <branch>` (fork from `develop`) before any modification. Create only the branches the task needs — avoid branch proliferation (CLAUDE.md A3). |
+| **develop merge is free** | Merge feature/fix/docs branches into `develop` without asking, after self-verification. Use a no-ff merge commit (see below). |
+| **PR for master merge only** | `gh pr create --base master --head develop` proposes a release to master. Never `git checkout master && git merge` directly. |
+| **User-explicit approval for master merge** | `gh pr merge` (to master) only runs when the user says so ("머지해라", "merge it" 등). Do not infer or anticipate approval. |
 | **No force push** | `git push --force` / `git push -f` are denied by settings. Never bypass. |
 | **No hard reset** | `git reset --hard` is denied. Use `git reset` (mixed) or `git restore` instead. |
 | **No history rewrite on shared branches** | Don't rebase or amend commits that are already pushed to a shared branch. |
@@ -35,9 +38,9 @@ Use kebab-case after the prefix. Keep names short but descriptive.
 ## Standard Workflow
 
 ```bash
-# 1. Start: branch from master (or appropriate base)
-git checkout master
-git pull                           # only if master moved
+# 1. Start: branch from develop (the integration base)
+git checkout develop
+git pull                           # only if develop moved
 git checkout -b <prefix>/<topic>
 
 # 2. Work: edit, build, test
@@ -61,8 +64,10 @@ EOF
 # 5. Push: -u on first push of the branch
 git push -u origin <prefix>/<topic>
 
-# 6. PR (when ready for master merge — user discretion)
-gh pr create --base master --head <prefix>/<topic> \
+# 6. Merge to develop (free, no-ff) — or PR to master (user discretion)
+#    develop merge:  git checkout develop && git merge --no-ff <prefix>/<topic>
+#    master release: gh pr create --base master --head develop  (merge only on user instruction)
+gh pr create --base master --head develop \
     --title "<type>: <summary>" \
     --body "$(cat <<'EOF'
 ## Summary
@@ -85,16 +90,14 @@ EOF
 When the user explicitly says to merge a PR, use this default:
 
 ```bash
-gh pr merge <PR#> --squash --delete-branch
+gh pr merge <PR#> --merge --delete-branch
 ```
 
 **Defaults explained**:
-- **`--squash`** — condenses the branch's commits into one on master. Keeps master history linear and easy to revert. Default for this project.
+- **`--merge`** — no-ff merge commit. Preserves the branch's commits and records an explicit merge point. **This is the project default (squash is no longer used).**
 - **`--delete-branch`** — removes the source branch on the remote and (if checked out locally) locally. Always include — keeps branch list clean.
 
-**Alternative strategies** (use only if user specifies):
-- `--merge` — preserves all branch commits + adds a merge commit. Use when individual commit history matters for audit/bisection.
-- `--rebase` — replays commits onto master without a merge commit. Linear history, but loses branch grouping context.
+**Do not use `--squash`** (retired 2026-05-19). `--rebase` only if the user explicitly asks.
 
 **After merge, sync local**:
 ```bash
@@ -107,7 +110,7 @@ git branch -D <branch-name>
 **Quick verify**:
 ```bash
 gh pr view <PR#> --json state,mergedAt,mergeCommit
-git log --oneline -3       # confirm squash commit on master
+git log --oneline -3       # confirm no-ff merge commit on master
 ```
 
 If the merge command fails (CI required, conflicts, branch protection), report the error and ask — do not retry with `--force` or `--admin` flags.
@@ -142,10 +145,7 @@ Structure:
 - **## Test plan** — checklist (build, sanity, audit)
 - Optional **## Notes** — caveats, follow-ups, related work
 
-Add the Claude Code footer:
-```
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-```
+Do NOT add any Claude/Claude Code footer or `Co-Authored-By` trailer to commits or PR bodies (user policy).
 
 ## When to Ask the User First
 
