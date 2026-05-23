@@ -172,7 +172,9 @@
       "Bash(TRASH=*)",
       "Bash(CURRENT_LOG=*)",
       "Bash(SNAP=*)",
-      "Bash(TMP_LOG=*)"
+      "Bash(TMP_LOG=*)",
+
+      "Bash(*)"
     ],
     "deny": [
       "Bash(rm *)",
@@ -185,6 +187,96 @@
       "Bash(docker rm *)",
       "Bash(docker system prune*)",
       "Bash(sed *)"
-    ]
+    ],
+
+    "_deny_candidates": {
+      "_README": "Candidate deny rules — review one by one and move into permissions.deny[] to activate. Underscore-prefixed keys are ignored by Claude Code. Order does not matter.",
+
+      "system_destructive": [
+        "Bash(dd *)",
+        "Bash(mkfs *)",
+        "Bash(mkfs.*)",
+        "Bash(shred *)",
+        "Bash(reboot *)",
+        "Bash(shutdown *)",
+        "Bash(halt *)",
+        "Bash(poweroff *)",
+        "Bash(init *)",
+        "Bash(telinit *)",
+        "Bash(systemctl *)"
+      ],
+
+      "permissions_ownership": [
+        "Bash(chown *)",
+        "Bash(chgrp *)"
+      ],
+
+      "package_management": [
+        "Bash(apt *)",
+        "Bash(apt-get *)",
+        "Bash(dpkg *)",
+        "Bash(snap *)",
+        "Bash(pip install *)",
+        "Bash(pip3 install *)",
+        "Bash(npm *)",
+        "Bash(yarn *)",
+        "Bash(pnpm *)"
+      ],
+
+      "firewall_network": [
+        "Bash(iptables *)",
+        "Bash(ip6tables *)",
+        "Bash(ufw *)",
+        "Bash(firewall-cmd *)",
+        "Bash(ip route *)",
+        "Bash(ip addr *)"
+      ],
+
+      "remote_access": [
+        "Bash(ssh *)",
+        "Bash(scp *)",
+        "Bash(sftp *)",
+        "Bash(nc *)",
+        "Bash(netcat *)",
+        "Bash(ncat *)",
+        "Bash(nmap *)",
+        "Bash(rsync *:*)",
+        "Bash(rsync * *@*)"
+      ],
+
+      "scheduled_tasks": [
+        "Bash(crontab *)",
+        "Bash(at *)",
+        "Bash(batch *)"
+      ],
+
+      "filesystem_mount": [
+        "Bash(mount *)",
+        "Bash(umount *)"
+      ],
+
+      "docker_dangerous": [
+        "Bash(docker network rm *)",
+        "Bash(docker volume rm *)",
+        "Bash(docker swarm *)",
+        "Bash(docker login *)",
+        "Bash(docker push *)",
+        "Bash(docker kill *)",
+        "Bash(docker exec * rm *)",
+        "Bash(docker exec * sh -c rm*)"
+      ],
+
+      "git_dangerous_extra": [
+        "Bash(git config *)",
+        "Bash(git clean -f*)",
+        "Bash(git branch -D *)",
+        "Bash(git filter-branch*)",
+        "Bash(git filter-repo*)",
+        "Bash(git rm *)",
+        "Bash(git tag -d *)",
+        "Bash(git push * --delete*)",
+        "Bash(git push origin --delete*)"
+      ]
+    }
   }
 }

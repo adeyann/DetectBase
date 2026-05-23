@@ -1,7 +1,7 @@
 # Claude Code Bash 권한 흐름 기록 (AUTO / APPROVED / DENIED)
 
 > 자동 생성: `scripts/permission_log.py` (직접 편집 X — 다시 실행하면 덮어씀).
-> 갱신 시각: 2026-05-23 22:55:18
+> 갱신 시각: 2026-05-23 23:55:02
 > 분석 대상: 1 개 transcript (latest)
 > 분류 규칙:
 > - **AUTO**     = `.claude/settings.json` allow 패턴 매치 (prompt 없음)
@@ -15,26 +15,14 @@
 
 | 카테고리 | 총 호출 | 비중 |
 |---|---:|---:|
-| **AUTO**     | 12228     | 97.5% |
-| **APPROVED** | 238 | 1.9% |
+| **AUTO**     | 12475     | 99.4% |
+| **APPROVED** | 0 | 0.0% |
 | **DENIED**   | 81   | 0.6% |
-| **합계**     | 12547          | 100% |
+| **합계**     | 12556          | 100% |
 
 ### APPROVED (prompt 후 허가 추정) — 상위 12
 
 ```
-    10  sed -n '415,430p' /home/claudedev/DetectBase/code/Management
-    10  sed -n '375,378p' /home/claudedev/DetectBase/code/BasicLibs/
-    10  # SettingData.h: line 224 ~ 446 (마지막 } namespace 직전) dead 타입
-    10  sed -n '220,225p' /home/claudedev/DetectBase/code/Management
-    10  sed -n '320,325p' /home/claudedev/DetectBase/code/Management
-    10  # 1. Impl_AlphaShot* / Impl_Extinguish* / Impl_AlphaRover* 함
-    10  # BasicLibs는 CMakeLists.txt에 GLOB 으로 src 자동 수집. PLC 파일을 .bak
-    10  # 1번: 옛 빌드 스크립트 mv /home/claudedev/DetectBase/scripts/.start
-     9  sed -n '288,320p' /home/claudedev/DetectBase/code/Management
-     8  \ echo "=== EngineActiveContext usage ==="; \ grep -rn "Engi
-     8  \ echo "=== sys_inc.h BOOL define ==="; \ grep -n "BOOL\|TRU
-     8  \ echo "=== ReplyDispatcherWithCleaner.remove and remove_exp
 ```
 
 ### DENIED — 상위 12
