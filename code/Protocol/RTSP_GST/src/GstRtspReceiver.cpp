@@ -217,13 +217,9 @@ namespace MGEN
                     &GstRtspReceiver::OnDepayBufferProbe, this, nullptr );
                 gst_object_unref( src_pad );
             }
-            // 검증 (2026-05-21): depay SINK probe (rtspsrc 출력 = depay 진입)
-            GstPad* sink_pad = gst_element_get_static_pad( depay, "sink" );
-            if( sink_pad ) {
-                gst_pad_add_probe( sink_pad, GST_PAD_PROBE_TYPE_BUFFER,
-                    &GstRtspReceiver::OnRtpInProbe, this, nullptr );
-                gst_object_unref( sink_pad );
-            }
+            // 검증 (2026-05-22): depay SINK probe(rtp_in, ~1800/s/cam) 제거 — per-packet
+            //   prometheus contention 이 loss burst 트리거인지 테스트. burst/stuck 사라지면 계측이 원인.
+            //   (depay src probe 는 per-NAL ~90/s 로 유지, stage 가시성용)
             gst_object_unref( depay );
         }
 

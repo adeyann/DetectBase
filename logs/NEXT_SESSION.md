@@ -55,12 +55,27 @@
 - clang-tidy 30 → 0 (NOLINT 24 + 진짜 fix PR #13)
 - cppcheck 63 → 59 (em-dash fix + dead code 제거 + suppress)
 
-### NEW-1. GstRtsp stale state root cause 추적 (진행 중)
-- **상태**: cam 659 stuck 1회 발생 (2026-05-20 05:42 KST), 진단 binary deployed (PR #16, cmake 0.1.5)
-- **진단 추가**: bus_message_total / reset_attempt_total / last_frame_age_sec metric + 모든 bus message type log
-- **다음 단계**: cam stuck 재발생 까지 monitoring 대기. 발생 시 metric/log 로 가설 좁히기.
-- **자동 복구 (watchdog) 금지**: 사용자 정책상 root cause 식별 전 forced restart 안 함.
-- 자세한 분석: [STUCK_ANALYSIS_cam659_20260520.md](STUCK_ANALYSIS_cam659_20260520.md)
+### NEW-1. GstRtsp stale state root cause 추적 — cascading stuck 확인 (긴급)
+- **상태**: 2026-05-20 17:00~17:45 KST 사이 **cam 660/661/659 cascading stuck**. cam 658 만 alive. DFPS 116 → 29.1.
+  - cam 660 stuck since 17:10:33 (34.5분), 661 since 17:16:30 (28.6분), 659 since 17:37:28 (7.6분)
+  - 1차 발생 (05:42 KST) → 7시간 무재발 → 17:00~ 폭발적 재발 + cascading
+- **진단 확정**: 이전 cam 659 패턴과 동일. EOS reset 정상 → 1~5분 stream 정상 → mid-stream frame stop → 다음 EOS 안 옴. TCP ESTAB 유지. 우리 측 reset trigger 없음.
+- **Root cause 가설**: 분기 미확정
+  - A. 외부 RTSP server frozen (TCP keepalive 만)
+  - B. 우리 측 rtspsrc internal stale (multi-stream race)
+  - 가설 분기: tcpdump 또는 force-reset 후 회복 여부
+- **Mitigation 설계 완료 (미배포)**: frame-age > 5초 시 force `RequestReconnect`
+  - 설계 문서: [FORCE_RESET_DESIGN_20260520.md](FORCE_RESET_DESIGN_20260520.md)
+  - 임계값 5초 = 정상 EOS reset 1.6초의 3× margin
+  - 검출 위치: RtspDetectorUnit.cpp:1426 dequeue_wait_for timeout 분기
+  - 새 metric: `detectbase_force_reset_total{cam_id, reason}`
+  - 배포 보류 — 사용자 지시 ("일단 두고", 2026-05-20 17:50 KST)
+- **자동 복구 (watchdog) 금지**: 사용자 정책상 root cause 식별 전 service restart 안 함
+- 자세한 분석:
+  - [STUCK_ANALYSIS_cam659_20260520.md](STUCK_ANALYSIS_cam659_20260520.md) — 1차 발생 (05:42 KST)
+  - [FORCE_RESET_DESIGN_20260520.md](FORCE_RESET_DESIGN_20260520.md) — mitigation 설계
+  - [stuck_dump_20260520_171959/](stuck_dump_20260520_171959/) — cam 660 stuck forensic dump
+  - [BASELINE_dump_20260520_140935/](BASELINE_dump_20260520_140935/) — 정상 baseline 비교용
 
 ### NEW-2. `correlation_mismatch` 폭증 root cause 추적 (진행 중)
 - **상태**: PR #16+#17 binary 적용 후 mismatch ~70× 폭증 (0.4/cam/sec → 27.5/cam/sec). 30분당 +200K stable plateau.
