@@ -135,7 +135,9 @@
       "Bash(GST_DEBUG=* docker *)",
 
       "Bash(git *)",
-      "Bash(gh *)"
+      "Bash(gh *)",
+
+      "Bash(docker restart *)"
     ],
     "deny": [
       "Bash(rm *)",
