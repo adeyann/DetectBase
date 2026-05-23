@@ -254,7 +254,59 @@
       "Bash(git rm *)",
       "Bash(git tag -d *)",
       "Bash(git push * --delete*)",
-      "Bash(git push origin --delete*)"
+      "Bash(git push origin --delete*)",
+
+      "Bash(wipefs *)",
+      "Bash(fdisk *)",
+      "Bash(parted *)",
+      "Bash(gdisk *)",
+      "Bash(sgdisk *)",
+      "Bash(cfdisk *)",
+      "Bash(lvcreate *)",
+      "Bash(lvremove *)",
+      "Bash(lvchange *)",
+      "Bash(vgcreate *)",
+      "Bash(vgremove *)",
+      "Bash(vgchange *)",
+      "Bash(pvcreate *)",
+      "Bash(pvremove *)",
+      "Bash(cryptsetup *)",
+      "Bash(mkswap *)",
+      "Bash(swapon *)",
+      "Bash(swapoff *)",
+      "Bash(losetup *)",
+      "Bash(tune2fs *)",
+      "Bash(btrfs *)",
+      "Bash(xfs_format *)",
+      "Bash(xfs_repair *)",
+
+      "Bash(kexec *)",
+      "Bash(update-grub *)",
+      "Bash(grub-install *)",
+      "Bash(grub-mkconfig *)",
+      "Bash(efibootmgr *)",
+
+      "Bash(chattr *)",
+
+      "Bash(useradd *)",
+      "Bash(userdel *)",
+      "Bash(usermod *)",
+      "Bash(groupadd *)",
+      "Bash(groupdel *)",
+      "Bash(groupmod *)",
+      "Bash(passwd *)",
+      "Bash(su *)",
+      "Bash(visudo *)",
+      "Bash(setcap *)",
+      "Bash(setfacl *)",
+      "Bash(getcap *)",
+
+      "Bash(service *)",
+
+      "Bash(tc *)",
+      "Bash(arp *)",
+      "Bash(iwconfig *)",
+      "Bash(iw *)"
     ]
   }
 }
