@@ -186,97 +186,75 @@
       "Bash(sudo *)",
       "Bash(docker rm *)",
       "Bash(docker system prune*)",
-      "Bash(sed *)"
-    ],
+      "Bash(sed *)",
 
-    "_deny_candidates": {
-      "_README": "Candidate deny rules — review one by one and move into permissions.deny[] to activate. Underscore-prefixed keys are ignored by Claude Code. Order does not matter.",
+      "Bash(dd *)",
+      "Bash(mkfs *)",
+      "Bash(mkfs.*)",
+      "Bash(shred *)",
+      "Bash(reboot *)",
+      "Bash(shutdown *)",
+      "Bash(halt *)",
+      "Bash(poweroff *)",
+      "Bash(init *)",
+      "Bash(telinit *)",
+      "Bash(systemctl *)",
 
-      "system_destructive": [
-        "Bash(dd *)",
-        "Bash(mkfs *)",
-        "Bash(mkfs.*)",
-        "Bash(shred *)",
-        "Bash(reboot *)",
-        "Bash(shutdown *)",
-        "Bash(halt *)",
-        "Bash(poweroff *)",
-        "Bash(init *)",
-        "Bash(telinit *)",
-        "Bash(systemctl *)"
-      ],
+      "Bash(chown *)",
+      "Bash(chgrp *)",
 
-      "permissions_ownership": [
-        "Bash(chown *)",
-        "Bash(chgrp *)"
-      ],
+      "Bash(apt *)",
+      "Bash(apt-get *)",
+      "Bash(dpkg *)",
+      "Bash(snap *)",
+      "Bash(pip install *)",
+      "Bash(pip3 install *)",
+      "Bash(npm *)",
+      "Bash(yarn *)",
+      "Bash(pnpm *)",
 
-      "package_management": [
-        "Bash(apt *)",
-        "Bash(apt-get *)",
-        "Bash(dpkg *)",
-        "Bash(snap *)",
-        "Bash(pip install *)",
-        "Bash(pip3 install *)",
-        "Bash(npm *)",
-        "Bash(yarn *)",
-        "Bash(pnpm *)"
-      ],
+      "Bash(iptables *)",
+      "Bash(ip6tables *)",
+      "Bash(ufw *)",
+      "Bash(firewall-cmd *)",
+      "Bash(ip route *)",
+      "Bash(ip addr *)",
 
-      "firewall_network": [
-        "Bash(iptables *)",
-        "Bash(ip6tables *)",
-        "Bash(ufw *)",
-        "Bash(firewall-cmd *)",
-        "Bash(ip route *)",
-        "Bash(ip addr *)"
-      ],
+      "Bash(ssh *)",
+      "Bash(scp *)",
+      "Bash(sftp *)",
+      "Bash(nc *)",
+      "Bash(netcat *)",
+      "Bash(ncat *)",
+      "Bash(nmap *)",
+      "Bash(rsync *:*)",
+      "Bash(rsync * *@*)",
 
-      "remote_access": [
-        "Bash(ssh *)",
-        "Bash(scp *)",
-        "Bash(sftp *)",
-        "Bash(nc *)",
-        "Bash(netcat *)",
-        "Bash(ncat *)",
-        "Bash(nmap *)",
-        "Bash(rsync *:*)",
-        "Bash(rsync * *@*)"
-      ],
+      "Bash(crontab *)",
+      "Bash(at *)",
+      "Bash(batch *)",
 
-      "scheduled_tasks": [
-        "Bash(crontab *)",
-        "Bash(at *)",
-        "Bash(batch *)"
-      ],
+      "Bash(mount *)",
+      "Bash(umount *)",
 
-      "filesystem_mount": [
-        "Bash(mount *)",
-        "Bash(umount *)"
-      ],
+      "Bash(docker network rm *)",
+      "Bash(docker volume rm *)",
+      "Bash(docker swarm *)",
+      "Bash(docker login *)",
+      "Bash(docker push *)",
+      "Bash(docker kill *)",
+      "Bash(docker exec * rm *)",
+      "Bash(docker exec * sh -c rm*)",
 
-      "docker_dangerous": [
-        "Bash(docker network rm *)",
-        "Bash(docker volume rm *)",
-        "Bash(docker swarm *)",
-        "Bash(docker login *)",
-        "Bash(docker push *)",
-        "Bash(docker kill *)",
-        "Bash(docker exec * rm *)",
-        "Bash(docker exec * sh -c rm*)"
-      ],
-
-      "git_dangerous_extra": [
-        "Bash(git config *)",
-        "Bash(git clean -f*)",
-        "Bash(git branch -D *)",
-        "Bash(git filter-branch*)",
-        "Bash(git filter-repo*)",
-        "Bash(git rm *)",
-        "Bash(git tag -d *)",
-        "Bash(git push * --delete*)",
-        "Bash(git push origin --delete*)"
-      ]
-    }
+      "Bash(git config *)",
+      "Bash(git clean -f*)",
+      "Bash(git branch -D *)",
+      "Bash(git filter-branch*)",
+      "Bash(git filter-repo*)",
+      "Bash(git rm *)",
+      "Bash(git tag -d *)",
+      "Bash(git push * --delete*)",
+      "Bash(git push origin --delete*)"
+    ]
   }
 }
