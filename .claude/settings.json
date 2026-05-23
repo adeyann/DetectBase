@@ -144,7 +144,25 @@
       "Bash(time *)",
       "Bash(until *)",
       "Bash(for *)",
-      "Bash(sleep *)"
+      "Bash(sleep *)",
+      "Bash(shopt *)",
+      "Bash(bash detectbase.sh *)",
+      "Bash(/home/claudedev/DetectBase/logs/*)",
+      "Bash(docker builder *)",
+
+      "Bash(PID=*)",
+      "Bash(F=*)",
+      "Bash(L=*)",
+      "Bash(M=*)",
+      "Bash(D=*)",
+      "Bash(O=*)",
+      "Bash(OUT=*)",
+      "Bash(LOG=*)",
+      "Bash(LOG_DIR=*)",
+      "Bash(BUILD_LOG=*)",
+      "Bash(SANITY_LOG=*)",
+      "Bash(TEST_DIR=*)",
+      "Bash(ASAN_DURATION_MIN=*)"
     ],
     "deny": [
       "Bash(rm *)",
