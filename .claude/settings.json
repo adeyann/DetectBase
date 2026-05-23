@@ -306,7 +306,18 @@
       "Bash(tc *)",
       "Bash(arp *)",
       "Bash(iwconfig *)",
-      "Bash(iw *)"
+      "Bash(iw *)",
+
+      "Bash(git stash drop *)",
+      "Bash(git stash clear)",
+      "Bash(git worktree remove *)",
+      "Bash(git submodule deinit *)",
+
+      "Bash(docker container rm *)",
+      "Bash(docker compose down*)",
+      "Bash(docker compose rm *)",
+
+      "Bash(truncate *)"
     ]
   }
 }
