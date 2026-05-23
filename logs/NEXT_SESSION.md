@@ -137,11 +137,20 @@
 - 운영 영향 0이라 보류 가능
 - v0.1.x cleanup PR 에 포함 가능
 
-### F. GStreamer 1.24+ upgrade (v1.0.0 후)
-- rtpmanager runtime leak (~340 MB/year) fix 시도
-- Ubuntu 22.04 → 24.04 base + glibc/GCC 동반 업그레이드
-- librknnrt ABI 호환 위험 사전 검증 필요
-- 비용 ~1.5~2시간 + 위험
+### ~~F. GStreamer 1.24+ upgrade~~ ✕ 폐기 (2026-05-24, 사용자 결정)
+- Ubuntu 22.04 base + librknnrt ABI 위험 + 비용 대비 효과 불분명. 우리 patch
+  (watchdog + reconnect 견고화) 로 cam stuck 클래스 해결됨. 업그레이드 불필요.
+
+### I. MPP 통합 재시도 (예정)
+- 이전 시도 (2026-05-14~15) 는 reconnect ~10MB RSS leak 으로 롤백.
+- 현재 in-place reset (rtspsrc 만 NULL→PLAYING, mppvideodec 보존) + frame-age
+  watchdog 가 mpp internal DMA buffer leak (~12MB/reconn) 회피 메커니즘
+  으로 이미 코드에 들어가 있음 (GstRtspClient.cpp 주석).
+- 재시도 시: pipeline 을 `rtspsrc + h264parse + mppvideodec + appsink` 로 교체.
+  매 EOS 마다 in-place reset → mppvideodec 인스턴스 보존 → DMA buffer
+  재할당 회피 → leak 미발생 가설 검증.
+- 참고: `.deleted/gst_attempt_20260515/`, `.DOCS/GSTREAMER_DEEP_REVIEW.md`,
+  `.DOCS/ONVIF_PAYLOADER_DESIGN.md`.
 
 ### G. DEBUG virtual lines 제거 (v1.0.0 시점)
 - 시연용 임시 코드 제거 (위치: README §14)
