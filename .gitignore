@@ -36,8 +36,10 @@ logs/.current_*
 logs/.backup_*
 logs/sanity_*
 
-# Trash (mv destination for deprecated artifacts)
-.deleted_backup/
+# Trash (abandoned/superseded artifacts; user runs real rm)
+.deleted/
+# Rollback / reusable snapshots (binaries, *.diagbak, *_rollback_* dirs)
+.backup/
 
 # Bundled static libraries (ABI incompatible — source build in docker)
 code/Protocol/REST/lib/
