@@ -162,7 +162,17 @@
       "Bash(BUILD_LOG=*)",
       "Bash(SANITY_LOG=*)",
       "Bash(TEST_DIR=*)",
-      "Bash(ASAN_DURATION_MIN=*)"
+      "Bash(ASAN_DURATION_MIN=*)",
+      "Bash(DOCKER_BUILDKIT=*)",
+      "Bash(DURATION_HOURS=*)",
+      "Bash(QUIT_T1=*)",
+      "Bash(LATEST=*)",
+      "Bash(BACKUP_NAME=*)",
+      "Bash(LAST_START_LINE=*)",
+      "Bash(TRASH=*)",
+      "Bash(CURRENT_LOG=*)",
+      "Bash(SNAP=*)",
+      "Bash(TMP_LOG=*)"
     ],
     "deny": [
       "Bash(rm *)",

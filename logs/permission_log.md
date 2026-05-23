@@ -1,7 +1,7 @@
 # Claude Code Bash 권한 흐름 기록 (AUTO / APPROVED / DENIED)
 
 > 자동 생성: `scripts/permission_log.py` (직접 편집 X — 다시 실행하면 덮어씀).
-> 갱신 시각: 2026-05-23 22:44:21
+> 갱신 시각: 2026-05-23 22:55:18
 > 분석 대상: 1 개 transcript (latest)
 > 분류 규칙:
 > - **AUTO**     = `.claude/settings.json` allow 패턴 매치 (prompt 없음)
@@ -15,10 +15,10 @@
 
 | 카테고리 | 총 호출 | 비중 |
 |---|---:|---:|
-| **AUTO**     | 12198     | 97.2% |
-| **APPROVED** | 266 | 2.1% |
+| **AUTO**     | 12228     | 97.5% |
+| **APPROVED** | 238 | 1.9% |
 | **DENIED**   | 81   | 0.6% |
-| **합계**     | 12545          | 100% |
+| **합계**     | 12547          | 100% |
 
 ### APPROVED (prompt 후 허가 추정) — 상위 12
 
