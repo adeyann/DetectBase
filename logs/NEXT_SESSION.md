@@ -1,24 +1,61 @@
-# NEXT_SESSION — v0.1.0 release 후 진입점
+# NEXT_SESSION — cam stuck fix 검증 + 권한 모델 전환 후 진입점
 
-**최종 갱신**: 2026-05-20 10:30 KST
-**현 상태**: cmake VERSION `0.1.6` (develop). v0.1.0 master tagged. PR #9~#16 develop 누적 (audit cleanup, RTSP URL fix, engine dtor UB fix, version sync, README sync, gst-rtsp 진단 trace). cam 659 stuck 1회 발생 (분석 진행 중, [STUCK_ANALYSIS_cam659_20260520.md](STUCK_ANALYSIS_cam659_20260520.md)).
+**최종 갱신**: 2026-05-24 00:10 KST
+**현 상태**: branch `fix/rtsp-reconnect-storm` (HEAD `8239fac`, 미머지). cam stuck 2 변종 분석·수정·23h+ 클린 검증. 권한 모델 deny-first 로 전환 (`Bash(*)` allow + deny 69 항목).
 
 ---
 
-## 현 상태 (2026-05-20 기준)
+## 현 상태 (2026-05-24 기준)
 
 ### Git
-- **master**: `d9ab212` — v0.1.0 tagged
-- **develop**: PR #18 (`a2e6bc3`) — PR #9~#18 누적 (cmake 0.1.7)
-- 모든 feature 브랜치 정리됨 (no-ff merge commit 정책 + `--delete-branch`)
-- Git workflow: no-ff merge commit, cmake VERSION = git tag, develop 머지 patch +1 auto
-- Co-Authored-By trailer 금지 (feedback_no_coauthor_trailer.md)
+- **master**: v0.1.0 tagged (변동 없음)
+- **develop**: cmake 0.1.10 (변동 없음)
+- **현재 작업 branch**: `fix/rtsp-reconnect-storm` — 다수 commit 누적, **미머지 (사용자 지시 대기)**.
+  - `fffa983` fix: RTSP cam stuck 2변종 해결 — reconnect 견고화 + frame-age watchdog
+  - `93c5f9a` chore: cam stuck 진단 마무리 정리
+  - `ef38067` / `b87d0fa` chore: 휴지통/백업 폴더 분리 `.deleted_backup` → `.deleted/` + `.backup/` 신설 (+ .gitignore)
+  - `029876b` docs: CLAUDE.md 5 디버깅 원칙 (effect/cause, library-first, test-env strict, A/B intervention, patch-live verify)
+  - `aa4a0d2` ~ `6db618b` chore: allow list 보강 (cp/docker build/sleep/until/for/time + 변수 prefix 23개)
+  - `ace020c` / `d0538e2` chore: permission_log 메커니즘 (`scripts/permission_log.py`)
+  - `ba439f9` revert: single-line Bash discipline (취하)
+  - `db20481` chore: 권한 모델 전환 — `Bash(*)` allow + `_deny_candidates` 보관
+  - `8239fac` chore: `_deny_candidates` 전부 `deny[]` promote (69 항목)
+- Git workflow: 변동 없음 (no-ff, no force push, Korean commit msg, no Co-Authored-By).
 
-### 운영 (2026-05-20)
-- `detectbase_service` Up (PR #16+#17 진단 binary)
-- 4 cam × ~29 fps/cam, plateau 정상
-- cam 659 1회 stuck (05:42 KST) → restart 후 복구 + 진단 binary 적용. stuck 재발 대기 중.
-- Monitor `b97mx4ehw` persistent (30min cycle, T+0 = 10:44)
+### 운영 (현재, ~23h+ clean)
+- `detectbase_service` Up (patched libRTSP_GST.so 로드, 2026-05-23 01:01 KST 재시작 이후)
+- 4 cam × ~116 DFPS, watchdog 발동 0, 영구 stuck 0, connect-timeout 0
+- Monitor `bgyvt1hvo` persistent — 30min heartbeat, 의미 있는 이벤트(영구 stuck / watchdog 발동 / storm)에만 보고
+- 진단 override (`docker-compose.override.yml.diagbak`)는 `.backup/` 보관 (재사용 가능)
+
+### cam stuck — 2 변종 확정 + 수정
+1. **변종 A (reconnect storm)**: 동기화 loop 경계의 너무 빠른 reconnect 가 RTSP 서버 SDP connect timeout 폭주 유발. + `StartReceiver()=true` 의 false-success 가 backoff 무력화 → tight 재시도 storm.
+   - **Fix** (`GstRtspClient::ReconnectWorker`):
+     - EOS in-place 경로 cam offset desync (`(cam_id%4)*500ms`).
+     - error 경로 teardown 후 3s+jitter 지연 (서버 세션 release).
+     - StartReceiver 후 frame 흐름 확인 (실제 GetFrameCount>0) — 안 흐르면 backoff 증가.
+2. **변종 B (침묵 stuck)**: GStreamer rtpjitterbuffer 내부 race 로 EOS 가 bus 미전파 → on_eos 미발화 → 재연결 미트리거 → 영구 stuck (cam661 식). 우리 reconnect 로직 무관.
+   - **Fix** (frame-age watchdog): `cv_.wait_for(5s)` 주기 wake 후 last_frame_ns 체크. 12s 무프레임이면 강제 in-place reset.
+3. **검증**: 23h+ 누적 clean. 단 두 변종 자연 재발이 없어 *패치가 막는 장면 직접 관측은 안 됨* — 강한 정황이나 airtight 증명은 아님 (정직).
+4. **상위 트리거**: GStreamer `rtpjitterbuffer + 유한 파일 loop RTSP source` 의 엣지 케이스 (잠재적으로 MR 8781 in 1.26.1 로 해결 — 우리는 1.20.3 (Ubuntu 22.04 한계)). 업그레이드 미진행, watchdog 로 graceful degradation.
+
+### 권한 모델 (2026-05-23 전환)
+- **deny-first 모델**: `Bash(*)` allow + `permissions.deny[]` 69 항목 (system 파괴 / chown / 패키지 / 방화벽 / 원격 / cron / mount / docker 위험 / git 위험).
+- enumerate 패턴은 유지 (문서성 / fallback).
+- 분석 도구: `./scripts/permission_log.py` → `logs/permission_log.md` (AUTO/APPROVED/DENIED 3분류).
+- 현재: AUTO 99.4% / APPROVED 0 / DENIED 0.6% (fnmatch 기준).
+- 메모리: `feedback_trash_dir.md` 최신화 (`.deleted/` + `.backup/` 분리).
+
+### 다음 세션 인계
+- **검증 모니터 `bgyvt1hvo`** 계속 가동 (실패 발생 시 즉시 보고). 사용자가 검증 종료 / 머지 결정 대기.
+- branch `fix/rtsp-reconnect-storm` 머지 시점은 사용자 지시.
+- 진단용 override 는 비활성 (`.backup/docker-compose.override.yml.diagbak`).
+
+(이하 historical content — v0.1.0 release 시점 — 유지)
+
+---
+
+## v0.1.0 시점 (2026-05-20 기준, historical)
 
 ### Audit baseline (audit_20260519_222710 — PR #13 H fix 검증)
 - cppcheck **59** (이전 63 → PR #9 dead code 제거 -2 + em-dash suppress fix -2)
