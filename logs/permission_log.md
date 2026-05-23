@@ -1,7 +1,7 @@
 # Claude Code Bash 권한 흐름 기록 (AUTO / APPROVED / DENIED)
 
 > 자동 생성: `scripts/permission_log.py` (직접 편집 X — 다시 실행하면 덮어씀).
-> 갱신 시각: 2026-05-23 21:59:23
+> 갱신 시각: 2026-05-23 22:19:17
 > 분석 대상: 1 개 transcript (latest)
 > 분류 규칙:
 > - **AUTO**     = `.claude/settings.json` allow 패턴 매치 (prompt 없음)
@@ -15,26 +15,26 @@
 
 | 카테고리 | 총 호출 | 비중 |
 |---|---:|---:|
-| **AUTO**     | 11404     | 91.0% |
-| **APPROVED** | 1052 | 8.4% |
-| **DENIED**   | 80   | 0.6% |
-| **합계**     | 12536          | 100% |
+| **AUTO**     | 11917     | 95.0% |
+| **APPROVED** | 543 | 4.3% |
+| **DENIED**   | 81   | 0.6% |
+| **합계**     | 12541          | 100% |
 
 ### APPROVED (prompt 후 허가 추정) — 상위 12
 
 ```
-    50  until [ $(grep -c "DFPS" /home/claudedev/DetectBase/logs/Det
-    50  until [ "$(grep -c 'DFPS' /home/claudedev/DetectBase/logs/De
-    35  until grep -qE "DFPS] *1[0-9]\.|FATAL" /home/claudedev/Detec
-    28  until [ "$(stat -c %Y /home/claudedev/DetectBase/logs/Detect
     22  PID=$(docker inspect -f '{{.State.Pid}}' detectbase_service 
     20  sleep 8 && docker ps --filter "name=detectbase" --format "ta
-    20  cp /home/claudedev/DetectBase/settings/NetworkSettings.json 
-    20  until docker ps --filter "name=detectbase_service" --filter 
-    18  cp /home/claudedev/DetectBase/code/AbnormalActions/src/Abnor
-    16  until docker ps --format "{{.Names}}\t{{.Status}}" | grep -E
-    14  until grep -qE "PROGRAM QUIT SUCCESS|SERVICE START SUCCESS|F
-    14  until grep -qE "DFPS] *1[0-9]\." /home/claudedev/DetectBase/
+    13  PID=$(docker inspect -f '{{.State.Pid}}' detectbase_service)
+    10  sleep 5 && docker ps --filter "name=detectbase" --format "ta
+    10  sleep 15 && docker ps --filter "name=detectbase" --format "t
+    10  sleep 25 && docker ps --filter "name=detectbase" --format "t
+    10  sed -n '415,430p' /home/claudedev/DetectBase/code/Management
+    10  sed -n '375,378p' /home/claudedev/DetectBase/code/BasicLibs/
+    10  # SettingData.h: line 224 ~ 446 (마지막 } namespace 직전) dead 타입
+    10  sed -n '220,225p' /home/claudedev/DetectBase/code/Management
+    10  sed -n '320,325p' /home/claudedev/DetectBase/code/Management
+    10  # 1. Impl_AlphaShot* / Impl_Extinguish* / Impl_AlphaRover* 함
 ```
 
 ### DENIED — 상위 12

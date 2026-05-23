@@ -137,7 +137,13 @@
       "Bash(git *)",
       "Bash(gh *)",
 
-      "Bash(docker restart *)"
+      "Bash(docker restart *)",
+      "Bash(docker build *)",
+      "Bash(cp *)",
+      "Bash(bash /home/claudedev/DetectBase/logs/*)",
+      "Bash(time *)",
+      "Bash(until *)",
+      "Bash(for *)"
     ],
     "deny": [
       "Bash(rm *)",
