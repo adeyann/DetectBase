@@ -67,7 +67,7 @@ Pipeline: RTSP input → YOLOv5 NPU inference → SORT tracking → boundary int
 - Always read and follow relevant skills in `.claude/skills/` before each task (coding-guidelines, git-workflow, monitoring).
 - **Apply A1**: for non-trivial changes, report a plan and wait for approval before editing.
 - `sed` is on the deny list — use awk/cut/tr for reads; provide complete files for edits.
-- No `rm`/`unlink`/`rmdir` — use `mv` to `.deleted_backup/`. Real `rm` by user only.
+- No `rm`/`unlink`/`rmdir`. Move with intent: trash → `.deleted/`, rollback/reusable snapshot → `.backup/`. Real `rm` by user only.
 - **Git workflow** — AI may use git/gh but never on `master` directly. Work on separate branches; merge to master only via PR on explicit user instruction. develop merge is free (self-verify first); auto patch +1 on develop merge (cmake VERSION = git tag), ask user for minor/major. Force push / `reset --hard` denied. **Minimize branch proliferation — create only the branches the task needs (instance of A3).**
 
 ### Coding Standard
@@ -104,10 +104,10 @@ Before any master/develop merge, run the final program verification:
 This gate is DetectBase's definition of "verified" (A4). Unit tests are not the primary mechanism.
 
 ### Directory Structure
-- code/ source · engines/ NPU engines · bin/ build output · settings/ config · scripts/ service scripts · logs/ active artifacts · .DOCS/ legacy md · .deleted_backup/ trash · .claude/ agents+skills
+- code/ source · engines/ NPU engines · bin/ build output · settings/ config · scripts/ service scripts · logs/ active artifacts · .DOCS/ legacy md · .backup/ rollback/reusable snapshots · .deleted/ trash · .claude/ agents+skills
 
 ### Document Lifecycle
-Active (logs/) → Legacy (.DOCS/, md only) → Trash (.deleted_backup/). Update references on move.
+Active (logs/) → Legacy (.DOCS/, md only) → Trash (.deleted/) or rollback Backup (.backup/). Update references on move.
 
 ### Known Issues (must read)
 - Proto generated files must be regenerated inside docker with matching protobuf/grpc version.
