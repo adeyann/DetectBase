@@ -1,19 +1,62 @@
-# NEXT_SESSION — cam stuck fix develop 머지 완료 후 진입점
+# NEXT_SESSION — Option A (MPP 통합) 진행 중
 
-**최종 갱신**: 2026-05-24 23:50 KST
-**현 상태**: branch `develop` (HEAD `c023b4e`). cam stuck 2 변종 fix + audit 1h 강제 머지 완료. leak 조사 시도 → metric 오해(`anon`=가상공간) 로 무효 종료, 학습 메모 저장.
+**최종 갱신**: 2026-05-25 02:05 KST
+**현 상태**: branch `feature/mpp-integration` (HEAD `05f3031`). Option A partial reset 구조 구현/검증 완료 (avdec_h264 유지). mppvideodec swap 시도 → DFPS 116→28 regression 발견, working tree revert.
 
 ---
 
-## 🔴 화요일 (2026-05-26) 9시 출근 후 사용자 1줄 실행
+## 🔴 화요일 (2026-05-26) 9시 출근 후 사용자 처리
 
+### 1. local branch 정리 (1줄)
 ```bash
 git branch -D fix/gst-rtpmanager-leak
 ```
 
-- 이유: origin 은 이미 삭제, local 만 남음. b92dcdc 가 develop 으로 cherry-pick (c023b4e) 됐으나 git 은 "병합 안됨" 판정 → `-d` 거부. `-D` (force) 필요.
-- 안전성: origin 삭제됨, develop 에 동일 내용 있음, 데이터 손실 0.
-- deny list 에 `git branch -D *` 들어있어 AI 가 실행 불가.
+### 2. (선택) MPP regression 조사 진행 여부 결정
+- 진행 시: `feature/mpp-integration` 에서 mppvideodec DFPS regression 원인 파악
+- 보류 시: 별도 branch 또는 backlog 로 미루고 ThreadProfiler/MPP 외 작업 진행
+
+---
+
+## 🟡 Option A (MPP 통합) 진행 상황 — 2026-05-25 새벽 기록
+
+### 완료 (`feature/mpp-integration` branch)
+- **infra** (commit `0a4f3c6`): Dockerfile.build 에 libmpp (JeffyCN/mirrors mpp-dev) +
+  gstreamer-rockchip plugin source build 추가. docker-compose.yml 에 `/dev/mpp_service`
+  + `/dev/rga` device mount 추가. `detectbase:1.0` image 재빌드 완료. mppvideodec
+  plugin gst-inspect 인식 ✓.
+- **structure** (commit `05f3031`): GstRtspReceiver 의 BuildPipeline/TeardownPipeline/
+  ResetSourceOnly 를 source/decode side 분리 구조로 refactor (~250줄).
+  - DECODE-SIDE (Stop 까지 영구): decode_queue → decoder → videoconvert → capsfilter(I420) → appsink
+  - SOURCE-SIDE (매 reset destroy/recreate): rtspsrc → depay → parse [+ tee → raw 분기]
+  - BOUNDARY: parse.src (또는 tee.src_%u) → decode_queue.sink
+  - **검증**: avdec_h264 유지 상태로 EOS cycle 2회 = 8회 PARTIAL reset 정상 작동, duration 4~16ms. DFPS 116 유지.
+
+### 발견된 regression — mppvideodec swap (working tree 만, 미커밋)
+- **변경**: `decoder_ = gst_element_factory_make( "mppvideodec", "dec" )` (avdec_h264 → mppvideodec 1줄)
+- **결과**: **DFPS 116 → 28 (4× drop)**. 4 cam × 7 FPS/cam (이전 29 FPS/cam).
+- **추가 신호**:
+  - mpp 초기화 log 에 `mpp_platform: client 12 driver is not ready!`
+  - `mpp_soc: open /proc/device-tree/compatible error` (단 컨테이너 안 `/proc/device-tree/compatible` 직접 cat 은 가능 — libmpp 의 open 패턴 문제)
+  - 디코딩 자체는 일부 진행 (frames_total 증가), 단 매우 느림 → **CPU fallback 또는 single-core 만 사용** 의심
+- **현 working tree**: revert 됨 (`git checkout HEAD -- code/Protocol/RTSP_GST/src/GstRtspReceiver.cpp`). avdec_h264 정상 운영 복귀 (DFPS 117).
+
+### 다음 세션 진입 시 조사 후보 (priority 순)
+
+| 후보 | 의미 |
+|---|---|
+| **(A) host kernel MPP driver 호환성** | `/proc/devices` 의 `243 mpp_service` major number / kernel module 버전. libmpp 1.0.x 가 기대하는 driver protocol version 와 host kernel 의 mpp driver 매칭 확인. RK3588 BSP 커널 vs upstream 차이? |
+| **(B) `client 12 driver is not ready` 정확 원인** | libmpp source 의 client_12 코드 경로 grep → 어떤 ioctl 이 실패하는지 확인. mpp_service device 권한 (currently root:video, container privileged) 가 충분한지. |
+| **(C) gstreamer-rockchip plugin caps negotiation** | mppvideodec 의 sink/src caps. h264parse → mppvideodec 사이 stream-format 동등 여부 (`byte-stream` vs `avc`). |
+| **(D) mppvideodec property 조사** | gst-inspect-1.0 mppvideodec 의 properties (예: `arm-afbc`, `hwfd` 등 — 일부 off 해야 software fallback 안 함?) |
+| **(E) Option A 자체로 가치 인정 후 MPP 보류** | 현 `05f3031` 의 partial reset 구조만 가치 있음. develop 으로 merge 후 mppvideodec 는 별 issue 로 추적. |
+
+### Option A 자체의 가치 (mppvideodec 와 무관)
+- ResetSourceOnly 가 partial reset 으로 변경되어, decoder element 가 영구 보존됨.
+- avdec_h264 는 software 라 DMA buffer leak 없지만, **rebuild 비용 자체가 감소** (전체 pipeline destroy 안 함).
+- 매 reset duration 4~16ms 측정 (이전 단일 desc 방식 대비 ~5~10× 빠름 추정).
+
+---
 
 ---
 
