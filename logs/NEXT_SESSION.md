@@ -92,11 +92,18 @@ git branch -D fix/gst-rtpmanager-leak
 - 빌드 branch: `refactor/thread-profiler` (develop fork)
 
 ### I. MPP 통합 재시도
-- 이전 시도 (2026-05-14~15) 는 reconnect ~10MB RSS leak 으로 롤백.
-- 현재 in-place reset (rtspsrc 만 NULL→PLAYING, mppvideodec 보존) + frame-age watchdog 가 mpp internal DMA buffer leak 회피 메커니즘 으로 이미 코드 안에.
-- 재시도 시 pipeline `rtspsrc + h264parse + mppvideodec + appsink` 로 교체.
-- 매 EOS in-place reset → mppvideodec 인스턴스 보존 → DMA buffer 재할당 회피 가설 검증.
+- 이전 시도 (2026-05-14~15) 는 매 reconnect ~10MB RSS leak 으로 롤백. 사용자 명령 (2026-05-15) 로 `mppvideodec` + 2-pipeline architecture 전면 제거.
+- **현 코드 실제 상태** (정정 — 이전 NEXT_SESSION 기술 오류):
+  - pipeline: `rtspsrc → rtph264depay → h264parse → avdec_h264(SW 디코더) → videoconvert → I420 → appsink`. mppvideodec 없음.
+  - `ResetSourceOnly()` 는 함수명 무관 **TeardownPipeline + BuildPipeline 전체 파괴/재생성**. element 보존 메커니즘 미구현.
+  - `GstRtspClient.cpp` 의 "mppvideodec 보존" 주석 + log message 도 잘못 (MPP 작업 시 정리 예정).
+- **재시도 시 실제 작업 범위**:
+  1. element 보존 reset 메커니즘 신규 설계/구현 (현재 없음 — BuildPipeline/TeardownPipeline 분리)
+  2. pipeline 교체 `avdec_h264` → `mppvideodec` (한 줄)
+  3. 매 EOS 시 mppvideodec 인스턴스 보존 → DMA buffer 재할당 회피 가설 검증 (ASan 1h + 12h+ sanity)
+  4. NPU offload 효과 측정 (CPU% 비교)
 - 참고: `.deleted/gst_attempt_20260515/`, `.DOCS/GSTREAMER_DEEP_REVIEW.md`, `.DOCS/ONVIF_PAYLOADER_DESIGN.md`.
+- 작업 branch: `feature/mpp-integration` (develop fork)
 
 ### C. Frame ordering 진짜 fix (조건부)
 - 방어 카운터 `detectbase_correlation_mismatch_total{cam_id}` 며칠 운영 후 빈도 측정
