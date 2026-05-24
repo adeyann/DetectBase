@@ -77,6 +77,9 @@ settings/NetworkSettings.local.json
 # Test data
 .test/
 
+# 임시 분석 도구 (세션 한정)
+scripts/permission_marker_audit.py
+
 # 그 외 임시 파일
 /tmp/
 *.tmp
