@@ -314,7 +314,6 @@
       "Bash(git submodule deinit *)",
 
       "Bash(docker container rm *)",
-      "Bash(docker compose down*)",
       "Bash(docker compose rm *)",
 
       "Bash(truncate *)"
