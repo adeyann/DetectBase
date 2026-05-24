@@ -189,19 +189,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #   Required for gstreamer-rockchip plugin (mppvideodec hardware decoder).
 #   pkg-config 파일: /usr/local/lib/pkgconfig/rockchip_mpp.pc
 # -----------------------------------------------------------------------------
-RUN git clone --depth 1 -b 1.0.11 https://github.com/rockchip-linux/mpp.git /tmp/mpp \
+RUN git clone --depth 1 -b mpp-dev https://github.com/JeffyCN/mirrors.git /tmp/mpp \
     && cd /tmp/mpp \
-    && mkdir build && cd build \
+    && mkdir -p build && cd build \
     && cmake .. \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/usr/local \
-        -DRKPLATFORM=ON \
-        -DHAVE_DRM=ON \
+        -DBUILD_TEST=OFF \
     && make -j$(nproc) \
     && make install \
     && cd /tmp/build \
     && rm -rf /tmp/mpp \
     && ldconfig
+# NOTE(source 선택): rockchip-linux/mpp 의 release tag (1.0.10/1.0.11) 와 develop branch
+#   모두 codec source file 결손 (h265d_parser.c 등) — CMake Generate fail.
+#   JeffyCN/mirrors mpp-dev branch (2026-01-02 HEAD) 가 vendor 가 검증한 buildable
+#   상태 (cmake odr-violation fix 포함). gstreamer-rockchip 와 동일 mirror.
+# NOTE(BUILD_TEST=OFF): test 프로그램 미필요, 빌드 시간 절약.
 
 # -----------------------------------------------------------------------------
 # gstreamer-rockchip plugin — mppvideodec / mppvideoenc / kmssink 등 제공
