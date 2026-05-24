@@ -17,6 +17,8 @@ This file has two layers:
 - State assumptions explicitly. If uncertain, ask.
 - If multiple interpretations exist, present them — don't pick silently.
 - Distinguish a *guess* from a *verified fact*. Never present a hypothesis as a conclusion.
+- **Effect vs cause:** what you first observe (loss bursts, socket overflow, paused tasks, stuck symptoms) is usually an *effect* — the cause is upstream of it. Don't stop at the first plausible signal; keep asking "what produced this?" until the chain bottoms out at code/config you can name.
+- **Assume the library is correct first; suspect your own code/configuration/usage.** External release libraries (GStreamer, librknnrt, FFmpeg, restclient-cpp, sioclient, etc.) are assumed working until proven otherwise. If the library is genuinely the cause, prove it with a minimal reproducer + an upstream issue/MR reference; otherwise the bug lives in our code or our use of the API.
 - If a simpler approach exists, say so. Push back when warranted.
 - If something is unclear, stop. Name what's confusing. Ask.
 - *Concrete application in this project:* the pre-change approval gate in Part B §Work Rules.
@@ -66,8 +68,9 @@ Pipeline: RTSP input → YOLOv5 NPU inference → SORT tracking → boundary int
 - Think and reason in English. Always respond in Korean (see Language policy).
 - Always read and follow relevant skills in `.claude/skills/` before each task (coding-guidelines, git-workflow, monitoring).
 - **Apply A1**: for non-trivial changes, report a plan and wait for approval before editing.
+- **Never silently restart the service to make a symptom disappear.** Service restart is an explicit diagnostic action only; state the intent ("재시작해 X 를 확인/적용한다") in the response. Using restart to obscure a problem is forbidden.
 - `sed` is on the deny list — use awk/cut/tr for reads; provide complete files for edits.
-- No `rm`/`unlink`/`rmdir` — use `mv` to `.deleted_backup/`. Real `rm` by user only.
+- No `rm`/`unlink`/`rmdir`. Move with intent: trash → `.deleted/`, rollback/reusable snapshot → `.backup/`. Real `rm` by user only.
 - **Git workflow** — AI may use git/gh but never on `master` directly. Work on separate branches; merge to master only via PR on explicit user instruction. develop merge is free (self-verify first); auto patch +1 on develop merge (cmake VERSION = git tag), ask user for minor/major. Force push / `reset --hard` denied. **Minimize branch proliferation — create only the branches the task needs (instance of A3).**
 
 ### Coding Standard
@@ -92,6 +95,7 @@ Pipeline: RTSP input → YOLOv5 NPU inference → SORT tracking → boundary int
 - Explicit lifetime (document shared_ptr ownership).
 - Backpressure: every queue has max_size + drop-oldest.
 - Graceful degradation: one unit/camera failure must not kill the process; skip + record a metric.
+- **Test environment must be stricter than production.** If a failure mode only manifests under test (looping file sources, synchronized loop boundaries, harsh timing, synthetic stress), it is still a real defect — fix the code, do not dismiss with "won't happen in prod." Test is the safety net that catches what live deployments will eventually hit.
 - Shutdown order fixed and documented (`// !!! DO NOT REORDER !!!`).
 - Observability: every branch/failure/drop is a Prometheus metric; logs are JSON + correlation_id.
 - **External-boundary defense (reconciles with A2):** wrap genuinely-fallible external inputs with `catch(...)` / validation. **External boundary = input from outside this process: RTSP stream data, NPU library (librknnrt) calls, network, file IO, third-party libs.** Defense is required here because failure is genuinely possible. Do NOT add defensive code for internal invariants the code already guarantees (that is A2's "impossible scenario").
@@ -101,13 +105,16 @@ Before any master/develop merge, run the final program verification:
 - **audit 5종**: clang-tidy, cppcheck, ASan, UBSan, TSan.
 - **N-hour sanity / monitoring run**: stable DFPS, RSS, no new metric anomalies, cam stuck watch.
 - **metric baseline**: q_drop 0, error metrics within accepted bounds.
+- **Single-variable intervention for root-cause claims**: for any non-trivial root cause assertion, prefer a controlled A/B experiment — apply the predicted fix, hold everything else, compare matched-duration windows (storm/stuck rate, error counts). Long passive observation alone establishes *correlation*, not *causation*; intervention closes the loop.
+- **Patch must be live in the running process**: after any code/build change, verify the patch is actually loaded by the running binary — grep a unique symbol/string in the mapped `.so`, observe a marker log, or confirm container restart picked up the new artifact. "Source is fixed" ≠ "running process is fixed."
+
 This gate is DetectBase's definition of "verified" (A4). Unit tests are not the primary mechanism.
 
 ### Directory Structure
-- code/ source · engines/ NPU engines · bin/ build output · settings/ config · scripts/ service scripts · logs/ active artifacts · .DOCS/ legacy md · .deleted_backup/ trash · .claude/ agents+skills
+- code/ source · engines/ NPU engines · bin/ build output · settings/ config · scripts/ service scripts · logs/ active artifacts · .DOCS/ legacy md · .backup/ rollback/reusable snapshots · .deleted/ trash · .claude/ agents+skills
 
 ### Document Lifecycle
-Active (logs/) → Legacy (.DOCS/, md only) → Trash (.deleted_backup/). Update references on move.
+Active (logs/) → Legacy (.DOCS/, md only) → Trash (.deleted/) or rollback Backup (.backup/). Update references on move.
 
 ### Known Issues (must read)
 - Proto generated files must be regenerated inside docker with matching protobuf/grpc version.

@@ -1,24 +1,61 @@
-# NEXT_SESSION — v0.1.0 release 후 진입점
+# NEXT_SESSION — cam stuck fix 검증 + 권한 모델 전환 후 진입점
 
-**최종 갱신**: 2026-05-20 10:30 KST
-**현 상태**: cmake VERSION `0.1.6` (develop). v0.1.0 master tagged. PR #9~#16 develop 누적 (audit cleanup, RTSP URL fix, engine dtor UB fix, version sync, README sync, gst-rtsp 진단 trace). cam 659 stuck 1회 발생 (분석 진행 중, [STUCK_ANALYSIS_cam659_20260520.md](STUCK_ANALYSIS_cam659_20260520.md)).
+**최종 갱신**: 2026-05-24 00:10 KST
+**현 상태**: branch `fix/rtsp-reconnect-storm` (HEAD `8239fac`, 미머지). cam stuck 2 변종 분석·수정·23h+ 클린 검증. 권한 모델 deny-first 로 전환 (`Bash(*)` allow + deny 69 항목).
 
 ---
 
-## 현 상태 (2026-05-20 기준)
+## 현 상태 (2026-05-24 기준)
 
 ### Git
-- **master**: `d9ab212` — v0.1.0 tagged
-- **develop**: PR #18 (`a2e6bc3`) — PR #9~#18 누적 (cmake 0.1.7)
-- 모든 feature 브랜치 정리됨 (no-ff merge commit 정책 + `--delete-branch`)
-- Git workflow: no-ff merge commit, cmake VERSION = git tag, develop 머지 patch +1 auto
-- Co-Authored-By trailer 금지 (feedback_no_coauthor_trailer.md)
+- **master**: v0.1.0 tagged (변동 없음)
+- **develop**: cmake 0.1.10 (변동 없음)
+- **현재 작업 branch**: `fix/rtsp-reconnect-storm` — 다수 commit 누적, **미머지 (사용자 지시 대기)**.
+  - `fffa983` fix: RTSP cam stuck 2변종 해결 — reconnect 견고화 + frame-age watchdog
+  - `93c5f9a` chore: cam stuck 진단 마무리 정리
+  - `ef38067` / `b87d0fa` chore: 휴지통/백업 폴더 분리 `.deleted_backup` → `.deleted/` + `.backup/` 신설 (+ .gitignore)
+  - `029876b` docs: CLAUDE.md 5 디버깅 원칙 (effect/cause, library-first, test-env strict, A/B intervention, patch-live verify)
+  - `aa4a0d2` ~ `6db618b` chore: allow list 보강 (cp/docker build/sleep/until/for/time + 변수 prefix 23개)
+  - `ace020c` / `d0538e2` chore: permission_log 메커니즘 (`scripts/permission_log.py`)
+  - `ba439f9` revert: single-line Bash discipline (취하)
+  - `db20481` chore: 권한 모델 전환 — `Bash(*)` allow + `_deny_candidates` 보관
+  - `8239fac` chore: `_deny_candidates` 전부 `deny[]` promote (69 항목)
+- Git workflow: 변동 없음 (no-ff, no force push, Korean commit msg, no Co-Authored-By).
 
-### 운영 (2026-05-20)
-- `detectbase_service` Up (PR #16+#17 진단 binary)
-- 4 cam × ~29 fps/cam, plateau 정상
-- cam 659 1회 stuck (05:42 KST) → restart 후 복구 + 진단 binary 적용. stuck 재발 대기 중.
-- Monitor `b97mx4ehw` persistent (30min cycle, T+0 = 10:44)
+### 운영 (현재, ~23h+ clean)
+- `detectbase_service` Up (patched libRTSP_GST.so 로드, 2026-05-23 01:01 KST 재시작 이후)
+- 4 cam × ~116 DFPS, watchdog 발동 0, 영구 stuck 0, connect-timeout 0
+- Monitor `bgyvt1hvo` persistent — 30min heartbeat, 의미 있는 이벤트(영구 stuck / watchdog 발동 / storm)에만 보고
+- 진단 override (`docker-compose.override.yml.diagbak`)는 `.backup/` 보관 (재사용 가능)
+
+### cam stuck — 2 변종 확정 + 수정
+1. **변종 A (reconnect storm)**: 동기화 loop 경계의 너무 빠른 reconnect 가 RTSP 서버 SDP connect timeout 폭주 유발. + `StartReceiver()=true` 의 false-success 가 backoff 무력화 → tight 재시도 storm.
+   - **Fix** (`GstRtspClient::ReconnectWorker`):
+     - EOS in-place 경로 cam offset desync (`(cam_id%4)*500ms`).
+     - error 경로 teardown 후 3s+jitter 지연 (서버 세션 release).
+     - StartReceiver 후 frame 흐름 확인 (실제 GetFrameCount>0) — 안 흐르면 backoff 증가.
+2. **변종 B (침묵 stuck)**: GStreamer rtpjitterbuffer 내부 race 로 EOS 가 bus 미전파 → on_eos 미발화 → 재연결 미트리거 → 영구 stuck (cam661 식). 우리 reconnect 로직 무관.
+   - **Fix** (frame-age watchdog): `cv_.wait_for(5s)` 주기 wake 후 last_frame_ns 체크. 12s 무프레임이면 강제 in-place reset.
+3. **검증**: 23h+ 누적 clean. 단 두 변종 자연 재발이 없어 *패치가 막는 장면 직접 관측은 안 됨* — 강한 정황이나 airtight 증명은 아님 (정직).
+4. **상위 트리거**: GStreamer `rtpjitterbuffer + 유한 파일 loop RTSP source` 의 엣지 케이스 (잠재적으로 MR 8781 in 1.26.1 로 해결 — 우리는 1.20.3 (Ubuntu 22.04 한계)). 업그레이드 미진행, watchdog 로 graceful degradation.
+
+### 권한 모델 (2026-05-23 전환)
+- **deny-first 모델**: `Bash(*)` allow + `permissions.deny[]` 69 항목 (system 파괴 / chown / 패키지 / 방화벽 / 원격 / cron / mount / docker 위험 / git 위험).
+- enumerate 패턴은 유지 (문서성 / fallback).
+- 분석 도구: `./scripts/permission_log.py` → `logs/permission_log.md` (AUTO/APPROVED/DENIED 3분류).
+- 현재: AUTO 99.4% / APPROVED 0 / DENIED 0.6% (fnmatch 기준).
+- 메모리: `feedback_trash_dir.md` 최신화 (`.deleted/` + `.backup/` 분리).
+
+### 다음 세션 인계
+- **검증 모니터 `bgyvt1hvo`** 계속 가동 (실패 발생 시 즉시 보고). 사용자가 검증 종료 / 머지 결정 대기.
+- branch `fix/rtsp-reconnect-storm` 머지 시점은 사용자 지시.
+- 진단용 override 는 비활성 (`.backup/docker-compose.override.yml.diagbak`).
+
+(이하 historical content — v0.1.0 release 시점 — 유지)
+
+---
+
+## v0.1.0 시점 (2026-05-20 기준, historical)
 
 ### Audit baseline (audit_20260519_222710 — PR #13 H fix 검증)
 - cppcheck **59** (이전 63 → PR #9 dead code 제거 -2 + em-dash suppress fix -2)
@@ -55,12 +92,27 @@
 - clang-tidy 30 → 0 (NOLINT 24 + 진짜 fix PR #13)
 - cppcheck 63 → 59 (em-dash fix + dead code 제거 + suppress)
 
-### NEW-1. GstRtsp stale state root cause 추적 (진행 중)
-- **상태**: cam 659 stuck 1회 발생 (2026-05-20 05:42 KST), 진단 binary deployed (PR #16, cmake 0.1.5)
-- **진단 추가**: bus_message_total / reset_attempt_total / last_frame_age_sec metric + 모든 bus message type log
-- **다음 단계**: cam stuck 재발생 까지 monitoring 대기. 발생 시 metric/log 로 가설 좁히기.
-- **자동 복구 (watchdog) 금지**: 사용자 정책상 root cause 식별 전 forced restart 안 함.
-- 자세한 분석: [STUCK_ANALYSIS_cam659_20260520.md](STUCK_ANALYSIS_cam659_20260520.md)
+### NEW-1. GstRtsp stale state root cause 추적 — cascading stuck 확인 (긴급)
+- **상태**: 2026-05-20 17:00~17:45 KST 사이 **cam 660/661/659 cascading stuck**. cam 658 만 alive. DFPS 116 → 29.1.
+  - cam 660 stuck since 17:10:33 (34.5분), 661 since 17:16:30 (28.6분), 659 since 17:37:28 (7.6분)
+  - 1차 발생 (05:42 KST) → 7시간 무재발 → 17:00~ 폭발적 재발 + cascading
+- **진단 확정**: 이전 cam 659 패턴과 동일. EOS reset 정상 → 1~5분 stream 정상 → mid-stream frame stop → 다음 EOS 안 옴. TCP ESTAB 유지. 우리 측 reset trigger 없음.
+- **Root cause 가설**: 분기 미확정
+  - A. 외부 RTSP server frozen (TCP keepalive 만)
+  - B. 우리 측 rtspsrc internal stale (multi-stream race)
+  - 가설 분기: tcpdump 또는 force-reset 후 회복 여부
+- **Mitigation 설계 완료 (미배포)**: frame-age > 5초 시 force `RequestReconnect`
+  - 설계 문서: [FORCE_RESET_DESIGN_20260520.md](FORCE_RESET_DESIGN_20260520.md)
+  - 임계값 5초 = 정상 EOS reset 1.6초의 3× margin
+  - 검출 위치: RtspDetectorUnit.cpp:1426 dequeue_wait_for timeout 분기
+  - 새 metric: `detectbase_force_reset_total{cam_id, reason}`
+  - 배포 보류 — 사용자 지시 ("일단 두고", 2026-05-20 17:50 KST)
+- **자동 복구 (watchdog) 금지**: 사용자 정책상 root cause 식별 전 service restart 안 함
+- 자세한 분석:
+  - [STUCK_ANALYSIS_cam659_20260520.md](STUCK_ANALYSIS_cam659_20260520.md) — 1차 발생 (05:42 KST)
+  - [FORCE_RESET_DESIGN_20260520.md](FORCE_RESET_DESIGN_20260520.md) — mitigation 설계
+  - [stuck_dump_20260520_171959/](stuck_dump_20260520_171959/) — cam 660 stuck forensic dump
+  - [BASELINE_dump_20260520_140935/](BASELINE_dump_20260520_140935/) — 정상 baseline 비교용
 
 ### NEW-2. `correlation_mismatch` 폭증 root cause 추적 (진행 중)
 - **상태**: PR #16+#17 binary 적용 후 mismatch ~70× 폭증 (0.4/cam/sec → 27.5/cam/sec). 30분당 +200K stable plateau.
@@ -85,11 +137,20 @@
 - 운영 영향 0이라 보류 가능
 - v0.1.x cleanup PR 에 포함 가능
 
-### F. GStreamer 1.24+ upgrade (v1.0.0 후)
-- rtpmanager runtime leak (~340 MB/year) fix 시도
-- Ubuntu 22.04 → 24.04 base + glibc/GCC 동반 업그레이드
-- librknnrt ABI 호환 위험 사전 검증 필요
-- 비용 ~1.5~2시간 + 위험
+### ~~F. GStreamer 1.24+ upgrade~~ ✕ 폐기 (2026-05-24, 사용자 결정)
+- Ubuntu 22.04 base + librknnrt ABI 위험 + 비용 대비 효과 불분명. 우리 patch
+  (watchdog + reconnect 견고화) 로 cam stuck 클래스 해결됨. 업그레이드 불필요.
+
+### I. MPP 통합 재시도 (예정)
+- 이전 시도 (2026-05-14~15) 는 reconnect ~10MB RSS leak 으로 롤백.
+- 현재 in-place reset (rtspsrc 만 NULL→PLAYING, mppvideodec 보존) + frame-age
+  watchdog 가 mpp internal DMA buffer leak (~12MB/reconn) 회피 메커니즘
+  으로 이미 코드에 들어가 있음 (GstRtspClient.cpp 주석).
+- 재시도 시: pipeline 을 `rtspsrc + h264parse + mppvideodec + appsink` 로 교체.
+  매 EOS 마다 in-place reset → mppvideodec 인스턴스 보존 → DMA buffer
+  재할당 회피 → leak 미발생 가설 검증.
+- 참고: `.deleted/gst_attempt_20260515/`, `.DOCS/GSTREAMER_DEEP_REVIEW.md`,
+  `.DOCS/ONVIF_PAYLOADER_DESIGN.md`.
 
 ### G. DEBUG virtual lines 제거 (v1.0.0 시점)
 - 시연용 임시 코드 제거 (위치: README §14)
