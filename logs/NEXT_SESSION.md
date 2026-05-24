@@ -1,198 +1,134 @@
-# NEXT_SESSION — cam stuck fix 검증 + 권한 모델 전환 후 진입점
+# NEXT_SESSION — cam stuck fix develop 머지 완료 후 진입점
 
-**최종 갱신**: 2026-05-24 00:10 KST
-**현 상태**: branch `fix/rtsp-reconnect-storm` (HEAD `8239fac`, 미머지). cam stuck 2 변종 분석·수정·23h+ 클린 검증. 권한 모델 deny-first 로 전환 (`Bash(*)` allow + deny 69 항목).
+**최종 갱신**: 2026-05-24 23:50 KST
+**현 상태**: branch `develop` (HEAD `c023b4e`). cam stuck 2 변종 fix + audit 1h 강제 머지 완료. leak 조사 시도 → metric 오해(`anon`=가상공간) 로 무효 종료, 학습 메모 저장.
 
 ---
 
-## 현 상태 (2026-05-24 기준)
+## 🔴 화요일 (2026-05-26) 9시 출근 후 사용자 1줄 실행
+
+```bash
+git branch -D fix/gst-rtpmanager-leak
+```
+
+- 이유: origin 은 이미 삭제, local 만 남음. b92dcdc 가 develop 으로 cherry-pick (c023b4e) 됐으나 git 은 "병합 안됨" 판정 → `-d` 거부. `-D` (force) 필요.
+- 안전성: origin 삭제됨, develop 에 동일 내용 있음, 데이터 손실 0.
+- deny list 에 `git branch -D *` 들어있어 AI 가 실행 불가.
+
+---
+
+## 현 상태 (2026-05-24 23:50 KST)
 
 ### Git
-- **master**: v0.1.0 tagged (변동 없음)
-- **develop**: cmake 0.1.10 (변동 없음)
-- **현재 작업 branch**: `fix/rtsp-reconnect-storm` — 다수 commit 누적, **미머지 (사용자 지시 대기)**.
-  - `fffa983` fix: RTSP cam stuck 2변종 해결 — reconnect 견고화 + frame-age watchdog
-  - `93c5f9a` chore: cam stuck 진단 마무리 정리
-  - `ef38067` / `b87d0fa` chore: 휴지통/백업 폴더 분리 `.deleted_backup` → `.deleted/` + `.backup/` 신설 (+ .gitignore)
-  - `029876b` docs: CLAUDE.md 5 디버깅 원칙 (effect/cause, library-first, test-env strict, A/B intervention, patch-live verify)
-  - `aa4a0d2` ~ `6db618b` chore: allow list 보강 (cp/docker build/sleep/until/for/time + 변수 prefix 23개)
-  - `ace020c` / `d0538e2` chore: permission_log 메커니즘 (`scripts/permission_log.py`)
-  - `ba439f9` revert: single-line Bash discipline (취하)
-  - `db20481` chore: 권한 모델 전환 — `Bash(*)` allow + `_deny_candidates` 보관
-  - `8239fac` chore: `_deny_candidates` 전부 `deny[]` promote (69 항목)
-- Git workflow: 변동 없음 (no-ff, no force push, Korean commit msg, no Co-Authored-By).
+- **master**: v0.1.0 tagged (변동 없음, develop 보다 56 commit 뒤)
+- **develop**: HEAD `c023b4e`, cmake **0.1.11**
+  - `c023b4e` chore(audit): ASan/TSan 최소 1시간 강제 (leak 조사 부산물, 가치 있음)
+  - `da7412e` Merge fix/rtsp-reconnect-storm into develop — cam stuck 2변종 fix + 권한 모델 + 폴더 정리
+  - `cb72341` chore: cmake VERSION 0.1.10→0.1.11 + .gitignore
+- **삭제됨**: origin `fix/rtsp-reconnect-storm` (머지 후 잔존 무의미), origin `fix/gst-rtpmanager-leak` (잘못된 조사)
+- **잔여 local**: `fix/gst-rtpmanager-leak` (위 화요일 항목 참조)
+- Git workflow 변동 없음.
 
-### 운영 (현재, ~23h+ clean)
-- `detectbase_service` Up (patched libRTSP_GST.so 로드, 2026-05-23 01:01 KST 재시작 이후)
-- 4 cam × ~116 DFPS, watchdog 발동 0, 영구 stuck 0, connect-timeout 0
-- Monitor `bgyvt1hvo` persistent — 30min heartbeat, 의미 있는 이벤트(영구 stuck / watchdog 발동 / storm)에만 보고
-- 진단 override (`docker-compose.override.yml.diagbak`)는 `.backup/` 보관 (재사용 가능)
+### 운영
+- `detectbase_service` Up (HEAD 빌드, post-audit restart since 2026-05-24 12:31 KST, 약 11h+)
+- 4 cam × DFPS 113~117 안정, watchdog 발동 0, 영구 stuck 0, connect-timeout 0
+- Process RSS 660~711 MB stable (cgroup 진짜 RSS, log `resident=` 기준)
+- 진단 override (`docker-compose.override.yml.diagbak`)는 `.backup/` 보관
 
-### cam stuck — 2 변종 확정 + 수정
-1. **변종 A (reconnect storm)**: 동기화 loop 경계의 너무 빠른 reconnect 가 RTSP 서버 SDP connect timeout 폭주 유발. + `StartReceiver()=true` 의 false-success 가 backoff 무력화 → tight 재시도 storm.
-   - **Fix** (`GstRtspClient::ReconnectWorker`):
-     - EOS in-place 경로 cam offset desync (`(cam_id%4)*500ms`).
-     - error 경로 teardown 후 3s+jitter 지연 (서버 세션 release).
-     - StartReceiver 후 frame 흐름 확인 (실제 GetFrameCount>0) — 안 흐르면 backoff 증가.
-2. **변종 B (침묵 stuck)**: GStreamer rtpjitterbuffer 내부 race 로 EOS 가 bus 미전파 → on_eos 미발화 → 재연결 미트리거 → 영구 stuck (cam661 식). 우리 reconnect 로직 무관.
-   - **Fix** (frame-age watchdog): `cv_.wait_for(5s)` 주기 wake 후 last_frame_ns 체크. 12s 무프레임이면 강제 in-place reset.
-3. **검증**: 23h+ 누적 clean. 단 두 변종 자연 재발이 없어 *패치가 막는 장면 직접 관측은 안 됨* — 강한 정황이나 airtight 증명은 아님 (정직).
-4. **상위 트리거**: GStreamer `rtpjitterbuffer + 유한 파일 loop RTSP source` 의 엣지 케이스 (잠재적으로 MR 8781 in 1.26.1 로 해결 — 우리는 1.20.3 (Ubuntu 22.04 한계)). 업그레이드 미진행, watchdog 로 graceful degradation.
+### Audit baseline (audit_20260524_115656)
+| | baseline (5/19) | 현재 (5/24) | 변화 |
+|---|---|---|---|
+| cppcheck | 59 | 59 | 0 |
+| clang-tidy | 0 | 0 | 0 |
+| TSan | 137 | 141 | +4 (sampling variance) |
+| ASan leak | (없음, 5min run) | 1.2 MB / 5min | 신규 측정 — 대부분 init-time, c023b4e 로 1h 최소화 강제 |
 
-### 권한 모델 (2026-05-23 전환)
-- **deny-first 모델**: `Bash(*)` allow + `permissions.deny[]` 69 항목 (system 파괴 / chown / 패키지 / 방화벽 / 원격 / cron / mount / docker 위험 / git 위험).
-- enumerate 패턴은 유지 (문서성 / fallback).
-- 분석 도구: `./scripts/permission_log.py` → `logs/permission_log.md` (AUTO/APPROVED/DENIED 3분류).
-- 현재: AUTO 99.4% / APPROVED 0 / DENIED 0.6% (fnmatch 기준).
-- 메모리: `feedback_trash_dir.md` 최신화 (`.deleted/` + `.backup/` 분리).
+### cam stuck — 머지된 2 변종 fix (요약)
+1. **변종 A (storm)**: cam offset desync `(cam_id%4)*500ms` + teardown 후 3s+jitter + StartReceiver 후 frame-flow 확인.
+2. **변종 B (silent stuck)**: frame-age watchdog (`cv_.wait_for(5s)` wake → 12s 무프레임이면 in-place reset).
 
-### 다음 세션 인계
-- **검증 모니터 `bgyvt1hvo`** 계속 가동 (실패 발생 시 즉시 보고). 사용자가 검증 종료 / 머지 결정 대기.
-- branch `fix/rtsp-reconnect-storm` 머지 시점은 사용자 지시.
-- 진단용 override 는 비활성 (`.backup/docker-compose.override.yml.diagbak`).
+**검증 정리**:
+- 24.5h+ 자연 운영 clean (Fix A+B)
+- 9.5h Fix A revert 실험 (Fix B만): 429 EOS / 0 storm / in-place reset 100% 성공
+- 30분 통제 실험 (WATCHDOG_STALE_SEC=3 + on_eos 차단): 4 cam 전부 watchdog **강제 발동 직접 관측** (단일변수 개입 검증)
 
-(이하 historical content — v0.1.0 release 시점 — 유지)
+### 권한 모델 (2026-05-23 전환, 머지 완료)
+- deny-first: `Bash(*)` allow + 123 항목 deny (시스템 파괴/사용자/네트워크/패키지/git/docker 위험).
+- `./scripts/permission_log.py` → `logs/permission_log.md` (AUTO/APPROVED/DENIED 3분류).
 
----
-
-## v0.1.0 시점 (2026-05-20 기준, historical)
-
-### Audit baseline (audit_20260519_222710 — PR #13 H fix 검증)
-- cppcheck **59** (이전 63 → PR #9 dead code 제거 -2 + em-dash suppress fix -2)
-- clang-tidy **0 ✅** (이전 30 → PR #9 NOLINT 24 + PR #13 진짜 fix)
-- ASan/UBSan: startup leak 0 + runtime leak ~1.2MB (GStreamer rtpmanager, 5분 run, 수용)
-- TSan: **우리 코드 진짜 race 0 ✅**, 잔여 137 (SIGKILL FP + 외부 lib + 추적 한계)
-
-자세한 결과:
-- [AUDIT_REPORT_20260519.md](AUDIT_REPORT_20260519.md) (v0.1.0 baseline, historical)
-- [SESSION_DFPS_B3_B4_PLATEAU_20260519.md](SESSION_DFPS_B3_B4_PLATEAU_20260519.md) (v0.1.0 직전 세션)
-- [STUCK_ANALYSIS_cam659_20260520.md](STUCK_ANALYSIS_cam659_20260520.md) (GstRtsp stale 추적)
-
-### PR 누적 (v0.1.0 → develop)
-| PR | 변경 | 목적 |
-|---|---|---|
-| #9 | refactor/audit-cleanup | NOLINT 24 + safe fix 7 + future PR §H 분리 |
-| #10 | docs/next-session-reorder | NEXT_SESSION §A 를 §H 뒤로 |
-| #11 | docs/next-session-c-reorder | §C 를 §A 뒤로 (mismatch=0 확인 후) |
-| #12 | fix/rtsp-url-port | mount `/<id>` + port 555 + ServerSetting wiring |
-| #13 | fix/engine-dtor-pure-virtual-call | EngineHandlerBase dtor pure virtual UB 진짜 fix (clang-tidy 30 → 0) |
-| #14 | chore/cmake-version-sync-0.1.3 | cmake VERSION 2.2.3 → 0.1.3 (git tag 동기) |
-| #15 | docs/readme-version-sync | README v0.1.4 sync + cmake 0.1.4 |
-| #16 | debug/gst-rtsp-stale-trace | cam stuck root cause 진단 도구 + cmake 0.1.5 |
-| #17 | fix/correlation-mismatch-metric | RegisterCounter 누락 fix + STUCK_ANALYSIS doc + cmake 0.1.6 |
-| #18 | docs/post-pr17-sync | README/OPERATIONS/CLAUDE/code 갱신 + cmake 0.1.7 |
-| #19 | docs/deep-sync | NEXT_SESSION 현 상태 + PR 누적 표 + cmake 0.1.8 |
-| #20 | docs/preserve-mismatch-analysis | MISMATCH_SURGE_ANALYSIS doc 신규 + STUCK_ANALYSIS 부수 발견 추가 + CLAUDE.md Known Issues mismatch surge 추가 + cmake 0.1.9 |
+### leak 조사 — 무효 종료 (2026-05-24)
+- 시작 이유: ASan 5분 run "1.2 MB / 10418 alloc" → leak 확정으로 해석.
+- 잘못된 추적: RSP-thread log 의 `anon=4220MB` 를 RSS 로 해석. 사실은 `/proc/self/maps` anonymous **가상 주소 공간** 합 — jemalloc reserved 영역 포함, 실제 RAM 사용 아님.
+- 진실: process resident RSS 9.5h 동안 658→678 MB stable. ASan leak 대부분 init-time (glib/YoloV5/rknn_init 1회), per-reset 96B × 3 수준.
+- 결론: **실질 메모리 leak 없음.** branch `fix/gst-rtpmanager-leak` 폐기.
+- 부산물 가치 commit `b92dcdc` → develop cherry-pick (audit ASan/TSan 1h 최소 강제, c023b4e).
+- 학습 메모: `feedback_verify_metric_definition.md` (memory) — "지표 출처 코드 grep 후 결론, 변수명 추측 금지".
+- 산출물 trash: `.deleted/leak_investigation_misguided_20260524/` (CSV/sh/PLAN.md).
 
 ---
 
 ## 다음 세션 작업 후보 (우선순위 순)
 
-### B. ~~audit cleanup PR~~ ✅ 완료 (2026-05-19, PR #9 `refactor/audit-cleanup`)
-- clang-tidy 30 → 0 (NOLINT 24 + 진짜 fix PR #13)
-- cppcheck 63 → 59 (em-dash fix + dead code 제거 + suppress)
-
-### NEW-1. GstRtsp stale state root cause 추적 — cascading stuck 확인 (긴급)
-- **상태**: 2026-05-20 17:00~17:45 KST 사이 **cam 660/661/659 cascading stuck**. cam 658 만 alive. DFPS 116 → 29.1.
-  - cam 660 stuck since 17:10:33 (34.5분), 661 since 17:16:30 (28.6분), 659 since 17:37:28 (7.6분)
-  - 1차 발생 (05:42 KST) → 7시간 무재발 → 17:00~ 폭발적 재발 + cascading
-- **진단 확정**: 이전 cam 659 패턴과 동일. EOS reset 정상 → 1~5분 stream 정상 → mid-stream frame stop → 다음 EOS 안 옴. TCP ESTAB 유지. 우리 측 reset trigger 없음.
-- **Root cause 가설**: 분기 미확정
-  - A. 외부 RTSP server frozen (TCP keepalive 만)
-  - B. 우리 측 rtspsrc internal stale (multi-stream race)
-  - 가설 분기: tcpdump 또는 force-reset 후 회복 여부
-- **Mitigation 설계 완료 (미배포)**: frame-age > 5초 시 force `RequestReconnect`
-  - 설계 문서: [FORCE_RESET_DESIGN_20260520.md](FORCE_RESET_DESIGN_20260520.md)
-  - 임계값 5초 = 정상 EOS reset 1.6초의 3× margin
-  - 검출 위치: RtspDetectorUnit.cpp:1426 dequeue_wait_for timeout 분기
-  - 새 metric: `detectbase_force_reset_total{cam_id, reason}`
-  - 배포 보류 — 사용자 지시 ("일단 두고", 2026-05-20 17:50 KST)
-- **자동 복구 (watchdog) 금지**: 사용자 정책상 root cause 식별 전 service restart 안 함
-- 자세한 분석:
-  - [STUCK_ANALYSIS_cam659_20260520.md](STUCK_ANALYSIS_cam659_20260520.md) — 1차 발생 (05:42 KST)
-  - [FORCE_RESET_DESIGN_20260520.md](FORCE_RESET_DESIGN_20260520.md) — mitigation 설계
-  - [stuck_dump_20260520_171959/](stuck_dump_20260520_171959/) — cam 660 stuck forensic dump
-  - [BASELINE_dump_20260520_140935/](BASELINE_dump_20260520_140935/) — 정상 baseline 비교용
-
-### NEW-2. `correlation_mismatch` 폭증 root cause 추적 (진행 중)
-- **상태**: PR #16+#17 binary 적용 후 mismatch ~70× 폭증 (0.4/cam/sec → 27.5/cam/sec). 30분당 +200K stable plateau.
-- **핵심 관찰**: 모든 mismatch delta = **정확히 10 frame** (variance 0, cross-cam 아님)
-- **동시 이상**: prof_RSP ifq/resp 분포 반전 (10K/24K → 33K/0.15K), HWM 1GB peak, prof_INF push 16→41us 증가
-- **운영 영향**: frame 시차 ~330ms (10 × 33ms) → bbox / tracking / event detection 정확도 영향. q_drop 0, cam 4/4 OK.
-- **Root cause 가설**: PR #16 의 진단 코드 (`last_frame_ns_` atomic store 매 frame + bus message IncrementCounter 매 호출) 의 cache line contention 으로 InferenceThread push 시간 증가 → result_q backlog 10 frame stable 형성.
-- **다음 단계**:
-  - Phase 1: 진단 항목 비활성 실험 (어느 변경이 trigger 인지 식별)
-  - Phase 2: PR #9 §C 옵션 적용 (per-correlation_id lookup 또는 handler affinity)
-  - Phase 3: 진단 binary light version 또는 제거 검증
-- 자세한 분석: [MISMATCH_SURGE_ANALYSIS_20260520.md](MISMATCH_SURGE_ANALYSIS_20260520.md)
-
-### D. ~~RTSP URL / publish port 정정~~ ✅ 완료 (2026-05-19, `fix/rtsp-url-port`)
-- mount path `/cam<id>` → `/<id>`
-- default port `8554` → `555` (RtspHandler.h + GstRtspProxyServer.h)
-- `ServerSetting.RtspPort` (MVAS dynamic) → `RtspHandler::Setting.proxy_server_port` 실제 연결 (NetworkManager::BuildRtspSetting)
-- 외부 viewer URL: `rtsp://<host>:555/<id>` (이전 `rtsp://<host>:8554/cam<id>`)
-
-### E. TSan SafeQueue 추적 한계 (~5건)
-- structural redesign (lock 범위 확장 또는 atomic guard)
-- 운영 영향 0이라 보류 가능
-- v0.1.x cleanup PR 에 포함 가능
-
-### ~~F. GStreamer 1.24+ upgrade~~ ✕ 폐기 (2026-05-24, 사용자 결정)
-- Ubuntu 22.04 base + librknnrt ABI 위험 + 비용 대비 효과 불분명. 우리 patch
-  (watchdog + reconnect 견고화) 로 cam stuck 클래스 해결됨. 업그레이드 불필요.
-
-### I. MPP 통합 재시도 (예정)
-- 이전 시도 (2026-05-14~15) 는 reconnect ~10MB RSS leak 으로 롤백.
-- 현재 in-place reset (rtspsrc 만 NULL→PLAYING, mppvideodec 보존) + frame-age
-  watchdog 가 mpp internal DMA buffer leak (~12MB/reconn) 회피 메커니즘
-  으로 이미 코드에 들어가 있음 (GstRtspClient.cpp 주석).
-- 재시도 시: pipeline 을 `rtspsrc + h264parse + mppvideodec + appsink` 로 교체.
-  매 EOS 마다 in-place reset → mppvideodec 인스턴스 보존 → DMA buffer
-  재할당 회피 → leak 미발생 가설 검증.
-- 참고: `.deleted/gst_attempt_20260515/`, `.DOCS/GSTREAMER_DEEP_REVIEW.md`,
-  `.DOCS/ONVIF_PAYLOADER_DESIGN.md`.
-
-### G. DEBUG virtual lines 제거 (v1.0.0 시점)
-- 시연용 임시 코드 제거 (위치: README §14)
-
-### H. ~~EngineHandlerBase dtor pure virtual UB fix~~ ✅ 완료 (2026-05-19, `fix/engine-dtor-pure-virtual-call`)
-- derived dtor (`~YoloV5_Torch_Onnx_RKNN_NPU`) 에 `if(IsActive()) TerminateEngine();` 명시 호출 추가
-- base dtor (`~EngineHandlerBase`) 의 `TerminateEngine()` 호출 제거 → ERROR log 만 (계약: derived 가 호출 책임)
-- `EngineHandlerBase.cpp:79` 의 `NOLINTNEXTLINE(clang-analyzer-cplusplus.PureVirtualCall)` 제거 (UB 실제 해결)
-- 호출 경로 모두 derived 살아있는 동안 처리 → pure virtual UB + Preprocess race 둘 다 회피
+### NEW-2. `correlation_mismatch` 폭증 root cause 추적 (진행 중, 가장 임박)
+- **상태**: PR #16+#17 binary 후 mismatch ~70× (0.4 → 27.5/cam/sec). 30분당 +200K stable plateau.
+- **핵심 관찰**: 모든 delta = 정확히 10 frame
+- **운영 영향**: frame 시차 ~330ms (10 × 33ms) → bbox / tracking / event detection 정확도 영향. q_drop 0.
+- **가설**: PR #16 진단 코드 (`last_frame_ns_` atomic store 매 frame + bus message IncrementCounter 매 호출) cache line contention → InferenceThread push 시간 증가 → result_q backlog.
+- **다음**:
+  - Phase 1: 진단 항목 비활성 실험 (어느 변경이 trigger 인지)
+  - Phase 2: per-correlation_id lookup 또는 handler affinity
+  - Phase 3: 진단 binary light version
+- 자세히: [MISMATCH_SURGE_ANALYSIS_20260520.md](MISMATCH_SURGE_ANALYSIS_20260520.md)
 
 ### A. ThreadProfiler module 신규 작성
 - 현재: RspProf/InfProf/EvtProf inline struct + 100 cycle 마다 직접 MLOG_INFO + SetGauge
 - 목표: 별도 thread 가 모든 stage timing + queue size 일괄 수집
 - 구조:
-  - **PUSH API**: 각 thread 가 `Sample(stage_name, us)` 호출 → atomic accumulator 누적
-  - **PULL API**: queue size / metric 등 외부 source 는 `RegisterPullSource(name, getter)` 등록 → ThreadProfiler thread 가 N초마다 drain
-- 효과: 측정 빈도/필드 변경 시 ThreadProfiler interval 만 수정. 신규 stage 추가는 Sample 한 줄. log format 일관.
+  - PUSH API: `Sample(stage_name, us)` → atomic accumulator
+  - PULL API: `RegisterPullSource(name, getter)` 등록 → ThreadProfiler thread 가 N초마다 drain
+- 효과: 측정 빈도/필드 변경 시 ThreadProfiler interval 만 수정. 신규 stage 추가는 한 줄.
 - 위치: `code/Profile/ThreadProfiler.h+cpp` 신규
-- 마이그레이션: RspProf/InfProf/EvtProf → Sample 호출 (~5줄/thread) + RegisterPullSource Init (~15줄)
 - 비용: ~4시간 (구현 + 마이그레이션 + 검증)
 - 빌드 branch: `refactor/thread-profiler` (develop fork)
 
+### I. MPP 통합 재시도
+- 이전 시도 (2026-05-14~15) 는 reconnect ~10MB RSS leak 으로 롤백.
+- 현재 in-place reset (rtspsrc 만 NULL→PLAYING, mppvideodec 보존) + frame-age watchdog 가 mpp internal DMA buffer leak 회피 메커니즘 으로 이미 코드 안에.
+- 재시도 시 pipeline `rtspsrc + h264parse + mppvideodec + appsink` 로 교체.
+- 매 EOS in-place reset → mppvideodec 인스턴스 보존 → DMA buffer 재할당 회피 가설 검증.
+- 참고: `.deleted/gst_attempt_20260515/`, `.DOCS/GSTREAMER_DEEP_REVIEW.md`, `.DOCS/ONVIF_PAYLOADER_DESIGN.md`.
+
 ### C. Frame ordering 진짜 fix (조건부)
-- 방어 카운터 `detectbase_correlation_mismatch_total{cam_id}` 며칠 운영 후 발생 빈도 측정
-- 3시간 sanity (2026-05-19) 결과: mismatch=0 일관. 발생 빈도 0 추정.
-- 발생 빈도 > 0 시 옵션:
+- 방어 카운터 `detectbase_correlation_mismatch_total{cam_id}` 며칠 운영 후 빈도 측정
+- 3h sanity (2026-05-19) 결과 mismatch=0. 발생 빈도 0 추정.
+- 발생 빈도 > 0 시:
   - per-correlation_id lookup (`cam_result_qs_` → `map<correlation_id, OutputLayerWrapper>`)
-  - handler affinity (cam → 고정 handler, round-robin 포기)
-- 발생 빈도 0 시 보류
+  - 또는 handler affinity (cam → 고정 handler, round-robin 포기)
+
+### E. TSan SafeQueue 추적 한계 (~5건)
+- structural redesign (lock 범위 확장 또는 atomic guard)
+- 운영 영향 0, 보류 가능
+
+### G. DEBUG virtual lines 제거 (v1.0.0 시점)
+- 시연용 임시 코드 제거 (위치: README §14)
+
+### ~~F. GStreamer 1.24+ upgrade~~ ✕ 폐기 (2026-05-24, 사용자)
+- Ubuntu 22.04 base + librknnrt ABI 위험 + 비용 대비 효과 불분명. watchdog + reconnect 견고화로 cam stuck 클래스 해결.
+
+### ~~NEW-1. GstRtsp stale root cause + Force Reset~~ ✅ 해결 (2026-05-24, cam stuck 2변종 fix 머지)
+- 변종 A/B 분리 + fix + 검증 완료. NEW-1 의 force reset 설계는 사실상 frame-age watchdog 로 구현됨.
+
+### ~~leak 조사 (`fix/gst-rtpmanager-leak`)~~ ✕ 무효 (2026-05-24)
+- metric 오해. 학습 메모 저장. 산출물 trash. (위 "leak 조사" 항목 참조)
 
 ---
 
 ## 다음 세션 진입 시 자동 처리
 
-1. `git status` + `git log -3` (현 상태)
-2. `git branch -a` (브랜치 정리 상태 — master, develop 만 있어야)
+1. `git status` + `git log develop -5` (현 develop 상태)
+2. `git branch -a` (잔여 fix/gst-rtpmanager-leak 확인 — 화요일 사용자 처리 가정 시 사라져있어야)
 3. 이 NEXT_SESSION.md 읽기
-4. [SESSION_DFPS_B3_B4_PLATEAU_20260519.md](SESSION_DFPS_B3_B4_PLATEAU_20260519.md) 의 "v0.1.0 release 마무리" 섹션 (마지막) 읽기
-5. 사용자 명령 또는 위 A~G 중 선택해서 진행
-   - A (ThreadProfiler) 가 가장 자연스러운 다음 단계
-   - B (audit cleanup) 는 짧고 명확한 작업
-   - 둘 다 develop fork 으로 작업 → PR 머지 (no-ff)
+4. 사용자 명령 또는 위 NEW-2 / A / I / C / E / G 중 선택해서 진행
 
 ---
 
@@ -200,24 +136,24 @@
 
 | 문서 | 내용 |
 |------|------|
-| [README.md](../README.md) | 프로젝트 전체 (§15 audit baseline 갱신됨, §17 분기 트리거 보류 항목) |
-| [CLAUDE.md](../CLAUDE.md) | 코딩 표준 + Known issues (rtpmanager leak 추가됨) |
+| [README.md](../README.md) | 프로젝트 전체 |
+| [CLAUDE.md](../CLAUDE.md) | 코딩 표준 + 5 디버깅 원칙 + Known Issues |
 | [OPERATIONS.md](../OPERATIONS.md) | 운영 트러블슈팅 |
-| [logs/AUDIT_REPORT_20260519.md](AUDIT_REPORT_20260519.md) | audit 결과 + rtpmanager A 결정 |
-| [logs/SESSION_DFPS_B3_B4_PLATEAU_20260519.md](SESSION_DFPS_B3_B4_PLATEAU_20260519.md) | 이번 세션 전체 진행 (B3/B4 + audit + TSan fix + v0.1.0 release) |
-| [logs/NPU_MODEL_PERFORMANCE.md](NPU_MODEL_PERFORMANCE.md) | YOLOv5 s/m/l/x 성능 예측 |
+| [logs/AUDIT_REPORT_20260519.md](AUDIT_REPORT_20260519.md) | v0.1.0 audit baseline |
+| [logs/SESSION_DFPS_B3_B4_PLATEAU_20260519.md](SESSION_DFPS_B3_B4_PLATEAU_20260519.md) | v0.1.0 release 세션 |
+| [logs/STUCK_ANALYSIS_cam659_20260520.md](STUCK_ANALYSIS_cam659_20260520.md) | 변종 B 추적 |
+| [logs/MISMATCH_SURGE_ANALYSIS_20260520.md](MISMATCH_SURGE_ANALYSIS_20260520.md) | NEW-2 분석 |
+| [logs/audit_20260524_115656/](audit_20260524_115656/) | 최신 audit |
 
-## Legacy (참조 가치 있는 완료 작업, .DOCS/ 로 이동)
+## Legacy (`.DOCS/`)
 
 | 문서 | 내용 |
 |------|------|
+| `.DOCS/FORCE_RESET_DESIGN_20260520.md` | 이전 mitigation 설계 (Fix B watchdog 로 대체됨) |
+| `.DOCS/HAPPYTIMESOFT_VS_GSTREAMER_20260521.md` | RTSP server 비교 |
 | `.DOCS/GSTREAMER_DEEP_REVIEW.md` | GStreamer Phase 1 deep review |
 | `.DOCS/GSTREAMER_REWORK_PLAN.md` | GStreamer Phase 1 rework plan |
 | `.DOCS/ONVIF_PAYLOADER_DESIGN.md` | GStreamer Phase 2 ONVIF design |
-| `.DOCS/PHASE1_CODE_REVIEW.md` | Phase 1 code review |
-| `.DOCS/BASICLIBS_AUDIT.md` | BasicLibs 초기 audit |
-| `.DOCS/SESSION_DFPS_LEAK_HUNT_20260518.md` | 이전 세션 (dfps leak hunt) |
-| `.DOCS/CODE_REVIEW_SUMMARY.md` | 1차 코드리뷰 (legacy) |
-| `.DOCS/REVIEW2/`, `.DOCS/REVIEW3/` | 2차, 3차 코드리뷰 |
+| `.DOCS/SESSION_DFPS_LEAK_HUNT_20260518.md` | dfps leak hunt 세션 |
 | `.DOCS/REVIEW3_COMPLETION_BASELINE_20260513.md` | 3차 리뷰 완료 baseline |
 | `.DOCS/TEST_48H_20260509_LEAK_FOUND.md` | 48h 테스트 leak 발견 |
