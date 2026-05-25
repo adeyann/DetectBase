@@ -122,13 +122,39 @@ namespace MGEN
         void MainLoopThreadFunc();
         std::shared_ptr<AVFrame> ConvertSampleToAVFrame( GstSample* sample ) noexcept;
 
+        // Option A — partial reset 메커니즘 (mppvideodec DMA buffer 보존을 위함):
+        //   SOURCE-SIDE (매 reset 마다 destroy/recreate): rtspsrc + depay + parse + (tee + raw 분기 if raw_passthrough)
+        //   DECODE-SIDE (Stop 까지 영구 보존): decode_queue + decoder + videoconvert + capsfilter + appsink
+        //   BOUNDARY: source 의 src pad (parse.src 또는 tee.src_0) ↔ decode_queue.sink
+        bool BuildDecodeSide();        // Init 1회 — preserve element 생성 + link + boundary sink 노출
+        bool BuildSourceSide();        // 매 reset — source element 생성 + add + dynamic pad 신호 + link to boundary
+        void TeardownSourceSide();     // 매 reset — source element NULL + bin remove + unref
+        void TeardownDecodeSide();     // Stop 시 — preserve element NULL + bin remove + unref
+        static void OnRtspsrcPadAdded( GstElement* rtspsrc, GstPad* new_pad, void* user_data );
+
         Config             cfg_;
         FrameCallback      cb_;
         RawPacketCallback  raw_cb_;
 
         GstElement*     pipeline_     = nullptr;
-        GstAppSink*     appsink_      = nullptr;
-        GstAppSink*     raw_appsink_  = nullptr;
+
+        // SOURCE-SIDE 요소 — reset 마다 nullptr → recreate. boundary pad 까지 데이터 전달.
+        GstElement*     rtspsrc_      = nullptr;  // rtspsrc (dynamic pad)
+        GstElement*     depay_        = nullptr;  // rtph264depay
+        GstElement*     parse_        = nullptr;  // h264parse
+        GstElement*     raw_tee_      = nullptr;  // tee (raw_passthrough=true 시)
+        GstElement*     raw_queue_    = nullptr;  // raw 분기 queue
+        GstElement*     raw_pay_      = nullptr;  // rtph264pay
+
+        // DECODE-SIDE 요소 — Stop 까지 보존. mppvideodec DMA buffer 재할당 회피의 핵심.
+        GstElement*     decode_queue_ = nullptr;  // leaky=downstream — boundary sink
+        GstElement*     decoder_      = nullptr;  // avdec_h264 (추후 mppvideodec 으로 swap 예정)
+        GstElement*     videoconvert_ = nullptr;  // videoconvert
+        GstElement*     capsfilter_   = nullptr;  // video/x-raw,format=I420
+
+        GstAppSink*     appsink_      = nullptr;  // decode 결과 — DECODE-SIDE 소속
+        GstAppSink*     raw_appsink_  = nullptr;  // raw H.264 stream — SOURCE-SIDE 소속
+
         GMainLoop*      loop_         = nullptr;
         std::thread     loop_thread_;
         guint           bus_watch_id_ = 0;
