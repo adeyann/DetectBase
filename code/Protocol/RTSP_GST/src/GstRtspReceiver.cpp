@@ -166,36 +166,33 @@ namespace MGEN
 
     bool GstRtspReceiver::BuildDecodeSide()
     {
-        // DECODE-SIDE (영구 보존) — videoconvert 제거, NV12 직출 :
-        //   decode_queue → mppvideodec (HW) → capsfilter(NV12) → appsink
-        //   downstream FramePreProcessor 의 sws_scale 가 NV12→RGB 자동 처리.
-        decode_queue_ = gst_element_factory_make( "queue",       "decodeq" );
-        decoder_      = gst_element_factory_make( "mppvideodec", "dec"     );
-        capsfilter_   = gst_element_factory_make( "capsfilter",  "caps"    );
+        // DECODE-SIDE (영구 보존) :
+        //   decode_queue (boundary entry) → decoder (avdec_h264, mppvideodec 으로 swap 예정)
+        //                                 → videoconvert → capsfilter(I420) → appsink
+        decode_queue_ = gst_element_factory_make( "queue",        "decodeq" );
+        decoder_      = gst_element_factory_make( "avdec_h264",   "dec"     );
+        videoconvert_ = gst_element_factory_make( "videoconvert", "conv"    );
+        capsfilter_   = gst_element_factory_make( "capsfilter",   "caps"    );
         GstElement* sink_elem = gst_element_factory_make( "appsink", "sink" );
 
-        // videoconvert 제거 — 이전 시도 (avdec_h264→videoconvert→capsfilter(I420)) 에서
-        //   NV12→I420 SW 변환이 4 cam × 30 FPS = 120 conv/sec CPU 병목 (DFPS 116→28 regression).
-        //   mppvideodec NV12 출력 → appsink → ConvertSampleToAVFrame 에서 NV12 처리 (AV_PIX_FMT_NV12).
-        videoconvert_ = nullptr;
-
-        if( !decode_queue_ || !decoder_ || !capsfilter_ || !sink_elem ) {
+        if( !decode_queue_ || !decoder_ || !videoconvert_ || !capsfilter_ || !sink_elem ) {
             MLOG_ERROR( "GstRtspReceiver[%d] DecodeSide element_factory_make 실패", cfg_.cam_id );
             return false;
         }
 
         // decode_queue (boundary entry): leaky=downstream, decoder backpressure 흡수.
+        //   기존 (gst_parse_launch 단일 desc) 의 "queue name=decodeq max-size-buffers=4 leaky=downstream" 동등.
         g_object_set( decode_queue_,
             "max-size-buffers", 4u,
             "leaky",            2,  // 2 = downstream
             nullptr );
 
-        // capsfilter: NV12 강제 (DMABuf 아닌 일반 raw 출력 — appsink 매핑 호환)
-        GstCaps* nv12_caps = gst_caps_new_simple( "video/x-raw",
-            "format", G_TYPE_STRING, "NV12",
+        // capsfilter: I420 강제 (downstream NV12 우려 차단)
+        GstCaps* i420_caps = gst_caps_new_simple( "video/x-raw",
+            "format", G_TYPE_STRING, "I420",
             nullptr );
-        g_object_set( capsfilter_, "caps", nv12_caps, nullptr );
-        gst_caps_unref( nv12_caps );
+        g_object_set( capsfilter_, "caps", i420_caps, nullptr );
+        gst_caps_unref( i420_caps );
 
         // appsink callback 설정
         g_object_set( sink_elem,
@@ -210,10 +207,10 @@ namespace MGEN
         gst_app_sink_set_callbacks( appsink_, &cbs, this, nullptr );
 
         gst_bin_add_many( GST_BIN( pipeline_ ),
-            decode_queue_, decoder_, capsfilter_, sink_elem,
+            decode_queue_, decoder_, videoconvert_, capsfilter_, sink_elem,
             nullptr );
 
-        if( !gst_element_link_many( decode_queue_, decoder_, capsfilter_, sink_elem, nullptr ) ) {
+        if( !gst_element_link_many( decode_queue_, decoder_, videoconvert_, capsfilter_, sink_elem, nullptr ) ) {
             MLOG_ERROR( "GstRtspReceiver[%d] DecodeSide link_many 실패", cfg_.cam_id );
             return false;
         }
@@ -701,14 +698,8 @@ namespace MGEN
             MLOG_ERROR( "gst_video_info_from_caps 실패" );
             return nullptr;
         }
-
-        const GstVideoFormat fmt = GST_VIDEO_INFO_FORMAT( &info );
-        // 지원 format: I420 (avdec_h264 출력) 또는 NV12 (mppvideodec 출력).
-        //   downstream FramePreProcessor (sws_scale) 가 양쪽 모두 RGB 변환 가능.
-        const bool is_i420 = ( fmt == GST_VIDEO_FORMAT_I420 );
-        const bool is_nv12 = ( fmt == GST_VIDEO_FORMAT_NV12 );
-        if( !is_i420 && !is_nv12 ) {
-            MLOG_ERROR( "예상 I420/NV12 아님 (format=%d)", (int) fmt );
+        if( GST_VIDEO_INFO_FORMAT( &info ) != GST_VIDEO_FORMAT_I420 ) {
+            MLOG_ERROR( "예상 I420 아님 (format=%d)", (int) GST_VIDEO_INFO_FORMAT( &info ) );
             return nullptr;
         }
 
@@ -717,7 +708,7 @@ namespace MGEN
 
         frame->width  = info.width;
         frame->height = info.height;
-        frame->format = is_i420 ? AV_PIX_FMT_YUV420P : AV_PIX_FMT_NV12;
+        frame->format = AV_PIX_FMT_YUV420P;
         if( av_frame_get_buffer( frame, 32 ) < 0 ) {
             av_frame_free( &frame );
             return nullptr;
@@ -729,32 +720,26 @@ namespace MGEN
             return nullptr;
         }
 
-        const size_t y_sz  = (size_t) info.width * info.height;
-        const size_t uv_sz = (size_t) info.width * ( info.height / 2 );  // NV12: interleaved UV plane
-        const size_t u_sz  = (size_t) ( info.width / 2 ) * ( info.height / 2 );  // I420: separate U plane
-        const size_t v_sz  = u_sz;
-        const size_t expected_sz = is_i420 ? ( y_sz + u_sz + v_sz ) : ( y_sz + uv_sz );
+        const size_t y_sz = (size_t) info.width * info.height;
+        const size_t u_sz = (size_t) ( info.width / 2 ) * ( info.height / 2 );
+        const size_t v_sz = u_sz;
         const uint8_t* src = map.data;
 
-        // Q1 fix (심층 review 2026-05-15): buffer size 부족 시 memcpy 만 skip 하지 말고
-        //   frame 회수 + nullptr 반환 (이전 garbage data 문제 회피).
-        if( map.size < expected_sz ) {
-            MLOG_ERROR( "ConvertSampleToAVFrame: buffer size 부족 (map.size=%zu, expected=%zu, fmt=%s) — frame drop",
-                        static_cast<size_t>( map.size ), expected_sz, is_i420 ? "I420" : "NV12" );
+        // Q1 fix (심층 review 2026-05-15): 이전 코드는 buffer size 부족 시 memcpy 만
+        // skip 하고 frame 은 그대로 반환했음. 결과적으로 0-initialised garbage data 가
+        // Unit → NPU 까지 흘러가 noise / 잘못된 inference / 최악의 경우 segfault 유발.
+        // 이제는 buffer size 부족이 검출되면 frame 을 회수하고 nullptr 을 반환한다.
+        if( map.size < y_sz + u_sz + v_sz ) {
+            MLOG_ERROR( "ConvertSampleToAVFrame: buffer size 부족 (map.size=%zu, expected=%zu) — frame drop",
+                        static_cast<size_t>( map.size ), y_sz + u_sz + v_sz );
             gst_buffer_unmap( buf, &map );
             av_frame_free( &frame );
             return nullptr;
         }
 
-        if( is_i420 ) {
-            std::memcpy( frame->data[ 0 ], src,                y_sz );
-            std::memcpy( frame->data[ 1 ], src + y_sz,         u_sz );
-            std::memcpy( frame->data[ 2 ], src + y_sz + u_sz,  v_sz );
-        } else {
-            // NV12: Y plane + interleaved UV plane (2 planes 만)
-            std::memcpy( frame->data[ 0 ], src,        y_sz  );
-            std::memcpy( frame->data[ 1 ], src + y_sz, uv_sz );
-        }
+        std::memcpy( frame->data[ 0 ], src,                y_sz );
+        std::memcpy( frame->data[ 1 ], src + y_sz,         u_sz );
+        std::memcpy( frame->data[ 2 ], src + y_sz + u_sz,  v_sz );
         gst_buffer_unmap( buf, &map );
 
         if( GST_BUFFER_PTS_IS_VALID( buf ) ) {
