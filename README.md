@@ -1,6 +1,6 @@
 # DetectBase
 
-**Version**: `0.1.11` (cmake `code/CMakeLists.txt`. master tag `v0.1.0`, develop 누적 cam stuck fix + 권한 모델 + audit 1h.)
+**Version**: `0.1.12` (cmake `code/CMakeLists.txt`. master tag `v0.1.0`, develop 누적 cam stuck fix + 권한 모델 + audit 1h + Option A partial reset.)
 
 Odroid M2 NPU 기반 RTSP 비디오 분석 베이스 프로젝트. 객체 탐지 + 트래킹 + 침입 감지 + 이벤트 송신을 통합한 production-ready 시스템.
 
