@@ -1,7 +1,7 @@
-# NEXT_SESSION — Option A (MPP 통합) 진행 중
+# NEXT_SESSION — Option A merge 준비 + MPP 조사 종료
 
-**최종 갱신**: 2026-05-25 02:05 KST
-**현 상태**: branch `feature/mpp-integration` (HEAD `05f3031`). Option A partial reset 구조 구현/검증 완료 (avdec_h264 유지). mppvideodec swap 시도 → DFPS 116→28 regression 발견, working tree revert.
+**최종 갱신**: 2026-05-26 (새벽 작업 종료)
+**현 상태**: branch `feature/mpp-integration` HEAD `861e0b1` (mppvideodec swap revert, Option A 만 유지). MPP integration 조사 종료 — library leak 확인 (upstream issue 5건 확인), mppvideodec 보류. Option A architecture 만 develop merge 예정.
 
 ---
 
@@ -11,174 +11,102 @@
 ```bash
 git branch -D fix/gst-rtpmanager-leak
 ```
+- 이유: origin 은 이미 삭제, local 만 남음. b92dcdc 가 develop 으로 cherry-pick (c023b4e) 됐으나 git 은 "병합 안됨" 판정 → `-d` 거부. `-D` (force) 필요.
+- deny list 에 있어 AI 가 실행 불가.
 
-### 2. (선택) MPP regression 조사 진행 여부 결정
-- 진행 시: `feature/mpp-integration` 에서 mppvideodec DFPS regression 원인 파악
-- 보류 시: 별도 branch 또는 backlog 로 미루고 ThreadProfiler/MPP 외 작업 진행
-
----
-
-## 🟡 Option A (MPP 통합) 진행 상황 — 2026-05-25 새벽 기록
-
-### 완료 (`feature/mpp-integration` branch)
-- **infra** (commit `0a4f3c6`): Dockerfile.build 에 libmpp (JeffyCN/mirrors mpp-dev) +
-  gstreamer-rockchip plugin source build 추가. docker-compose.yml 에 `/dev/mpp_service`
-  + `/dev/rga` device mount 추가. `detectbase:1.0` image 재빌드 완료. mppvideodec
-  plugin gst-inspect 인식 ✓.
-- **structure** (commit `05f3031`): GstRtspReceiver 의 BuildPipeline/TeardownPipeline/
-  ResetSourceOnly 를 source/decode side 분리 구조로 refactor (~250줄).
-  - DECODE-SIDE (Stop 까지 영구): decode_queue → decoder → videoconvert → capsfilter(I420) → appsink
-  - SOURCE-SIDE (매 reset destroy/recreate): rtspsrc → depay → parse [+ tee → raw 분기]
-  - BOUNDARY: parse.src (또는 tee.src_%u) → decode_queue.sink
-  - **검증**: avdec_h264 유지 상태로 EOS cycle 2회 = 8회 PARTIAL reset 정상 작동, duration 4~16ms. DFPS 116 유지.
-
-### 발견된 regression — mppvideodec swap (working tree 만, 미커밋)
-- **변경**: `decoder_ = gst_element_factory_make( "mppvideodec", "dec" )` (avdec_h264 → mppvideodec 1줄)
-- **결과**: **DFPS 116 → 28 (4× drop)**. 4 cam × 7 FPS/cam (이전 29 FPS/cam).
-- **추가 신호**:
-  - mpp 초기화 log 에 `mpp_platform: client 12 driver is not ready!`
-  - `mpp_soc: open /proc/device-tree/compatible error` (단 컨테이너 안 `/proc/device-tree/compatible` 직접 cat 은 가능 — libmpp 의 open 패턴 문제)
-  - 디코딩 자체는 일부 진행 (frames_total 증가), 단 매우 느림 → **CPU fallback 또는 single-core 만 사용** 의심
-- **현 working tree**: revert 됨 (`git checkout HEAD -- code/Protocol/RTSP_GST/src/GstRtspReceiver.cpp`). avdec_h264 정상 운영 복귀 (DFPS 117).
-
-### 다음 세션 진입 시 조사 후보 (priority 순)
-
-| 후보 | 의미 |
-|---|---|
-| **(A) host kernel MPP driver 호환성** | `/proc/devices` 의 `243 mpp_service` major number / kernel module 버전. libmpp 1.0.x 가 기대하는 driver protocol version 와 host kernel 의 mpp driver 매칭 확인. RK3588 BSP 커널 vs upstream 차이? |
-| **(B) `client 12 driver is not ready` 정확 원인** | libmpp source 의 client_12 코드 경로 grep → 어떤 ioctl 이 실패하는지 확인. mpp_service device 권한 (currently root:video, container privileged) 가 충분한지. |
-| **(C) gstreamer-rockchip plugin caps negotiation** | mppvideodec 의 sink/src caps. h264parse → mppvideodec 사이 stream-format 동등 여부 (`byte-stream` vs `avc`). |
-| **(D) mppvideodec property 조사** | gst-inspect-1.0 mppvideodec 의 properties (예: `arm-afbc`, `hwfd` 등 — 일부 off 해야 software fallback 안 함?) |
-| **(E) Option A 자체로 가치 인정 후 MPP 보류** | 현 `05f3031` 의 partial reset 구조만 가치 있음. develop 으로 merge 후 mppvideodec 는 별 issue 로 추적. |
-
-### Option A 자체의 가치 (mppvideodec 와 무관)
-- ResetSourceOnly 가 partial reset 으로 변경되어, decoder element 가 영구 보존됨.
-- avdec_h264 는 software 라 DMA buffer leak 없지만, **rebuild 비용 자체가 감소** (전체 pipeline destroy 안 함).
-- 매 reset duration 4~16ms 측정 (이전 단일 desc 방식 대비 ~5~10× 빠름 추정).
+### 2. feature/mpp-integration → develop merge 결정
+- 조사 종료된 branch. Option A architecture (`05f3031`) + infra commits 가치 있음. mppvideodec swap 은 revert 됨.
+- merge 시 cmake VERSION 0.1.11 → 0.1.12 auto patch.
 
 ---
 
----
+## 🟢 MPP integration 조사 — 종결 (2026-05-26 새벽)
 
-## 현 상태 (2026-05-24 23:50 KST)
+### 결론
+**mppvideodec 는 RK3588 + libmpp 환경의 알려진 leak issue 로 사용 보류.** library 측 fix 필요 — 우리 코드 측 회피 불가.
 
-### Git
-- **master**: v0.1.0 tagged (변동 없음, develop 보다 56 commit 뒤)
-- **develop**: HEAD `c023b4e`, cmake **0.1.11**
-  - `c023b4e` chore(audit): ASan/TSan 최소 1시간 강제 (leak 조사 부산물, 가치 있음)
-  - `da7412e` Merge fix/rtsp-reconnect-storm into develop — cam stuck 2변종 fix + 권한 모델 + 폴더 정리
-  - `cb72341` chore: cmake VERSION 0.1.10→0.1.11 + .gitignore
-- **삭제됨**: origin `fix/rtsp-reconnect-storm` (머지 후 잔존 무의미), origin `fix/gst-rtpmanager-leak` (잘못된 조사)
-- **잔여 local**: `fix/gst-rtpmanager-leak` (위 화요일 항목 참조)
-- Git workflow 변동 없음.
+### 검증된 사실
+- **Option A architecture (partial reset)** = avdec_h264 와 함께 사용 시 **정상 작동** (`05f3031`, 42min A/B 검증 정체)
+- **mppvideodec 도입 시 leak**: 12h sanity 에서 ~10 MB/EOS 누적 (libmpp deinit 시 626670 buffers stuck in mpp_packet_srv pool)
+- **우리 코드 측 fix 시도 5건 모두 실패**:
+  - 시도 1: state wait (`gst_element_get_state`) — leak 동일
+  - 시도 2: decoder state cycle (READY → PLAYING) — leak 동일
+  - 시도 3: lifecycle 재설계 (decode chain 을 source-side 로 이동) — 40% 감소만 (10→6 MB/EOS)
+  - drain attempt (EOS+FLUSH) — source 깨뜨림, DFPS 117→29 drop
+  - 진단 logging — decoder ref=1, 실제 destroy 발생 확정 (우리 코드는 완벽)
 
-### 운영
-- `detectbase_service` Up (HEAD 빌드, post-audit restart since 2026-05-24 12:31 KST, 약 11h+)
-- 4 cam × DFPS 113~117 안정, watchdog 발동 0, 영구 stuck 0, connect-timeout 0
-- Process RSS 660~711 MB stable (cgroup 진짜 RSS, log `resident=` 기준)
-- 진단 override (`docker-compose.override.yml.diagbak`)는 `.backup/` 보관
+### library leak 확인 단서 (다수 upstream issue)
+| Issue | 환경 | 증상 |
+|---|---|---|
+| rockchip-linux/mpp #514 | RK3588 (Orange Pi) | **valgrind: `mpp_destroy` 안 Invalid read of size 8** = 진짜 use-after-free |
+| rockchip-linux/mpp #689 | RK3588 | `mpp_buffer: ... deinit with 6266880 bytes not released` |
+| rockchip-linux/mpp #724 | RK3588j 4K 1path | 일정 시간 후 OOM kill |
+| rockchip-linux/mpp #837 | example 그대로 | 예제 코드 자체 leak |
+| JeffyCN/mirrors #50 | Rock 5B | gst-launch memory 폭증 (JeffyCN "내쪽 정상" 회피) |
+| 우리 환경 | RK3588 (Odroid M2) | mpp_packet_srv 626670 buffers leak, "client 12 driver is not ready" (#689 과 동일) |
 
-### Audit baseline (audit_20260524_115656)
-| | baseline (5/19) | 현재 (5/24) | 변화 |
-|---|---|---|---|
-| cppcheck | 59 | 59 | 0 |
-| clang-tidy | 0 | 0 | 0 |
-| TSan | 137 | 141 | +4 (sampling variance) |
-| ASan leak | (없음, 5min run) | 1.2 MB / 5min | 신규 측정 — 대부분 init-time, c023b4e 로 1h 최소화 강제 |
+### `feature/mpp-integration` 의 commits
+```
+861e0b1 revert: mppvideodec swap 폐기 — Option A 유지
+7ead9f4 chore: deny list 에서 docker compose down 제거
+7a9b32e feat(rtsp): avdec_h264 → mppvideodec swap + videoconvert 제거 [revert 됨]
+45d0fcb docs: NEXT_SESSION 갱신 — Option A 진행 + MPP swap regression 기록
+05f3031 feat(rtsp): Option A partial reset 구조 도입 ★ 핵심
+0a4f3c6 infra(mpp): libmpp source 를 JeffyCN/mirrors mpp-dev 로 전환
+b0e0136 infra(mpp): libmpp 1.0.11 + gstreamer-rockchip plugin Dockerfile 추가
+6163ea1 docs: NEXT_SESSION I (MPP) 정정 — element 보존 reset 미구현 명시
+```
 
-### cam stuck — 머지된 2 변종 fix (요약)
-1. **변종 A (storm)**: cam offset desync `(cam_id%4)*500ms` + teardown 후 3s+jitter + StartReceiver 후 frame-flow 확인.
-2. **변종 B (silent stuck)**: frame-age watchdog (`cv_.wait_for(5s)` wake → 12s 무프레임이면 in-place reset).
-
-**검증 정리**:
-- 24.5h+ 자연 운영 clean (Fix A+B)
-- 9.5h Fix A revert 실험 (Fix B만): 429 EOS / 0 storm / in-place reset 100% 성공
-- 30분 통제 실험 (WATCHDOG_STALE_SEC=3 + on_eos 차단): 4 cam 전부 watchdog **강제 발동 직접 관측** (단일변수 개입 검증)
-
-### 권한 모델 (2026-05-23 전환, 머지 완료)
-- deny-first: `Bash(*)` allow + 123 항목 deny (시스템 파괴/사용자/네트워크/패키지/git/docker 위험).
-- `./scripts/permission_log.py` → `logs/permission_log.md` (AUTO/APPROVED/DENIED 3분류).
-
-### leak 조사 — 무효 종료 (2026-05-24)
-- 시작 이유: ASan 5분 run "1.2 MB / 10418 alloc" → leak 확정으로 해석.
-- 잘못된 추적: RSP-thread log 의 `anon=4220MB` 를 RSS 로 해석. 사실은 `/proc/self/maps` anonymous **가상 주소 공간** 합 — jemalloc reserved 영역 포함, 실제 RAM 사용 아님.
-- 진실: process resident RSS 9.5h 동안 658→678 MB stable. ASan leak 대부분 init-time (glib/YoloV5/rknn_init 1회), per-reset 96B × 3 수준.
-- 결론: **실질 메모리 leak 없음.** branch `fix/gst-rtpmanager-leak` 폐기.
-- 부산물 가치 commit `b92dcdc` → develop cherry-pick (audit ASan/TSan 1h 최소 강제, c023b4e).
-- 학습 메모: `feedback_verify_metric_definition.md` (memory) — "지표 출처 코드 grep 후 결론, 변수명 추측 금지".
-- 산출물 trash: `.deleted/leak_investigation_misguided_20260524/` (CSV/sh/PLAN.md).
+merge 시 develop 으로 가져갈 가치:
+- `05f3031` Option A — cam stuck fix + reset 속도 4~16ms (이전 단일 desc 대비 5~10× 빠름)
+- `0a4f3c6` / `b0e0136` infra — 미래 MPP 재시도 시 base 로 사용 (library fix 나오면)
+- `7ead9f4` deny list 정리 — operational improvement
+- `861e0b1` revert — 잔재 없이 clean
 
 ---
 
-## 다음 세션 작업 후보 (우선순위 순)
+## 🟢 운영 (2026-05-26 새벽)
 
-### NEW-2. `correlation_mismatch` 폭증 root cause 추적 (진행 중, 가장 임박)
-- **상태**: PR #16+#17 binary 후 mismatch ~70× (0.4 → 27.5/cam/sec). 30분당 +200K stable plateau.
-- **핵심 관찰**: 모든 delta = 정확히 10 frame
-- **운영 영향**: frame 시차 ~330ms (10 × 33ms) → bbox / tracking / event detection 정확도 영향. q_drop 0.
-- **가설**: PR #16 진단 코드 (`last_frame_ns_` atomic store 매 frame + bus message IncrementCounter 매 호출) cache line contention → InferenceThread push 시간 증가 → result_q backlog.
-- **다음**:
-  - Phase 1: 진단 항목 비활성 실험 (어느 변경이 trigger 인지)
-  - Phase 2: per-correlation_id lookup 또는 handler affinity
-  - Phase 3: 진단 binary light version
-- 자세히: [MISMATCH_SURGE_ANALYSIS_20260520.md](MISMATCH_SURGE_ANALYSIS_20260520.md)
+- `detectbase_service` Up, **avdec_h264 + Option A architecture** (mppvideodec revert 완료)
+- 4 cam × DFPS 117, frames_total 진행 중
+- working tree clean, branch tip `861e0b1`
+
+---
+
+## 다음 세션 작업 후보 (Option A merge 후 priority 순)
+
+### NEW-2. `correlation_mismatch` 폭증 root cause 추적 (전 세션 임박)
+- 상태: PR #16+#17 binary 후 mismatch ~70× (0.4 → 27.5/cam/sec). 30분당 +200K stable plateau.
+- 현 상태 (5/24 측정): surge 사라짐. mismatch 0.056/cam/sec. NEW-2 사실상 close 가능.
 
 ### A. ThreadProfiler module 신규 작성
-- 현재: RspProf/InfProf/EvtProf inline struct + 100 cycle 마다 직접 MLOG_INFO + SetGauge
-- 목표: 별도 thread 가 모든 stage timing + queue size 일괄 수집
-- 구조:
-  - PUSH API: `Sample(stage_name, us)` → atomic accumulator
-  - PULL API: `RegisterPullSource(name, getter)` 등록 → ThreadProfiler thread 가 N초마다 drain
-- 효과: 측정 빈도/필드 변경 시 ThreadProfiler interval 만 수정. 신규 stage 추가는 한 줄.
+- 현재: RspProf/InfProf/EvtProf inline struct 분산.
+- 목표: 별도 thread 가 모든 stage timing + queue size 일괄 수집.
 - 위치: `code/Profile/ThreadProfiler.h+cpp` 신규
-- 비용: ~4시간 (구현 + 마이그레이션 + 검증)
-- 빌드 branch: `refactor/thread-profiler` (develop fork)
+- 비용: ~4시간
 
-### I. MPP 통합 재시도
-- 이전 시도 (2026-05-14~15) 는 매 reconnect ~10MB RSS leak 으로 롤백. 사용자 명령 (2026-05-15) 로 `mppvideodec` + 2-pipeline architecture 전면 제거.
-- **현 코드 실제 상태** (정정 — 이전 NEXT_SESSION 기술 오류):
-  - pipeline: `rtspsrc → rtph264depay → h264parse → avdec_h264(SW 디코더) → videoconvert → I420 → appsink`. mppvideodec 없음.
-  - `ResetSourceOnly()` 는 함수명 무관 **TeardownPipeline + BuildPipeline 전체 파괴/재생성**. element 보존 메커니즘 미구현.
-  - `GstRtspClient.cpp` 의 "mppvideodec 보존" 주석 + log message 도 잘못 (MPP 작업 시 정리 예정).
-- **재시도 시 실제 작업 범위**:
-  1. element 보존 reset 메커니즘 신규 설계/구현 (현재 없음 — BuildPipeline/TeardownPipeline 분리)
-  2. pipeline 교체 `avdec_h264` → `mppvideodec` (한 줄)
-  3. 매 EOS 시 mppvideodec 인스턴스 보존 → DMA buffer 재할당 회피 가설 검증 (ASan 1h + 12h+ sanity)
-  4. NPU offload 효과 측정 (CPU% 비교)
-- 참고: `.deleted/gst_attempt_20260515/`, `.DOCS/GSTREAMER_DEEP_REVIEW.md`, `.DOCS/ONVIF_PAYLOADER_DESIGN.md`.
-- 작업 branch: `feature/mpp-integration` (develop fork)
-
-### C. Frame ordering 진짜 fix (조건부)
-- 방어 카운터 `detectbase_correlation_mismatch_total{cam_id}` 며칠 운영 후 빈도 측정
-- 3h sanity (2026-05-19) 결과 mismatch=0. 발생 빈도 0 추정.
-- 발생 빈도 > 0 시:
-  - per-correlation_id lookup (`cam_result_qs_` → `map<correlation_id, OutputLayerWrapper>`)
-  - 또는 handler affinity (cam → 고정 handler, round-robin 포기)
+### I. MPP 통합 재시도 — **보류 (library fix 대기)**
+- rockchip-linux/mpp / JeffyCN/mirrors upstream 의 mpp_destroy 관련 fix 나올 때까지 보류
+- infra commits 는 `feature/mpp-integration` merge 후 develop 에 잔존 → 재시도 시 base 로 사용
+- 만약 process auto-restart 운영 wrapper 채택하면 mppvideodec 사용 가능 path 도 있음
 
 ### E. TSan SafeQueue 추적 한계 (~5건)
-- structural redesign (lock 범위 확장 또는 atomic guard)
-- 운영 영향 0, 보류 가능
+- 운영 영향 0, v1.0.0 cleanup 묶음
+
+### C. Frame ordering 진짜 fix (조건부)
+- 현 빈도 0.056/cam/sec — 보류 유지
 
 ### G. DEBUG virtual lines 제거 (v1.0.0 시점)
-- 시연용 임시 코드 제거 (위치: README §14)
-
-### ~~F. GStreamer 1.24+ upgrade~~ ✕ 폐기 (2026-05-24, 사용자)
-- Ubuntu 22.04 base + librknnrt ABI 위험 + 비용 대비 효과 불분명. watchdog + reconnect 견고화로 cam stuck 클래스 해결.
-
-### ~~NEW-1. GstRtsp stale root cause + Force Reset~~ ✅ 해결 (2026-05-24, cam stuck 2변종 fix 머지)
-- 변종 A/B 분리 + fix + 검증 완료. NEW-1 의 force reset 설계는 사실상 frame-age watchdog 로 구현됨.
-
-### ~~leak 조사 (`fix/gst-rtpmanager-leak`)~~ ✕ 무효 (2026-05-24)
-- metric 오해. 학습 메모 저장. 산출물 trash. (위 "leak 조사" 항목 참조)
 
 ---
 
 ## 다음 세션 진입 시 자동 처리
 
-1. `git status` + `git log develop -5` (현 develop 상태)
-2. `git branch -a` (잔여 fix/gst-rtpmanager-leak 확인 — 화요일 사용자 처리 가정 시 사라져있어야)
+1. `git status` + `git log -3` (현 상태)
+2. `git branch -a` (`feature/mpp-integration` merge 됐는지, `fix/gst-rtpmanager-leak` 잔재 처리됐는지)
 3. 이 NEXT_SESSION.md 읽기
-4. 사용자 명령 또는 위 NEW-2 / A / I / C / E / G 중 선택해서 진행
+4. Option A merge 안 됐으면 — `feature/mpp-integration` → develop merge --no-ff (cmake 0.1.11→0.1.12 patch +1)
+5. 그 후 NEW-2 close 확인 또는 A (ThreadProfiler) 진입
 
 ---
 
@@ -189,21 +117,6 @@ git branch -D fix/gst-rtpmanager-leak
 | [README.md](../README.md) | 프로젝트 전체 |
 | [CLAUDE.md](../CLAUDE.md) | 코딩 표준 + 5 디버깅 원칙 + Known Issues |
 | [OPERATIONS.md](../OPERATIONS.md) | 운영 트러블슈팅 |
-| [logs/AUDIT_REPORT_20260519.md](AUDIT_REPORT_20260519.md) | v0.1.0 audit baseline |
-| [logs/SESSION_DFPS_B3_B4_PLATEAU_20260519.md](SESSION_DFPS_B3_B4_PLATEAU_20260519.md) | v0.1.0 release 세션 |
 | [logs/STUCK_ANALYSIS_cam659_20260520.md](STUCK_ANALYSIS_cam659_20260520.md) | 변종 B 추적 |
 | [logs/MISMATCH_SURGE_ANALYSIS_20260520.md](MISMATCH_SURGE_ANALYSIS_20260520.md) | NEW-2 분석 |
-| [logs/audit_20260524_115656/](audit_20260524_115656/) | 최신 audit |
-
-## Legacy (`.DOCS/`)
-
-| 문서 | 내용 |
-|------|------|
-| `.DOCS/FORCE_RESET_DESIGN_20260520.md` | 이전 mitigation 설계 (Fix B watchdog 로 대체됨) |
-| `.DOCS/HAPPYTIMESOFT_VS_GSTREAMER_20260521.md` | RTSP server 비교 |
-| `.DOCS/GSTREAMER_DEEP_REVIEW.md` | GStreamer Phase 1 deep review |
-| `.DOCS/GSTREAMER_REWORK_PLAN.md` | GStreamer Phase 1 rework plan |
-| `.DOCS/ONVIF_PAYLOADER_DESIGN.md` | GStreamer Phase 2 ONVIF design |
-| `.DOCS/SESSION_DFPS_LEAK_HUNT_20260518.md` | dfps leak hunt 세션 |
-| `.DOCS/REVIEW3_COMPLETION_BASELINE_20260513.md` | 3차 리뷰 완료 baseline |
-| `.DOCS/TEST_48H_20260509_LEAK_FOUND.md` | 48h 테스트 leak 발견 |
+| [logs/audit_20260524_115656/](audit_20260524_115656/) | 최신 audit baseline (cppcheck 59 / clang-tidy 0 / TSan 141) |
