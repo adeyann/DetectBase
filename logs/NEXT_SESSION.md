@@ -1,7 +1,7 @@
 # NEXT_SESSION — v0.1.17 (git workflow 정책 + pre-push docs check + memory 영어화) 진입점
 
 **최종 갱신**: 2026-05-26 18:00 KST
-**현 develop HEAD**: `0dcf725` (cmake VERSION `0.1.17` — README/code/README Version 라인과 sync. 마지막 released = v0.1.16)
+**현 develop HEAD**: `bbcebd0` (cmake VERSION `0.1.18` placeholder. README/code/README "Version" 라인 = 마지막 released **v0.1.17**)
 **현 상태**: **PID 4924 사고 분석 + 재발 방지 패치 적용 완료**. baseline 안정 운영 중 (DFPS 115+, RSS 600MB, monitor `bthk32wqw` 가동).
 
 ---
