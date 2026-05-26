@@ -41,6 +41,8 @@ RestClient::Response RestClient::Connection::GET_or_throw_if_timeout( const std:
 }
 
 // JSON 변환 함수 (외부 라이브러리 nlohmann::json 보호 패턴 — catch 보존)
+// catch 의 silent return 폐지 (2026-05-26): parse 실패 가시화로 운영 시 진단 가능.
+//   parse 실패 vs 정상 빈 응답 구분 필요 — caller 가 메시지로 판단할 수 있어야 함.
 nlohmann::json RestClient::get_json_from_resp_body( Response& resp )
 {
     try {
@@ -52,7 +54,12 @@ nlohmann::json RestClient::get_json_from_resp_body( Response& resp )
 
         return res;
     }
+    catch( const std::exception& e ) {
+        MLOG_WARN( "REST response JSON parse 실패: %s (body size=%zu)", e.what(), resp.body.size() );
+        return nlohmann::json::object();
+    }
     catch( ... ) {
+        MLOG_WARN( "REST response JSON parse 실패: unknown exception (body size=%zu)", resp.body.size() );
         return nlohmann::json::object();
     }
 }
@@ -68,7 +75,12 @@ nlohmann::json RestClient::get_json_from_resp_body( const std::string& resp_body
 
         return res;
     }
+    catch( const std::exception& e ) {
+        MLOG_WARN( "REST response JSON parse 실패: %s (body size=%zu)", e.what(), resp_body.size() );
+        return nlohmann::json::object();
+    }
     catch( ... ) {
+        MLOG_WARN( "REST response JSON parse 실패: unknown exception (body size=%zu)", resp_body.size() );
         return nlohmann::json::object();
     }
 }

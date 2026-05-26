@@ -1,6 +1,6 @@
 # DetectBase
 
-**Version**: `0.1.14` (cmake `code/CMakeLists.txt`. master tag `v0.1.0`, develop 누적 cam stuck fix + 권한 모델 + audit 1h. **MPP + Option A 완전 폐기 (0.1.14)** — mppvideodec 미사용 상태에서 Option A 의 14ms partial reset 이 multi-cam cluster sync 강화 → DFPS dip 증폭 확인. 5/24 Full reset baseline (mean DFPS 115.6, ≥110: 98.8%) 복귀. snapshot: tag `mpp-architecture-snapshot-v0.1.13` + `.backup/mpp_purged_20260526/`. **per-cam stage FPS counter (0.1.12) revert (0.1.13)** — global mutex hot path 으로 wd 빈도 증가 회귀, A-B-A control test 검증.)
+**Version**: `0.1.15` (cmake `code/CMakeLists.txt`. master tag `v0.1.0`, develop 누적 cam stuck fix + 권한 모델 + audit 1h. **REST response JSON parse silent catch 가시화 (0.1.15)** — `rest_impl.cpp` 의 catch 에 `MLOG_WARN` 추가. **MPP + Option A 완전 폐기 (0.1.14)** — mppvideodec 미사용 상태에서 Option A 의 14ms partial reset 이 multi-cam cluster sync 강화 → DFPS dip 증폭 확인. 5/24 Full reset baseline (mean DFPS 115.6, ≥110: 98.8%) 복귀. snapshot: tag `mpp-architecture-snapshot-v0.1.13` + `.backup/mpp_purged_20260526/`. **per-cam stage FPS counter (0.1.12) revert (0.1.13)** — global mutex hot path 으로 wd 빈도 증가 회귀, A-B-A control test 검증.)
 
 Odroid M2 NPU 기반 RTSP 비디오 분석 베이스 프로젝트. 객체 탐지 + 트래킹 + 침입 감지 + 이벤트 송신을 통합한 production-ready 시스템.
 
