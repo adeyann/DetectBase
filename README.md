@@ -1,6 +1,6 @@
 # DetectBase
 
-**Version**: `0.1.13` (cmake `code/CMakeLists.txt`. master tag `v0.1.0`, develop 누적 cam stuck fix + 권한 모델 + audit 1h + Option A partial reset. **per-cam stage FPS counter (0.1.12) revert** — global mutex hot path 으로 wd 빈도 증가 회귀 확인, A-B-A control test 로 검증.)
+**Version**: `0.1.14` (cmake `code/CMakeLists.txt`. master tag `v0.1.0`, develop 누적 cam stuck fix + 권한 모델 + audit 1h. **MPP + Option A 완전 폐기 (0.1.14)** — mppvideodec 미사용 상태에서 Option A 의 14ms partial reset 이 multi-cam cluster sync 강화 → DFPS dip 증폭 확인. 5/24 Full reset baseline (mean DFPS 115.6, ≥110: 98.8%) 복귀. snapshot: tag `mpp-architecture-snapshot-v0.1.13` + `.backup/mpp_purged_20260526/`. **per-cam stage FPS counter (0.1.12) revert (0.1.13)** — global mutex hot path 으로 wd 빈도 증가 회귀, A-B-A control test 검증.)
 
 Odroid M2 NPU 기반 RTSP 비디오 분석 베이스 프로젝트. 객체 탐지 + 트래킹 + 침입 감지 + 이벤트 송신을 통합한 production-ready 시스템.
 
@@ -959,6 +959,7 @@ grep "PROGRAM QUIT SUCCESS" logs/DetectBase.log
 | TSan 카메라 1대 환경 검증 | 분기 시 1회 |
 | Debug Virtual Lines 제거 | 분기 시 |
 | **GStreamer 1.24+ upgrade (Ubuntu 24.04 base)** | **v1.0.0 후** — rtpmanager runtime leak (~340 MB/year) fix 시도. Dockerfile.build 22.04 → 24.04, GStreamer 1.20.3 → 1.24.x, ASan long-run 재검증 |
+| ~~MPP / Option A 재시도~~ | ✅ **2026-05-26 완전 폐기**. mppvideodec leak 회피 위한 architecture 였으나 사용 중단. snapshot `mpp-architecture-snapshot-v0.1.13` + `.backup/mpp_purged_20260526/` 보존. 미래 hardware decoder 필요 시 처음부터 재설계 (cluster sync / GMainContext 격리 함께 해결) |
 | ~~audit cleanup PR (clang-tidy 21 + cppcheck 11)~~ | ✅ 완료 (2026-05-19, PR #9 + #13). clang-tidy 30 → 0, cppcheck 63 → 59. |
 
 ---
@@ -978,7 +979,7 @@ grep "PROGRAM QUIT SUCCESS" logs/DetectBase.log
 
 | 문서 | 내용 |
 |---|---|
-| **[logs/NEXT_SESSION.md](logs/NEXT_SESSION.md)** | Option A merge 완료 + stage FPS counter 도입 후 진입점 (다음 후보: DFPS dip 진단 / ThreadProfiler / NEW-2 close / MPP 재시도) |
+| **[logs/NEXT_SESSION.md](logs/NEXT_SESSION.md)** | MPP + Option A 폐기 후 진입점 (v0.1.14) — Full reset 복귀 후 운영 안정성 확인 |
 | [.DOCS/STUCK_ANALYSIS_cam659_20260520.md](.DOCS/STUCK_ANALYSIS_cam659_20260520.md) | cam 659 stuck 사건 분석 (2026-05-20) + 진단 도구 (PR #16) 활용 절차 — legacy |
 | [.DOCS/MISMATCH_SURGE_ANALYSIS_20260520.md](.DOCS/MISMATCH_SURGE_ANALYSIS_20260520.md) | `correlation_mismatch` 폭증 분석 (2026-05-20) — delta=10 stable backlog — legacy |
 | [.DOCS/SESSION_DFPS_B3_B4_PLATEAU_20260519.md](.DOCS/SESSION_DFPS_B3_B4_PLATEAU_20260519.md) | v0.1.0 release 직전 세션 전체 진행 (B3/B4 + audit + TSan race fix + 마무리) — legacy |

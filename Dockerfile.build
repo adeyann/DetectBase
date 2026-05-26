@@ -184,54 +184,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # -----------------------------------------------------------------------------
-# Rockchip MPP (Media Process Platform) — hardware codec userspace library
-#   target: RK3588 (Odroid M2), version 1.0.11 (latest stable, 호환성 최신)
-#   Required for gstreamer-rockchip plugin (mppvideodec hardware decoder).
-#   pkg-config 파일: /usr/local/lib/pkgconfig/rockchip_mpp.pc
-# -----------------------------------------------------------------------------
-RUN git clone --depth 1 -b mpp-dev https://github.com/JeffyCN/mirrors.git /tmp/mpp \
-    && cd /tmp/mpp \
-    && mkdir -p build && cd build \
-    && cmake .. \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX=/usr/local \
-        -DBUILD_TEST=OFF \
-    && make -j$(nproc) \
-    && make install \
-    && cd /tmp/build \
-    && rm -rf /tmp/mpp \
-    && ldconfig
-# NOTE(source 선택): rockchip-linux/mpp 의 release tag (1.0.10/1.0.11) 와 develop branch
-#   모두 codec source file 결손 (h265d_parser.c 등) — CMake Generate fail.
-#   JeffyCN/mirrors mpp-dev branch (2026-01-02 HEAD) 가 vendor 가 검증한 buildable
-#   상태 (cmake odr-violation fix 포함). gstreamer-rockchip 와 동일 mirror.
-# NOTE(BUILD_TEST=OFF): test 프로그램 미필요, 빌드 시간 절약.
-
-# -----------------------------------------------------------------------------
-# gstreamer-rockchip plugin — mppvideodec / mppvideoenc / kmssink 등 제공
-#   source: JeffyCN/mirrors gstreamer-rockchip branch (Rockchip 공식 mirror, 2026-03 active)
-#   build deps: meson + ninja (apt), libmpp (위), libgstreamer1.0-dev (위)
-#   install: /usr/lib/aarch64-linux-gnu/gstreamer-1.0/  (Ubuntu 표준 plugin 경로 — gst-inspect 자동 검색)
-# -----------------------------------------------------------------------------
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        meson \
-        ninja-build \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN git clone --depth 1 -b gstreamer-rockchip https://github.com/JeffyCN/mirrors.git /tmp/gst-rockchip \
-    && cd /tmp/gst-rockchip \
-    && PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-} \
-       meson setup build \
-        --prefix=/usr \
-        --libdir=lib/aarch64-linux-gnu \
-        --buildtype=release \
-    && ninja -C build \
-    && ninja -C build install \
-    && cd /tmp/build \
-    && rm -rf /tmp/gst-rockchip \
-    && ldconfig
-
-# -----------------------------------------------------------------------------
 # 라이브러리 캐시 갱신 + LD_LIBRARY_PATH 설정 (기존 BuildScript.sh 가정 일치)
 # -----------------------------------------------------------------------------
 RUN ldconfig
