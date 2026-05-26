@@ -72,6 +72,10 @@ Pipeline: RTSP input → YOLOv5 NPU inference → SORT tracking → boundary int
 - `sed` is on the deny list — use awk/cut/tr for reads; provide complete files for edits.
 - No `rm`/`unlink`/`rmdir`. Move with intent: trash → `.deleted/`, rollback/reusable snapshot → `.backup/`. Real `rm` by user only.
 - **Git workflow** — AI may use git/gh but never on `master` directly. Work on separate branches; merge to master only via PR on explicit user instruction. develop merge is free (self-verify first); auto patch +1 on develop merge (cmake VERSION = git tag), ask user for minor/major. Force push / `reset --hard` denied. **Minimize branch proliferation — create only the branches the task needs (instance of A3).**
+- **Master merge gate (release-grade verification)** — develop → master merge 는 사용자 명시 허가 필수 + 다음 검증 통과:
+  - **patch / minor bump**: 모든 audit (5종) 통과 + **3시간 이상 운영 모니터링** (DFPS / RSS / FD / Thread / wd 안정 추세, 후술 §Verification 기준)
+  - **major bump**: 모든 audit (5종) 통과 + **각 10시간 이상의 에이징(aging) 모니터링** (장시간 메모리 / FD / Thread leak 추적) + **스트레스 모니터링** (max cam / max load 시 안정성 + DFPS dip 분포 + wd 빈도) + 사용자 명시 허가
+  - 사용자 허가 없이 master 가지 않는 게 절대 원칙. AI 가 "검증 완료, 머지하자" 라고 결론 내지 않고 사용자 결정 기다림.
 
 ### Coding Standard
 - C++17, enforce RAII, guarantee exception safety.
@@ -109,6 +113,18 @@ Before any master/develop merge, run the final program verification:
 - **Patch must be live in the running process**: after any code/build change, verify the patch is actually loaded by the running binary — grep a unique symbol/string in the mapped `.so`, observe a marker log, or confirm container restart picked up the new artifact. "Source is fixed" ≠ "running process is fixed."
 
 This gate is DetectBase's definition of "verified" (A4). Unit tests are not the primary mechanism.
+
+### Master merge gate — bump 종류별 검증 요건
+
+| bump 종류 | audit | 모니터링 | 사용자 허가 |
+|---|---|---|---|
+| **patch** (0.0.X) | 5종 모두 통과 | **3h+** 운영 안정 추세 | 명시 허가 필수 |
+| **minor** (0.X.0) | 5종 모두 통과 | **3h+** 운영 안정 추세 | 명시 허가 필수 |
+| **major** (X.0.0) | 5종 모두 통과 | **각 10h+** 에이징 (leak/FD/thread 장시간 추세) + **10h+** 스트레스 (max cam / max load 안정성, DFPS dip 분포, wd 빈도) | 명시 허가 필수 |
+
+- 운영 모니터링 = `logs/monitor.sh <label>` JSONL + DFPS / RSS / FD / threads / wd / reset / eos / disk / docker_cpu/mem 추세 점검
+- "사용자 명시 허가" 의 의미: 사용자가 직접 "master merge 진행해라" 또는 동등한 의사 표현. AI 가 검증 완료 후 "이제 머지하자" 라고 단정 X. 사용자 결정 기다림.
+- 검증 부족 시 master 가까이 가지 않음 — develop 에 그대로 두고 모니터링 시간 채우기.
 
 ### Directory Structure
 - code/ source · engines/ NPU engines · bin/ build output · settings/ config · scripts/ service scripts · logs/ active artifacts · .DOCS/ legacy md · .backup/ rollback/reusable snapshots · .deleted/ trash · .claude/ agents+skills
