@@ -174,6 +174,27 @@ ResetSourceOnly 가 호출한 TeardownPipeline 의 unref 가 hang. ReconnectWork
 - 현 기본값: `ALERT_DFPS_LOW_THRESHOLD=100`, `ALERT_DFPS_LOW_STREAK=2`, `ALERT_RSS_MB_THRESHOLD=1100`, `ALERT_WARN_DELTA_PER_CYCLE=500`, `ALERT_WARMUP_CYCLES=4`
 - 운영 1-2주 데이터 누적 후 임계값 재검토 권장
 
+### v1.0.0 cleanup 묶음 (legacy 출처: [.DOCS/SESSION_DFPS_B3_B4_PLATEAU_20260519.md](../.DOCS/SESSION_DFPS_B3_B4_PLATEAU_20260519.md))
+**누락됐다가 복원 (5/27 사용자 지적)**. v0.1.16-sync NEXT_SESSION rewrite 시 빠짐.
+
+1. **ThreadProfiler 모듈 신규** — 현 RspProf / InfProf / EvtProf inline struct (각 thread 내부 변수) 통합 → 별도 thread + PUSH (stage timing) / PULL (counter / queue size) API. RtspDetectorUnit.cpp 의 inline instrument 분리. ~4시간 예상.
+
+2. **DEBUG virtual lines 제거** — 매 cycle emit 되는 노이즈성 MLOG_INFO 라인 강등 (`MLOG_INFO` → `MLOG_DEBUG`):
+   - `RtspDetectorUnit.cpp:1268` `INF-thread (avg over 100 cycles...)` — 매 100 inference cycle, 4 cam × ~3.3s = 분당 ~75줄
+   - `RtspDetectorUnit.cpp:1624 / 1747` `RSP-thread (avg over 100 cycles...)` — 동일 빈도, 라인 길이 매우 김 (50+ field)
+   - `RtspDetectorUnit.cpp:1931` `event_detected type=X cam=N count=M` — traffic burst 시 분당 100-200줄 (5/24 storm 분석 시 진짜 시그널 찾기 어려운 노이즈)
+   - `RtspDetectorUnit.cpp:2034` `EVT-thread (avg over 100 event cycles...)`
+   - **효과**: Release build (`DEBUG_MODE` off) 에서 compile-out (`MgenLogger.h:47-50` cutoff = INFO) → 운영 log volume 대폭 감소 + 실 incident (frame-age watchdog / ResetSourceOnly / EOS) 신호 명확. cam_loss 분석 시 SignalNoise 비율 ↑.
+
+3. **TSan SafeQueue 잔존 race cleanup** — 5/19 audit baseline 시점 자체 코드 race 0건 ✅. 단 v1.0.0 시점 SafeQueue 의 shared_ptr ref counting / max_size 변경 path / drop_count 경합 등 deep review 권장.
+
+4. **v4 instrument 의 `t_*_set` dead code** — `knownConditionTrueFalse` 9건 (cppcheck audit_20260519). ThreadProfiler 마이그레이션 (#1) 시 자연 정리.
+
+순서 의존성:
+- #1 (ThreadProfiler) 가 먼저. 그 부수효과로 #4 정리.
+- #2 (DEBUG virtual lines 강등) 은 독립. #1 과 묶거나 별도.
+- #3 (TSan deep review) 은 #1 진행 중 동시 가능.
+
 ---
 
 ## 운영 metric / monitor
