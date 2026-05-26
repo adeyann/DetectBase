@@ -41,6 +41,7 @@ logs/bisect*
 logs/.current_*
 logs/.backup_*
 logs/sanity_*
+logs/.detectbase.lock
 
 # Trash (abandoned/superseded artifacts; user runs real rm)
 .deleted/
