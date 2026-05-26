@@ -21,7 +21,7 @@ code/
 ├── Protocol/
 │   ├── REST/         curl + restclient-cpp
 │   ├── SocketIO/     sioclient
-│   ├── RTSP/         RTSP 프록시 서버 (외부 라이브러리)
+│   ├── RTSP_GST/     GStreamer 기반 RTSP receiver (rtspsrc + avdec_h264) + proxy server (Full reset architecture, v0.1.14 부터 MPP/Option A 폐기)
 │   └── GRPC/         gRPC + protobuf — 분석 6 fix (shared_ptr handler registry) 적용
 ├── AbnormalActions/  침입/체류 이벤트 검사 (Line/Area Intrusion, Vehicle Intrusion/Parking)
 ├── Management/
@@ -108,7 +108,7 @@ GRPC 활성화 / 운영 정책은 [상위 README §"GRPC 통신"](../README.md) 
 - const 정확성 필수
 - 공개 API 에 Doxygen 주석
 
-## 검증 상태 (2026-05-20 — PR #9 audit cleanup + PR #13 H fix 후, cmake 0.1.7)
+## 검증 상태 (2026-05-24 — audit_20260524_115656 baseline, cmake 0.1.10 시점)
 
 | 항목 | 결과 |
 |---|---|
@@ -121,7 +121,15 @@ GRPC 활성화 / 운영 정책은 [상위 README §"GRPC 통신"](../README.md) 
 | graceful shutdown | 10초, PROGRAM QUIT SUCCESS |
 | 운영 leak (RSS/FD/Thread) | 0건 (10h sanity baseline: RSS plateau ±20MB, FD/Threads stable) |
 
+### v0.1.13 ~ v0.1.15 변경 (5/26)
+- v0.1.13: per-cam stage FPS counter (0.1.12) revert — global mutex hot path 회귀
+- v0.1.14: MPP + Option A 완전 폐기 — Full reset 복귀 (5/24 baseline)
+- v0.1.15: REST `get_json_from_resp_body` silent catch → MLOG_WARN 추가 (운영 가시화)
+
+이 변경들은 cmake 0.1.10 시점 audit 결과를 영향 안 줌 (코드 단순화 + log 추가). 다음 audit 갱신 권장.
+
 자세한 내용:
 - [.DOCS/REVIEW3/SUMMARY.md](../.DOCS/REVIEW3/SUMMARY.md) (3차 review baseline, 레거시)
 - [../.DOCS/AUDIT_REPORT_20260519.md](../.DOCS/AUDIT_REPORT_20260519.md) (v0.1.0 audit baseline, legacy)
 - [../.DOCS/STUCK_ANALYSIS_cam659_20260520.md](../.DOCS/STUCK_ANALYSIS_cam659_20260520.md) (GstRtsp stale 추적, legacy)
+- [../.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](../.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md) (v2.0.0 Search engine 도입 가이드)

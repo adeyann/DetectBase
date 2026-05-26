@@ -979,7 +979,8 @@ grep "PROGRAM QUIT SUCCESS" logs/DetectBase.log
 
 | 문서 | 내용 |
 |---|---|
-| **[logs/NEXT_SESSION.md](logs/NEXT_SESSION.md)** | MPP + Option A 폐기 후 진입점 (v0.1.14) — Full reset 복귀 후 운영 안정성 확인 |
+| **[logs/NEXT_SESSION.md](logs/NEXT_SESSION.md)** | v0.1.15 진입점 — Full reset 복귀 + REST silent catch fix + monitor.sh 추적 시작, 5/24 Full reset baseline 도달 검증 진행 중 |
+| **[.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md)** | v2.0.0 multi-engine (Search 등) 도입 가이드 — MAIA 기반, event-driven 패턴, Phase 1-5 ~3-4주 작업 |
 | [.DOCS/STUCK_ANALYSIS_cam659_20260520.md](.DOCS/STUCK_ANALYSIS_cam659_20260520.md) | cam 659 stuck 사건 분석 (2026-05-20) + 진단 도구 (PR #16) 활용 절차 — legacy |
 | [.DOCS/MISMATCH_SURGE_ANALYSIS_20260520.md](.DOCS/MISMATCH_SURGE_ANALYSIS_20260520.md) | `correlation_mismatch` 폭증 분석 (2026-05-20) — delta=10 stable backlog — legacy |
 | [.DOCS/SESSION_DFPS_B3_B4_PLATEAU_20260519.md](.DOCS/SESSION_DFPS_B3_B4_PLATEAU_20260519.md) | v0.1.0 release 직전 세션 전체 진행 (B3/B4 + audit + TSan race fix + 마무리) — legacy |
