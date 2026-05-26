@@ -174,6 +174,31 @@ ResetSourceOnly 가 호출한 TeardownPipeline 의 unref 가 hang. ReconnectWork
 - 현 기본값: `ALERT_DFPS_LOW_THRESHOLD=100`, `ALERT_DFPS_LOW_STREAK=2`, `ALERT_RSS_MB_THRESHOLD=1100`, `ALERT_WARN_DELTA_PER_CYCLE=500`, `ALERT_WARMUP_CYCLES=4`
 - 운영 1-2주 데이터 누적 후 임계값 재검토 권장
 
+### BasicLibs 정리 권장 (legacy 출처: [.DOCS/BASICLIBS_AUDIT.md](../.DOCS/BASICLIBS_AUDIT.md) §6 P3)
+**누락됐다가 복원 (5/27)**. v1.0.0 정리 단계에서 같이 진행 가능:
+
+1. **ClassChecker YAML → JSON 마이그레이션 + vendored yaml-cpp 제거**
+   - 현 `code/BasicLibs/core/parser/yaml-cpp/` (.a 포함) 사용처 = `code/BasicLibs/core/types/ClassChecker.h` 1개
+   - YAML 파일 1개 (engines/engine.classes.yaml or similar) JSON 변환 + 사용 코드 nlohmann::json 로 교체
+   - 효과: ~3,000 LOC 제거 (vendored yaml-cpp)
+   - 작업 ~1-2 시간
+
+2. **SafeThread → ThreadPool 도입** (확장 시점에)
+   - 현 SafeThread 29건 사용. cam 별 인스턴스 분리 (no pool)
+   - 카메라 8~16대 확장 계획 있을 시 검토. 6+ cam scale-up 시 batch>1 fix 와 묶어서 가능
+   - 사전 작업 아님 — scale-up 의사결정 후
+
+3. **DeviceCluster 인라인화** — 1개 파일 사용 (SettingManager) → 흡수 가능. 작은 정리.
+
+### v1.0.0 후 GStreamer upgrade (legacy 출처: [.DOCS/SESSION_DFPS_B3_B4_PLATEAU_20260519.md](../.DOCS/SESSION_DFPS_B3_B4_PLATEAU_20260519.md))
+**누락됐다가 복원 (5/27)**.
+
+**GStreamer 1.20.3 → 1.24+ upgrade** — rtpmanager long-running leak (`CLAUDE.md` "외부 lib, ~340 MB/year, accepted") 의 fix 가능성 검증.
+- 비용: 1.5~2시간 + Ubuntu 22.04 → 24.04 base 변경 + librknnrt ABI 호환 위험 + protobuf/grpc source rebuild
+- 시점: **v1.0.0 release 후** 별도 phase (master 안정화 후)
+- 기대 효과: rtpmanager leak 사라지면 1년 운영 RSS plateau 확정. 단 1.24 changelog 에 명확한 본 케이스 fix 단서는 없음 → 불확실
+- 만약 cam_loss 의 root cause [5] (GStreamer thread join 실패) 가 1.24 에서 fix 됐다면 우리 fix 의 leak 압력 도 해소될 수 있음 — bonus
+
 ### v1.0.0 cleanup 묶음 (legacy 출처: [.DOCS/SESSION_DFPS_B3_B4_PLATEAU_20260519.md](../.DOCS/SESSION_DFPS_B3_B4_PLATEAU_20260519.md))
 **누락됐다가 복원 (5/27 사용자 지적)**. v0.1.16-sync NEXT_SESSION rewrite 시 빠짐.
 
