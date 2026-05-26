@@ -1,8 +1,8 @@
 # NEXT_SESSION — v0.1.15 (Full reset 복귀 + REST log fix + monitor 추적) 진입점
 
-**최종 갱신**: 2026-05-26 15:30 KST (context compact 직전)
-**현 develop HEAD**: `61da783` (cmake VERSION 0.1.15)
-**현 상태**: **MPP + Option A 완전 폐기 후 안정화 단계**. Full reset 복귀. 5/24 baseline 검증 진행 중.
+**최종 갱신**: 2026-05-26 15:35 KST (context compact 직전)
+**현 develop HEAD**: `5590082` (cmake VERSION 0.1.15)
+**현 상태**: **MPP + Option A 완전 폐기 후 안정화 단계**. Full reset 복귀. 5/24 baseline 도달 확인 (5/26 15:32 monitor heartbeat: dfps 115.8, reset=28 eos=28 정합, wd=0).
 
 ---
 
