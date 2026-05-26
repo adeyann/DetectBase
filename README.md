@@ -622,7 +622,7 @@ curl -s http://localhost:9090/metrics | grep "^detectbase_"
 curl -s http://localhost:9090/metrics | grep "^detectbase_dfps_total "
 ```
 
-#### 등록된 메트릭 (전체 18개)
+#### 등록된 메트릭 (전체 23개 — core 18 + per-cam stage FPS 5)
 
 | 이름 | 타입 | 설명 |
 |---|---|---|
@@ -645,6 +645,11 @@ curl -s http://localhost:9090/metrics | grep "^detectbase_dfps_total "
 | `detectbase_grpc_send_failed_total{rpc, code}` | counter | GRPC client 송신 실패 |
 | `detectbase_grpc_recv_total{rpc}` | counter | GRPC server 수신 누적 |
 | `detectbase_setting_partial_failure_total{unit_key, unit_id}` | counter | 설정 reset 부분 실패 (graceful degradation) |
+| `detectbase_cam_avframe_dequeued_total{cam_id}` | counter | GATE 4 — RtspDetectorUnit avframe_q dequeue (frame 흐름 게이트) |
+| `detectbase_cam_inflight_pushed_total{cam_id}` | counter | GATE 5 — engine 으로 inference 요청 push |
+| `detectbase_cam_result_received_total{cam_id}` | counter | GATE 6 — engine response 수신 |
+| `detectbase_cam_tracker_processed_total{cam_id}` | counter | GATE 7 — SORT tracker 처리 완료 |
+| `detectbase_cam_event_dispatched_total{cam_id}` | counter | GATE 8 — event/io dispatch 완료 (frame 한 cycle 종료) |
 
 #### `errors_total` 의 `type` 라벨
 
