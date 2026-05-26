@@ -26,6 +26,7 @@ logs/*.jsonl
 logs/*.log.*
 logs/*.gz
 logs/*.sh
+!logs/monitor.sh
 logs/test_*/
 logs/audit_*/
 logs/gst_*/
