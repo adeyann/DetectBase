@@ -78,6 +78,7 @@ Pipeline: RTSP input → YOLOv5 NPU inference → SORT tracking → boundary int
   3. **버전 불일치 시**: 사용자 지정 버전이 commit 의 cmake VERSION 과 다르면 머지 전에 정렬 (새 commit 으로 cmake 만 user-version 으로 올리거나, 기존 commit 의 cmake 를 user-version 으로 수정).
   4. **머지 직후 local placeholder bump**: cmake VERSION 을 (just-merged) + 1 patch 로 별도 commit 후 push (다음 개발 placeholder). 예: 0.1.16 머지 후 → cmake 0.1.17 으로 bump.
   5. **버전 참조 문서 동기**: README / code/README / NEXT_SESSION 등 버전을 직접 인용하는 모든 문서는 머지 시점에 같이 갱신. 코드만 올리고 docs 가 뒤처지면 "cmake vs docs 불일치" 사고 (실제로 v0.1.16 머지 때 발생).
+- **Pre-push docs check (5/26 절대 규칙)** — 머지뿐 아니라 **commit 을 branch 에 push 할 때마다** 모든 문서를 전체적으로 점검하고 변경 사항과 정합되게 최신화. 점검 대상: README / code/README / NEXT_SESSION / OPERATIONS / .DOCS/ 의 버전 참조, 상태 설명, changelog. 정합 안 되어 push 후 발견되면 즉시 다음 commit 으로 보완 — push 전 점검이 원칙.
 - **Master merge gate (release-grade verification)** — develop → master merge 는 사용자 명시 허가 필수 + 다음 검증 통과:
   - **patch / minor bump**: 모든 audit (5종) 통과 + **3시간 이상 운영 모니터링** (DFPS / RSS / FD / Thread / wd 안정 추세, 후술 §Verification 기준)
   - **major bump**: 모든 audit (5종) 통과 + **각 10시간 이상의 에이징(aging) 모니터링** (장시간 메모리 / FD / Thread leak 추적) + **스트레스 모니터링** (max cam / max load 시 안정성 + DFPS dip 분포 + wd 빈도) + 사용자 명시 허가

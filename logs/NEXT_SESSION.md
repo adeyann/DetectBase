@@ -69,7 +69,8 @@
 3. **버전 불일치 시**: 사용자 지정 버전이 commit 의 cmake VERSION 과 다르면 머지 전에 정렬 (commit 수정 or 새 commit)
 4. **머지 직후 local bump**: cmake 를 (just-merged) + 1 patch 로 placeholder bump
 5. **README / code/README / NEXT_SESSION 등 버전 참조 문서**도 같이 갱신
-6. CLAUDE.md / memory 갱신 — 후속 정책 정착 작업 진행 중
+6. **Pre-push docs check (절대 규칙)** — merge 뿐만 아니라 **모든 commit push 시점**에 모든 문서 (README / code/README / NEXT_SESSION / OPERATIONS / .DOCS/) 전수 점검. 코드 변경과 정합 안 맞으면 즉시 다음 commit 으로 보완. push 전 점검이 원칙.
+7. CLAUDE.md §Work Rules + memory `feedback_git_workflow.md` 에 모두 명시. memory 는 AI-only 문서라 영어로 변환됨 (5/26).
 
 ---
 
