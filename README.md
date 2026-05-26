@@ -1,6 +1,6 @@
 # DetectBase
 
-**Version**: `0.1.12` (cmake `code/CMakeLists.txt`. master tag `v0.1.0`, develop 누적 cam stuck fix + 권한 모델 + audit 1h + Option A partial reset.)
+**Version**: `0.1.12` (cmake `code/CMakeLists.txt`. master tag `v0.1.0`, develop 누적 cam stuck fix + 권한 모델 + audit 1h + Option A partial reset + per-cam stage FPS counter.)
 
 Odroid M2 NPU 기반 RTSP 비디오 분석 베이스 프로젝트. 객체 탐지 + 트래킹 + 침입 감지 + 이벤트 송신을 통합한 production-ready 시스템.
 
@@ -971,7 +971,7 @@ grep "PROGRAM QUIT SUCCESS" logs/DetectBase.log
 
 | 문서 | 내용 |
 |---|---|
-| **[logs/NEXT_SESSION.md](logs/NEXT_SESSION.md)** | cam stuck fix develop 머지 완료 후 진입점 (다음 후보: NEW-2 mismatch / ThreadProfiler / MPP 재시도 / TSan SafeQueue) |
+| **[logs/NEXT_SESSION.md](logs/NEXT_SESSION.md)** | Option A merge 완료 + stage FPS counter 도입 후 진입점 (다음 후보: DFPS dip 진단 / ThreadProfiler / NEW-2 close / MPP 재시도) |
 | **[logs/STUCK_ANALYSIS_cam659_20260520.md](logs/STUCK_ANALYSIS_cam659_20260520.md)** | cam 659 stuck 사건 분석 (2026-05-20) + 진단 도구 (PR #16) 활용 절차 |
 | **[logs/MISMATCH_SURGE_ANALYSIS_20260520.md](logs/MISMATCH_SURGE_ANALYSIS_20260520.md)** | `correlation_mismatch` 폭증 분석 (2026-05-20) — delta=10 stable backlog, PR #16 binary trigger 추정 |
 | [logs/SESSION_DFPS_B3_B4_PLATEAU_20260519.md](logs/SESSION_DFPS_B3_B4_PLATEAU_20260519.md) | v0.1.0 release 직전 세션 전체 진행 (B3/B4 + audit + TSan race fix + 마무리) |
