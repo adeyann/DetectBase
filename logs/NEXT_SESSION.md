@@ -152,7 +152,7 @@ git push origin :feature/mpp-integration
 | [README.md](../README.md) | 프로젝트 전체 (Version 0.1.12) |
 | [CLAUDE.md](../CLAUDE.md) | 코딩 표준 + 5 디버깅 원칙 + Known Issues |
 | [OPERATIONS.md](../OPERATIONS.md) | 운영 트러블슈팅 |
-| [logs/STUCK_ANALYSIS_cam659_20260520.md](STUCK_ANALYSIS_cam659_20260520.md) | cam stuck 변종 B 추적 |
-| [logs/MISMATCH_SURGE_ANALYSIS_20260520.md](MISMATCH_SURGE_ANALYSIS_20260520.md) | NEW-2 분석 |
+| [.DOCS/STUCK_ANALYSIS_cam659_20260520.md](../.DOCS/STUCK_ANALYSIS_cam659_20260520.md) | cam stuck 변종 B 추적 — legacy |
+| [.DOCS/MISMATCH_SURGE_ANALYSIS_20260520.md](../.DOCS/MISMATCH_SURGE_ANALYSIS_20260520.md) | NEW-2 분석 — legacy |
 | [logs/audit_20260524_115656/](audit_20260524_115656/) | 최신 audit baseline (cppcheck 59 / clang-tidy 0 / TSan 141) |
 | [logs/post_merge_sanity.csv](post_merge_sanity.csv) | 5h+ 모니터 데이터 (DFPS / RSS / reset / wd / EOS time series) |

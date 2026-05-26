@@ -123,5 +123,5 @@ GRPC 활성화 / 운영 정책은 [상위 README §"GRPC 통신"](../README.md) 
 
 자세한 내용:
 - [.DOCS/REVIEW3/SUMMARY.md](../.DOCS/REVIEW3/SUMMARY.md) (3차 review baseline, 레거시)
-- [../logs/AUDIT_REPORT_20260519.md](../logs/AUDIT_REPORT_20260519.md) (v0.1.0 audit baseline)
-- [../logs/STUCK_ANALYSIS_cam659_20260520.md](../logs/STUCK_ANALYSIS_cam659_20260520.md) (GstRtsp stale 추적, 진행 중)
+- [../.DOCS/AUDIT_REPORT_20260519.md](../.DOCS/AUDIT_REPORT_20260519.md) (v0.1.0 audit baseline, legacy)
+- [../.DOCS/STUCK_ANALYSIS_cam659_20260520.md](../.DOCS/STUCK_ANALYSIS_cam659_20260520.md) (GstRtsp stale 추적, legacy)

@@ -977,11 +977,11 @@ grep "PROGRAM QUIT SUCCESS" logs/DetectBase.log
 | 문서 | 내용 |
 |---|---|
 | **[logs/NEXT_SESSION.md](logs/NEXT_SESSION.md)** | Option A merge 완료 + stage FPS counter 도입 후 진입점 (다음 후보: DFPS dip 진단 / ThreadProfiler / NEW-2 close / MPP 재시도) |
-| **[logs/STUCK_ANALYSIS_cam659_20260520.md](logs/STUCK_ANALYSIS_cam659_20260520.md)** | cam 659 stuck 사건 분석 (2026-05-20) + 진단 도구 (PR #16) 활용 절차 |
-| **[logs/MISMATCH_SURGE_ANALYSIS_20260520.md](logs/MISMATCH_SURGE_ANALYSIS_20260520.md)** | `correlation_mismatch` 폭증 분석 (2026-05-20) — delta=10 stable backlog, PR #16 binary trigger 추정 |
-| [logs/SESSION_DFPS_B3_B4_PLATEAU_20260519.md](logs/SESSION_DFPS_B3_B4_PLATEAU_20260519.md) | v0.1.0 release 직전 세션 전체 진행 (B3/B4 + audit + TSan race fix + 마무리) |
-| [logs/AUDIT_REPORT_20260519.md](logs/AUDIT_REPORT_20260519.md) | audit 결과 + rtpmanager A 결정 |
-| [logs/NPU_MODEL_PERFORMANCE.md](logs/NPU_MODEL_PERFORMANCE.md) | YOLOv5 s/m/l/x 성능 예측 |
+| [.DOCS/STUCK_ANALYSIS_cam659_20260520.md](.DOCS/STUCK_ANALYSIS_cam659_20260520.md) | cam 659 stuck 사건 분석 (2026-05-20) + 진단 도구 (PR #16) 활용 절차 — legacy |
+| [.DOCS/MISMATCH_SURGE_ANALYSIS_20260520.md](.DOCS/MISMATCH_SURGE_ANALYSIS_20260520.md) | `correlation_mismatch` 폭증 분석 (2026-05-20) — delta=10 stable backlog — legacy |
+| [.DOCS/SESSION_DFPS_B3_B4_PLATEAU_20260519.md](.DOCS/SESSION_DFPS_B3_B4_PLATEAU_20260519.md) | v0.1.0 release 직전 세션 전체 진행 (B3/B4 + audit + TSan race fix + 마무리) — legacy |
+| [.DOCS/AUDIT_REPORT_20260519.md](.DOCS/AUDIT_REPORT_20260519.md) | audit 결과 + rtpmanager A 결정 — legacy |
+| [.DOCS/NPU_MODEL_PERFORMANCE.md](.DOCS/NPU_MODEL_PERFORMANCE.md) | YOLOv5 s/m/l/x 성능 예측 — legacy |
 | [.DOCS/REVIEW3_COMPLETION_BASELINE_20260513.md](.DOCS/REVIEW3_COMPLETION_BASELINE_20260513.md) | 3차 코드리뷰 완료 시점 baseline 스냅샷 (legacy) |
 
 ### 코드 리뷰 결과
