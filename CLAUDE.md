@@ -71,7 +71,13 @@ Pipeline: RTSP input → YOLOv5 NPU inference → SORT tracking → boundary int
 - **Never silently restart the service to make a symptom disappear.** Service restart is an explicit diagnostic action only; state the intent ("재시작해 X 를 확인/적용한다") in the response. Using restart to obscure a problem is forbidden.
 - `sed` is on the deny list — use awk/cut/tr for reads; provide complete files for edits.
 - No `rm`/`unlink`/`rmdir`. Move with intent: trash → `.deleted/`, rollback/reusable snapshot → `.backup/`. Real `rm` by user only.
-- **Git workflow** — AI may use git/gh but never on `master` directly. Work on separate branches; merge to master only via PR on explicit user instruction. develop merge is free (self-verify first); auto patch +1 on develop merge (cmake VERSION = git tag), ask user for minor/major. Force push / `reset --hard` denied. **Minimize branch proliferation — create only the branches the task needs (instance of A3).**
+- **Git workflow** — AI may use git/gh but never on `master` directly. Work on separate branches; merge to master only via PR on explicit user instruction. Force push / `reset --hard` denied. **Minimize branch proliferation — create only the branches the task needs (instance of A3).**
+- **Version-bump 절차 (5/26 정착)** — code/cmake bump 가 같은 commit 에 묶이면 code 와 git tag 의 호환 어긋남 위험. 그래서:
+  1. **Bump 는 push 후 별도 commit 으로** — code 변경 commit 은 cmake VERSION 그대로 유지. push 끝낸 다음 cmake 만 올린 별도 commit.
+  2. **Develop / master 머지 전**: topic branch HEAD ↔ target branch 의 직전 마지막 commit 비교, 변경 요약을 사용자에게 보고 + **사용자에게 버전 명시적 확인** ("이 머지의 버전은 무엇인가?").
+  3. **버전 불일치 시**: 사용자 지정 버전이 commit 의 cmake VERSION 과 다르면 머지 전에 정렬 (새 commit 으로 cmake 만 user-version 으로 올리거나, 기존 commit 의 cmake 를 user-version 으로 수정).
+  4. **머지 직후 local placeholder bump**: cmake VERSION 을 (just-merged) + 1 patch 로 별도 commit 후 push (다음 개발 placeholder). 예: 0.1.16 머지 후 → cmake 0.1.17 으로 bump.
+  5. **버전 참조 문서 동기**: README / code/README / NEXT_SESSION 등 버전을 직접 인용하는 모든 문서는 머지 시점에 같이 갱신. 코드만 올리고 docs 가 뒤처지면 "cmake vs docs 불일치" 사고 (실제로 v0.1.16 머지 때 발생).
 - **Master merge gate (release-grade verification)** — develop → master merge 는 사용자 명시 허가 필수 + 다음 검증 통과:
   - **patch / minor bump**: 모든 audit (5종) 통과 + **3시간 이상 운영 모니터링** (DFPS / RSS / FD / Thread / wd 안정 추세, 후술 §Verification 기준)
   - **major bump**: 모든 audit (5종) 통과 + **각 10시간 이상의 에이징(aging) 모니터링** (장시간 메모리 / FD / Thread leak 추적) + **스트레스 모니터링** (max cam / max load 시 안정성 + DFPS dip 분포 + wd 빈도) + 사용자 명시 허가
