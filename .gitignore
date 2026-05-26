@@ -21,6 +21,8 @@ logs/*.log
 logs/*.txt
 logs/*.csv
 logs/*.out
+logs/*.json
+logs/*.jsonl
 logs/*.log.*
 logs/*.gz
 logs/*.sh

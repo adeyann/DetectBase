@@ -68,33 +68,6 @@ namespace MGEN
                     "Correlation ID mismatch between inflight frame and NPU response per cam_id (frame ordering defense counter)" );
             } );
         }
-
-        // Per-cam stage FPS counter — frame 흐름 각 gateway 에서 per-cam 누적.
-        //   rate(<counter>{cam_id="N"}[10s]) 로 stage FPS 계산. DFPS dip 시 어느 stage 에서
-        //   drop 시작하는지 정확 식별 (camera/network → decode → cam thread → NPU req →
-        //   NPU resp → tracker → event).
-        std::once_flag g_stage_fps_metrics_once;
-        void RegisterStageFpsMetricsOnce() noexcept
-        {
-            std::call_once( g_stage_fps_metrics_once, []{
-                auto& reg = MGEN::MetricsRegistry::Instance();
-                // GATE 4: cam_thread 가 AVFrame queue 에서 frame dequeue 성공 (수신 frame rate).
-                reg.RegisterCounter( "detectbase_cam_avframe_dequeued_total",
-                    "Frames dequeued by cam_thread from GStreamer AVFrame queue per cam_id (effective receive FPS)" );
-                // GATE 5: NPU 요청 inflight_q 에 push.
-                reg.RegisterCounter( "detectbase_cam_inflight_pushed_total",
-                    "Frames pushed to inflight_q (NPU request enqueue) per cam_id" );
-                // GATE 6: NPU 응답 inflight_q 에서 dequeue (response thread).
-                reg.RegisterCounter( "detectbase_cam_result_received_total",
-                    "Frames dequeued from inflight_q (NPU response received) per cam_id" );
-                // GATE 7: tracker 처리 완료.
-                reg.RegisterCounter( "detectbase_cam_tracker_processed_total",
-                    "Frames processed by tracker (post NPU, ready for event detection) per cam_id" );
-                // GATE 8: event detection / final 처리.
-                reg.RegisterCounter( "detectbase_cam_event_dispatched_total",
-                    "Frames passing event detection (final stage before DFPS counter) per cam_id" );
-            } );
-        }
     }
 
     // ============================================================================
@@ -343,7 +316,6 @@ namespace MGEN
         , iostream_manager_( std::move( io_stream_manager ) )
     {
         RegisterCorrelationMismatchMetricOnce();
-        RegisterStageFpsMetricsOnce();
     }
 
     RtspDetectorUnit::~RtspDetectorUnit()
@@ -1020,10 +992,6 @@ namespace MGEN
             {
                 // check frame recv time
                 avframe_current_recv_time = std::chrono::system_clock::now();
-                // GATE 4: AVFrame dequeue 성공 — 수신 frame rate counter.
-                MGEN::MetricsRegistry::Instance().IncrementCounter(
-                    "detectbase_cam_avframe_dequeued_total",
-                    { { "cam_id", std::to_string( id_ ) } }, 1.0 );
             }
 
             // get AVFrame ptr — std::move 로 atomic ref-count op 회피 (TSan happens-before 추적 한계).
@@ -1278,10 +1246,6 @@ namespace MGEN
                 cyc_inflight_size = inflight_q_->size();  // push 직전 size (누적 leak 검증)
                 // SafeQueue::enqueue_move 는 max_size 도달 시 oldest drop. response thread 가 느리면 자연 backpressure.
                 inflight_q_->enqueue_move( std::move( item ) );
-                // GATE 5: NPU 요청 inflight_q push 완료.
-                MGEN::MetricsRegistry::Instance().IncrementCounter(
-                    "detectbase_cam_inflight_pushed_total",
-                    { { "cam_id", std::to_string( id_ ) } }, 1.0 );
             }
             t_after_push = std::chrono::steady_clock::now();
             t_push_set = true;
@@ -1471,10 +1435,6 @@ namespace MGEN
             }
 
             InflightItem item = std::move( *opt_item );
-            // GATE 6: inflight_q 에서 dequeue 성공 — NPU 응답 수신 시점.
-            MGEN::MetricsRegistry::Instance().IncrementCounter(
-                "detectbase_cam_result_received_total",
-                { { "cam_id", std::to_string( id_ ) } }, 1.0 );
             // shared_ptr copy → atomic ref-count add (TSan happens-before 추적 한계로 race report).
             // std::move 로 ownership 이양 → atomic op 없음. item.frame 은 이후 unused.
             auto frame = std::move( item.frame );
@@ -1597,11 +1557,6 @@ namespace MGEN
 
             cyc_trk_cnt = entire_track_results.size();  // 이 cycle 의 tracking output 개수 (운영 추세)
 
-            // GATE 7: tracker 통과 — frame 단위 카운트 (tracking output 개수 아닌, cycle 통과 개수).
-            MGEN::MetricsRegistry::Instance().IncrementCounter(
-                "detectbase_cam_tracker_processed_total",
-                { { "cam_id", std::to_string( id_ ) } }, 1.0 );
-
             SendDetectResultToMetaData( entire_track_results );
             t_after_meta = std::chrono::steady_clock::now();
             t_meta_set = true;
@@ -1609,10 +1564,6 @@ namespace MGEN
             if( entire_track_results.empty() ) {
                 t_after_ev = std::chrono::steady_clock::now();
                 t_ev_set = true;
-                // GATE 8: event 처리 단계 완료 (empty path — 이벤트 없음).
-                MGEN::MetricsRegistry::Instance().IncrementCounter(
-                    "detectbase_cam_event_dispatched_total",
-                    { { "cam_id", std::to_string( id_ ) } }, 1.0 );
                 if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
                     rsp_prof.ifq_us           += rsp_us( t_rsp_top, t_after_ifq );
                     rsp_prof.resp_us          += rsp_us( t_after_ifq, t_after_resp );
@@ -1742,11 +1693,6 @@ namespace MGEN
 
             t_after_ev = std::chrono::steady_clock::now();
             t_ev_set = true;
-
-            // GATE 8: event 처리 단계 완료 (event path — 이벤트 있음).
-            MGEN::MetricsRegistry::Instance().IncrementCounter(
-                "detectbase_cam_event_dispatched_total",
-                { { "cam_id", std::to_string( id_ ) } }, 1.0 );
 
             // ResponseThread stage profile flush — event path 도 동일 full format 으로 통합 (v4 leak hunt).
             if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
