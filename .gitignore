@@ -18,6 +18,8 @@ code/Engine/NPU/librknn_api/aarch64/librknnrt.so
 
 # Runtime logs (binary/rotated — .md 분석 문서만 추적)
 logs/*.log
+logs/*.txt
+logs/*.csv
 logs/*.out
 logs/*.log.*
 logs/*.gz
@@ -30,6 +32,7 @@ logs/massif*
 logs/bisect*
 *.log
 *.txt
+*.csv
 
 # logs/ 임시 파일 (확장자 .log 외 — AI 작업 중 생성)
 logs/.current_*
