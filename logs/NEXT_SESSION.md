@@ -1,8 +1,32 @@
 # NEXT_SESSION — v0.1.17 (git workflow 정책 + pre-push docs check + memory 영어화) 진입점
 
-**최종 갱신**: 2026-05-26 18:00 KST
-**현 develop HEAD**: `bbcebd0` (cmake VERSION `0.1.18` placeholder. README/code/README "Version" 라인 = 마지막 released **v0.1.17**)
-**현 상태**: **PID 4924 사고 분석 + 재발 방지 패치 적용 완료**. baseline 안정 운영 중 (DFPS 115+, RSS 600MB, monitor `bthk32wqw` 가동).
+**최종 갱신**: 2026-05-26 18:55 KST
+**현 develop HEAD**: `c15701b` (cmake VERSION `0.1.18` placeholder. README/code/README "Version" 라인 = 마지막 released **v0.1.17**)
+**현 상태**: **v0.1.18 baseline 가동** (monitor `b4nzajj8j`, `v018_post_ab`). wd 회귀 A/B test 결론 = v0.1.16 patch 결백, cam 서버 측 state 결함이 원인. **내일 (5/27) cam 서버 재시작 예정.**
+
+---
+
+## 🚨 5/26 18:30 ~ 18:55 — wd 회귀 조사 + A/B test 결과 (must read)
+
+**증상**: v0.1.16 binary 50분 운영 시 wd=6 + cam_loss (active=3/4) — 5/24 baseline (wd=0/24h) 대비 명백한 회귀.
+
+**A/B test 수행**: `experiment/wd-baseline-rollback` from `008bd81` (v0.1.14, pre-argv-guard, pre-flock) → 동일 환경에서 binary 만 교체.
+
+**결과**: v0.1.14 binary 도 부팅 4분만에 wd=1 + 동일 cam_loss 발생. **v0.1.16 patch (argv guard + flock) 결백.**
+
+**진짜 원인 — cam 서버 측 state 결함** (happytime rtsp 4.1, 192.168.2.111-114):
+- `ss -tan` 결과: 192.168.2.114 가 CLOSE-WAIT (cam 658 wd 와 일치) → 서버가 끊었는데 우리 socket dangling
+- 192.168.2.113 ARP `STALE` (cam 659 와 일치)
+- container restart 후에도 LAST-ACK 잔존 — server-side 가 자가 회복 안 됨
+
+**Trigger 가설**: 오늘 15:59-16:41 PID 4924 incident (duplicate DetectBase) 동안 각 cam 서버가 2x client load 처리 → happytime rtsp 의 connection table / session state 코럽트. PID 4924 사망 후에도 자가 회복 안 됨.
+
+**대응 — 내일 (5/27) 진행**:
+1. **cam 서버 4대 (192.168.2.111-114) 의 happytime rtsp daemon 재시작** — 가장 직접 검증. 재시작 후 wd 발생 멈추면 hypothesis 확정.
+2. v0.1.18 baseline 24h 안정성 재측정 (cam 서버 정상화 상태에서).
+
+**부수 발견**:
+- DetectBase 가 server-side close 받았을 때 socket close 누락 → CLOSE-WAIT 패턴 관찰. fd leak 누적 위험은 낮지만 (소량), defensive 코드 추가 후보 (future).
 
 ---
 
