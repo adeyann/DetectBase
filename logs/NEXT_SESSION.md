@@ -1,7 +1,7 @@
 # NEXT_SESSION — v0.1.16 (argv guard + flock + monitor threshold alerts) 진입점
 
 **최종 갱신**: 2026-05-26 18:00 KST
-**현 develop HEAD**: `579764c` (cmake VERSION 0.1.16)
+**현 develop HEAD**: `31d9aa9` (cmake VERSION `0.1.17` placeholder — 마지막 released = v0.1.16)
 **현 상태**: **PID 4924 사고 분석 + 재발 방지 패치 적용 완료**. baseline 안정 운영 중 (DFPS 115+, RSS 600MB, monitor `bthk32wqw` 가동).
 
 ---
