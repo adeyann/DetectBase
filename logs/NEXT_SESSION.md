@@ -1,8 +1,38 @@
-# NEXT_SESSION — v0.1.17 (git workflow 정책 + pre-push docs check + memory 영어화) 진입점
+# NEXT_SESSION — v0.1.18 (cam_loss root cause fix: TeardownPipeline unref-skip) 진입점
 
-**최종 갱신**: 2026-05-26 18:55 KST
-**현 develop HEAD**: `c15701b` (cmake VERSION `0.1.18` placeholder. README/code/README "Version" 라인 = 마지막 released **v0.1.17**)
-**현 상태**: **v0.1.18 baseline 가동** (monitor `b4nzajj8j`, `v018_post_ab`). wd 회귀 A/B test 결론 = v0.1.16 patch 결백, cam 서버 측 state 결함이 원인. **내일 (5/27) cam 서버 재시작 예정.**
+**최종 갱신**: 2026-05-26 22:50 KST
+**현 develop HEAD**: (이 commit 기준 — fix/teardown-pipeline-unref-hang 머지 대기)
+**현 상태**: **v0.1.18 + TeardownPipeline fix 가동** (monitor `bl4c785is`, `v018_teardown_fix`). 1h 운영 wd=1/cam_loss=0 ✅. cam_loss 의 진짜 root cause 식별 + fix 검증.
+
+---
+
+## 🎯 5/26 22:00 — cam_loss 진짜 ROOT CAUSE 식별 + FIX (must read)
+
+**증상**: cam 661 의 42분 cam_loss (19:10-19:54). 자가 회복 불가, process restart 만이 해결.
+
+**ROOT CAUSE 확정**: `GstRtspReceiver::TeardownPipeline()` 의 `gst_object_unref(pipeline_)` 가 GStreamer 내부 thread join 에서 **unbounded block**. cam 661 의 backup log:
+```
+10:09:33  ResetSourceOnly[661] 진입 — pipeline destroy/rebuild
+... 매칭되는 OK 로그 없음 (45분 침묵) ...
+10:54:54  process restart (escape)
+```
+
+ResetSourceOnly 가 호출한 TeardownPipeline 의 unref 가 hang. ReconnectWorker thread (cam 661) 가 receiver_mtx_ 들고 stuck. 같은 thread 안 watchdog cycle 도 발화 불가. process restart 만이 escape.
+
+**FIX**: `gst_element_get_state` timeout 시 `gst_object_unref` 건너뛰고 의도된 leak (process restart 시 OS cleanup) + WARN log.
+
+**검증 (1h)**:
+| 측면 | pre-fix (v016/v014_ab) | post-fix (v018+fix) |
+|---|---|---|
+| Duration | 50min / 8min | **63min** |
+| wd | 6 / 1 | **1** (boot 직후) |
+| cam_loss | 영구 sustained | **0건** ✅ |
+| DFPS | 60-90 osc | **116.1** baseline |
+| cam_active | 3/4 sustained | **4/4 stable** |
+
+자세한 분석: [.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md](../.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md) (doc 진화 이력 + 이전 틀린 가설 정리 포함).
+
+---
 
 ---
 
