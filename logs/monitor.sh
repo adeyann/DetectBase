@@ -54,6 +54,7 @@ ALERT_WARN_DELTA_PER_CYCLE="${ALERT_WARN_DELTA_PER_CYCLE:-500}"  # ≥ 500 warn/
 ALERT_DFPS_LOW_THRESHOLD="${ALERT_DFPS_LOW_THRESHOLD:-100}"      # DFPS < 100 = degraded
 ALERT_DFPS_LOW_STREAK="${ALERT_DFPS_LOW_STREAK:-2}"              # 2 consecutive cycles → real (1 sample = reset artifact)
 ALERT_RSS_MB_THRESHOLD="${ALERT_RSS_MB_THRESHOLD:-1100}"         # ≥ 1100MB = 2x baseline → suspect duplicate/leak
+ALERT_WARMUP_CYCLES="${ALERT_WARMUP_CYCLES:-4}"                  # 첫 N cycle (~N min) dfps/storm alert skip — boot ramp-up false positive 방지
 
 # state carried between cycles
 PREV_WARN=0
@@ -63,7 +64,7 @@ PREV_FTC=0
 DFPS_LOW_STREAK=0
 
 echo "[monitor armed $(date +%H:%M:%S)] label=$LABEL container=$CONTAINER commit=$(cd $ROOT && git log -1 --format=%h) cut=$START_LOG_CUT interval=${INTERVAL_SEC}s out=$OUT"
-echo "[monitor armed] alert thresholds: warn_delta≥${ALERT_WARN_DELTA_PER_CYCLE}/cycle, dfps<${ALERT_DFPS_LOW_THRESHOLD} for ${ALERT_DFPS_LOW_STREAK} cycles, rss≥${ALERT_RSS_MB_THRESHOLD}MB, err>0, wd>0, ftc>0, cam_loss"
+echo "[monitor armed] alert thresholds: warn_delta≥${ALERT_WARN_DELTA_PER_CYCLE}/cycle, dfps<${ALERT_DFPS_LOW_THRESHOLD} for ${ALERT_DFPS_LOW_STREAK} cycles, rss≥${ALERT_RSS_MB_THRESHOLD}MB, err>0, wd>0, ftc>0, cam_loss | warmup=${ALERT_WARMUP_CYCLES} cycles (dfps/storm skip during boot ramp)"
 
 # python builder: log_tail (stdin) + env vars → 1 줄 JSONL.
 # heredoc 으로 단일 정의 후 매 cycle 재사용.
@@ -277,7 +278,8 @@ while true; do
     FTC_DELTA=$(( FTC - PREV_FTC ))
 
     # 1) WARN rate spike — storm signature (correlation_id mismatch / Queue Full burst)
-    if [ "$WARN_DELTA" -ge "$ALERT_WARN_DELTA_PER_CYCLE" ]; then
+    #    boot ramp-up 시 누적 시작점부터 측정되므로 첫 cycle 만 skip
+    if [ "$CYC" -gt 1 ] && [ "$WARN_DELTA" -ge "$ALERT_WARN_DELTA_PER_CYCLE" ]; then
         echo "[★storm $(date +%H:%M:%S)] warn +${WARN_DELTA}/cycle (total=${WRN}) — possible correlation_id storm / Queue Full burst"
     fi
 
@@ -287,9 +289,10 @@ while true; do
     fi
 
     # 3) DFPS sustained low — 단발 sample (reset cycle artifact) 무시, ≥${ALERT_DFPS_LOW_STREAK} cycle 연속이면 alert
+    #    boot ramp-up 첫 ${ALERT_WARMUP_CYCLES} cycle 은 skip (DetectBase init 직후 stream 안정화 ~3-4분 필요).
     if [ -n "$DFPS" ] && awk -v d="$DFPS" -v thr="$ALERT_DFPS_LOW_THRESHOLD" 'BEGIN{exit !(d>0 && d<thr)}'; then
         DFPS_LOW_STREAK=$(( DFPS_LOW_STREAK + 1 ))
-        if [ "$DFPS_LOW_STREAK" -eq "$ALERT_DFPS_LOW_STREAK" ]; then
+        if [ "$CYC" -gt "$ALERT_WARMUP_CYCLES" ] && [ "$DFPS_LOW_STREAK" -eq "$ALERT_DFPS_LOW_STREAK" ]; then
             echo "[★dfps_low $(date +%H:%M:%S)] dfps=${DFPS} sustained ${DFPS_LOW_STREAK} cycles (<${ALERT_DFPS_LOW_THRESHOLD})"
         fi
     else
