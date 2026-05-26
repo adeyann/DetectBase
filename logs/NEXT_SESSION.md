@@ -30,7 +30,21 @@ ResetSourceOnly 가 호출한 TeardownPipeline 의 unref 가 hang. ReconnectWork
 | DFPS | 60-90 osc | **116.1** baseline |
 | cam_active | 3/4 sustained | **4/4 stable** |
 
-자세한 분석: [.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md](../.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md) (doc 진화 이력 + 이전 틀린 가설 정리 포함).
+자세한 분석: [.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md](../.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md) (doc 진화 이력 + 이전 틀린 가설 정리 + escalation playbook 포함).
+
+### 솔직한 fix 평가 (사용자 비판적 검증 반영)
+- fix 는 **사후조치 (defensive workaround)** — stuck 의 진짜 원인 ([1] stream 끊김 + [5] GStreamer thread join 실패) 미식별
+- 162분 운영 결과 fix path 자체가 발화 X → fix 의 effectiveness empirical 검증 0
+- 안정성 회복은 stuck 조건 사라진 환경 변화 (cam server state cleanup) 때문일 가능성 → **사실상 162분간 아무것도 안 고친 것**일 수도
+- 진짜 검증은 다음 자연 stuck 시
+
+### Escalation 순서 (stuck 재발 시 단계별)
+1. **Step 1 (현 상태)**: 자연 stuck 대기 + monitor + fix path 발화 검증
+2. **Step 2**: `GST_DEBUG=2,rtspsrc:5,udpsrc:5,rtpsession:5` env var 추가 후 재실행 — GStreamer 내부 동작 추적
+3. **Step 3**: tcpdump packet capture (RTP/RTCP/RTSP protocol-level)
+4. **Step 4 (최후 수단)**: **happytimesoft RTSP 모듈로 rollback A/B test** — `37dae37` parent commit (GStreamer 통합 직전) 빌드 + 동일 환경에서 stuck 발생 여부 비교. happytimesoft 도 stuck 시 외부 원인 (cam server / 네트워크), 멀쩡하면 GStreamer 통합 결함
+
+자세한 Step 4 절차: [.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md §"다음 단계"](../.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md)
 
 ---
 
