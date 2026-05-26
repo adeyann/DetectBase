@@ -1,7 +1,7 @@
-# NEXT_SESSION — v0.1.16 (argv guard + flock + monitor threshold alerts) 진입점
+# NEXT_SESSION — v0.1.17 (git workflow 정책 + pre-push docs check + memory 영어화) 진입점
 
 **최종 갱신**: 2026-05-26 18:00 KST
-**현 develop HEAD**: `31d9aa9` (cmake VERSION `0.1.17` placeholder — 마지막 released = v0.1.16)
+**현 develop HEAD**: `0dcf725` (cmake VERSION `0.1.17` — README/code/README Version 라인과 sync. 마지막 released = v0.1.16)
 **현 상태**: **PID 4924 사고 분석 + 재발 방지 패치 적용 완료**. baseline 안정 운영 중 (DFPS 115+, RSS 600MB, monitor `bthk32wqw` 가동).
 
 ---
@@ -130,7 +130,7 @@
 
 | 문서 | 내용 |
 |------|------|
-| [README.md](../README.md) | 프로젝트 전체 (Version 0.1.16) |
+| [README.md](../README.md) | 프로젝트 전체 (Version 0.1.17) |
 | [CLAUDE.md](../CLAUDE.md) | 코딩 표준 + master merge gate + git workflow 정책 (5/26 갱신) |
 | [OPERATIONS.md](../OPERATIONS.md) | 운영 트러블슈팅 |
 | [.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](../.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md) | v2.0.0 Search engine 도입 가이드 |
