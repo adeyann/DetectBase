@@ -46,7 +46,24 @@ HEARTBEAT_EVERY="${HEARTBEAT_EVERY:-30}"
 START_TS=$(date -u +%s)
 START_LOG_CUT=$(date -u -d "2 minute ago" '+%Y-%m-%dT%H:%M')
 
+# § ALERT thresholds — 운영 사고 시그니처 기반 (5/24 storm / 5/26 PID 4924 사례 분석).
+#   기준선: baseline DFPS ~115, RSS ~600MB, warn rate ~10-30/min.
+#   5/24 STORM 시: warn ~6000/min, DFPS 95-100 (2-4분 지속), RSS plateau.
+#   5/26 PID 4924 시: warn ~10000/min, DFPS 60-65 (44분 sustained), RSS 1300MB.
+ALERT_WARN_DELTA_PER_CYCLE="${ALERT_WARN_DELTA_PER_CYCLE:-500}"  # ≥ 500 warn/cycle → storm signature
+ALERT_DFPS_LOW_THRESHOLD="${ALERT_DFPS_LOW_THRESHOLD:-100}"      # DFPS < 100 = degraded
+ALERT_DFPS_LOW_STREAK="${ALERT_DFPS_LOW_STREAK:-2}"              # 2 consecutive cycles → real (1 sample = reset artifact)
+ALERT_RSS_MB_THRESHOLD="${ALERT_RSS_MB_THRESHOLD:-1100}"         # ≥ 1100MB = 2x baseline → suspect duplicate/leak
+
+# state carried between cycles
+PREV_WARN=0
+PREV_ERR=0
+PREV_WD=0
+PREV_FTC=0
+DFPS_LOW_STREAK=0
+
 echo "[monitor armed $(date +%H:%M:%S)] label=$LABEL container=$CONTAINER commit=$(cd $ROOT && git log -1 --format=%h) cut=$START_LOG_CUT interval=${INTERVAL_SEC}s out=$OUT"
+echo "[monitor armed] alert thresholds: warn_delta≥${ALERT_WARN_DELTA_PER_CYCLE}/cycle, dfps<${ALERT_DFPS_LOW_THRESHOLD} for ${ALERT_DFPS_LOW_STREAK} cycles, rss≥${ALERT_RSS_MB_THRESHOLD}MB, err>0, wd>0, ftc>0, cam_loss"
 
 # python builder: log_tail (stdin) + env vars → 1 줄 JSONL.
 # heredoc 으로 단일 정의 후 매 cycle 재사용.
@@ -252,11 +269,57 @@ while true; do
         echo "  ext: disk=${DISK_PCT:-?}% cpu=${DOCKER_CPU:-?}% mem=${DOCKER_MEM:-?}% sock=${LISTEN}L/${ESTAB}E npu=${NPU_TEMP:-?}°C"
     fi
 
-    # § ALERT — 5 cycle 1회로 spam 방지
-    if [ "$WD" -gt 0 ] && [ $((CYC % 5)) -eq 0 ]; then
-        echo "[★watchdog $(date +%H:%M:%S)] wd=${WD}"
+    # § ALERT — delta 기반 (이전 cycle 대비 증가분), edge-trigger 로 spam 방지.
+    #   각 alert line 은 한 줄 + [★ prefix + 카테고리 + timestamp 로 시작.
+    WARN_DELTA=$(( WRN - PREV_WARN ))
+    ERR_DELTA=$(( ERR - PREV_ERR ))
+    WD_DELTA=$(( WD - PREV_WD ))
+    FTC_DELTA=$(( FTC - PREV_FTC ))
+
+    # 1) WARN rate spike — storm signature (correlation_id mismatch / Queue Full burst)
+    if [ "$WARN_DELTA" -ge "$ALERT_WARN_DELTA_PER_CYCLE" ]; then
+        echo "[★storm $(date +%H:%M:%S)] warn +${WARN_DELTA}/cycle (total=${WRN}) — possible correlation_id storm / Queue Full burst"
     fi
-    if [ "$FTC" -gt 0 ] && [ $((CYC % 5)) -eq 0 ]; then
-        echo "[★storm $(date +%H:%M:%S)] ftc=${FTC}"
+
+    # 2) NEW ERROR — 0건이 baseline. 새 err 발생 시 한 번 알림
+    if [ "$ERR_DELTA" -gt 0 ]; then
+        echo "[★err $(date +%H:%M:%S)] err +${ERR_DELTA} (total=${ERR}) — DetectBase.log lvl=ERROR 발생"
     fi
+
+    # 3) DFPS sustained low — 단발 sample (reset cycle artifact) 무시, ≥${ALERT_DFPS_LOW_STREAK} cycle 연속이면 alert
+    if [ -n "$DFPS" ] && awk -v d="$DFPS" -v thr="$ALERT_DFPS_LOW_THRESHOLD" 'BEGIN{exit !(d>0 && d<thr)}'; then
+        DFPS_LOW_STREAK=$(( DFPS_LOW_STREAK + 1 ))
+        if [ "$DFPS_LOW_STREAK" -eq "$ALERT_DFPS_LOW_STREAK" ]; then
+            echo "[★dfps_low $(date +%H:%M:%S)] dfps=${DFPS} sustained ${DFPS_LOW_STREAK} cycles (<${ALERT_DFPS_LOW_THRESHOLD})"
+        fi
+    else
+        DFPS_LOW_STREAK=0
+    fi
+
+    # 4) RSS over budget — duplicate process / leak 시그니처
+    if [ "$RES_MB" -ge "$ALERT_RSS_MB_THRESHOLD" ]; then
+        echo "[★memory $(date +%H:%M:%S)] rss=${RES_MB}MB (≥${ALERT_RSS_MB_THRESHOLD}MB) — 2x baseline → duplicate process / leak 의심"
+    fi
+
+    # 5) WATCHDOG fire (delta)
+    if [ "$WD_DELTA" -gt 0 ]; then
+        echo "[★watchdog $(date +%H:%M:%S)] wd +${WD_DELTA} (total=${WD}) — cam frame-age timeout"
+    fi
+
+    # 6) Failed-To-Connect (delta)
+    if [ "$FTC_DELTA" -gt 0 ]; then
+        echo "[★ftc $(date +%H:%M:%S)] ftc +${FTC_DELTA} (total=${FTC}) — connection 실패"
+    fi
+
+    # 7) Cam loss — registered 보다 active 가 작음
+    if [ -n "${CAM_ACTIVE:-}" ] && [ -n "${CAM_REG:-}" ] && [ "${CAM_ACTIVE:-0}" != "0" ] && [ "${CAM_REG:-0}" != "0" ]; then
+        if awk -v a="${CAM_ACTIVE:-0}" -v r="${CAM_REG:-0}" 'BEGIN{exit !(a<r)}'; then
+            echo "[★cam_loss $(date +%H:%M:%S)] active=${CAM_ACTIVE}/${CAM_REG} — cam 일부 비활성"
+        fi
+    fi
+
+    PREV_WARN="$WRN"
+    PREV_ERR="$ERR"
+    PREV_WD="$WD"
+    PREV_FTC="$FTC"
 done
