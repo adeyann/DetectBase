@@ -1,23 +1,10 @@
 /**
  * @file GstRtspReceiver.cpp
- * @brief GstRtspReceiver — Option A (partial reset) — source/decode side 분리.
+ * @brief GstRtspReceiver — 단일 pipeline (avdec_h264 / I420 / PoC 검증 구조).
  *
- * Pipeline 구성:
- *   SOURCE-SIDE (ResetSourceOnly 마다 destroy/recreate):
- *     rtspsrc → rtph264depay → h264parse [ → tee → raw_queue → rtph264pay → raw_appsink ]
- *   BOUNDARY:
- *     parse.src (또는 raw_passthrough=true 시 tee.src_%u) → decode_queue.sink
- *   DECODE-SIDE (Stop 까지 영구 보존):
- *     decode_queue (leaky=downstream) → decoder (avdec_h264 → 추후 mppvideodec) → videoconvert
- *                                     → capsfilter(I420) → appsink
- *
- * 설계 목적: mppvideodec 의 internal hardware DMA buffer 가 매 reconnect 마다 재할당돼
- *   leak 으로 누적되던 이전 시도 (2026-05-15 rollback) 의 해결책. decode-side 가 영구
- *   보존되므로 reset 시 DMA buffer 재할당 없음.
- *
- * 이전 history:
- *   2026-05-15: 2-pipeline architecture + mppvideodec → leak 발생 → rollback 후 avdec_h264 단일 pipeline.
- *   2026-05-25: feature/mpp-integration branch — Option A 로 재시도.
+ * 2-pipeline architecture / mppvideodec 모두 제거 — 사용자 명령 (2026-05-15).
+ *   reason: 매 reconnect 시 leak 발생. mppvideodec 외 다른 변수 영향도 큼.
+ *   PoC 단위 14/14 PASS 시점 구조로 롤백 후 재측정.
  */
 
 #include "GstRtspReceiver.h"
@@ -130,238 +117,125 @@ namespace MGEN
 
     bool GstRtspReceiver::BuildPipeline()
     {
-        // Option A — partial reset 구조 :
-        //   pipeline_ (container) + BuildDecodeSide (Stop 까지 영구) + BuildSourceSide (ResetSourceOnly 마다 swap)
-        //   bus watch 는 pipeline_ 에 묶임 (영구).
-        pipeline_ = gst_pipeline_new( nullptr );
+        gchar* desc = nullptr;
+        if( cfg_.enable_raw_passthrough ) {
+            desc = g_strdup_printf(
+                "rtspsrc name=src location=%s latency=%d "
+                "    timeout=%d tcp-timeout=%d do-retransmission=%s "
+                "    keepalive=true udp-buffer-size=2097152 "
+                "    user-id=%s user-pw=%s "
+                "  ! rtph264depay name=depay ! h264parse "
+                "  ! tee name=tee_h264 "
+                "tee_h264. ! queue max-size-buffers=4 leaky=downstream "
+                "  ! avdec_h264 ! videoconvert ! video/x-raw,format=I420 "
+                "  ! appsink name=sink emit-signals=true sync=false max-buffers=%d drop=true "
+                "tee_h264. ! queue max-size-buffers=8 leaky=downstream "
+                "  ! rtph264pay pt=96 config-interval=1 "
+                "  ! appsink name=raw_sink emit-signals=true sync=false max-buffers=20 drop=true",
+                cfg_.url.c_str(),
+                cfg_.latency_ms,
+                cfg_.timeout_us,
+                cfg_.tcp_timeout_us,
+                cfg_.do_retransmission ? "true" : "false",
+                cfg_.user_id.c_str(),
+                cfg_.user_pw.c_str(),
+                cfg_.appsink_max_buffers );
+        } else {
+            desc = g_strdup_printf(
+                "rtspsrc name=src location=%s latency=%d "
+                "    timeout=%d tcp-timeout=%d do-retransmission=%s "
+                "    keepalive=true udp-buffer-size=2097152 "
+                "    user-id=%s user-pw=%s "
+                "  ! rtph264depay name=depay ! h264parse "
+                // 검증 (2026-05-21): decouple queue 추가. raw 변형엔 있으나 normal 에 누락됐던 것.
+                //   leaky=downstream → decode 지연 시 upstream(udpsrc) backpressure 차단 (frame drop 으로 흡수).
+                //   가설: 이 queue 부재가 cam stuck (udpsrc socket read 중단) 의 원인.
+                "  ! queue name=decodeq max-size-buffers=4 leaky=downstream "
+                "  ! avdec_h264 ! videoconvert ! video/x-raw,format=I420 "
+                "  ! appsink name=sink emit-signals=true sync=false max-buffers=%d drop=true",
+                cfg_.url.c_str(),
+                cfg_.latency_ms,
+                cfg_.timeout_us,
+                cfg_.tcp_timeout_us,
+                cfg_.do_retransmission ? "true" : "false",
+                cfg_.user_id.c_str(),
+                cfg_.user_pw.c_str(),
+                cfg_.appsink_max_buffers );
+        }
+
+        // 측정 (2026-05-21): timeout 값이 실제 pipeline 에 적용되는지 검증용 desc log
+        MLOG_INFO( "GstRtspReceiver[%d] pipeline desc: %s", cfg_.cam_id, desc );
+
+        GError* err = nullptr;
+        pipeline_ = gst_parse_launch( desc, &err );
+        g_free( desc );
+
         if( !pipeline_ ) {
-            MLOG_ERROR( "GstRtspReceiver[%d] gst_pipeline_new 실패", cfg_.cam_id );
+            MLOG_ERROR( "gst_parse_launch 실패: %s", err ? err->message : "(unknown)" );
+            if( err ) g_error_free( err );
             return false;
+        }
+
+        appsink_ = GST_APP_SINK( gst_bin_get_by_name( GST_BIN( pipeline_ ), "sink" ) );
+        if( !appsink_ ) {
+            MLOG_ERROR( "appsink(name='sink') not found in pipeline" );
+            gst_object_unref( pipeline_ );
+            pipeline_ = nullptr;
+            return false;
+        }
+
+        GstAppSinkCallbacks callbacks {};
+        callbacks.new_sample = &GstRtspReceiver::OnNewSample;
+        gst_app_sink_set_callbacks( appsink_, &callbacks, this, nullptr );
+
+        if( cfg_.enable_raw_passthrough ) {
+            raw_appsink_ = GST_APP_SINK( gst_bin_get_by_name( GST_BIN( pipeline_ ), "raw_sink" ) );
+            if( !raw_appsink_ ) {
+                MLOG_ERROR( "raw_appsink(name='raw_sink') not found in pipeline" );
+                gst_object_unref( appsink_ );
+                appsink_ = nullptr;
+                gst_object_unref( pipeline_ );
+                pipeline_ = nullptr;
+                return false;
+            }
+            GstAppSinkCallbacks raw_cbs {};
+            raw_cbs.new_sample = &GstRtspReceiver::OnNewRawSample;
+            gst_app_sink_set_callbacks( raw_appsink_, &raw_cbs, this, nullptr );
         }
 
         GstBus* bus = gst_pipeline_get_bus( GST_PIPELINE( pipeline_ ) );
         bus_watch_id_ = gst_bus_add_watch( bus, &GstRtspReceiver::OnBusMessage, this );
         gst_object_unref( bus );
 
-        if( !BuildDecodeSide() ) {
-            MLOG_ERROR( "GstRtspReceiver[%d] BuildDecodeSide 실패", cfg_.cam_id );
-            TeardownPipeline();
-            return false;
+        // 측정 (2026-05-21): depay src pad 에 buffer probe 추가 — RTP/pre-decode flow per cam.
+        //   probe 는 pipeline destroy 시 자동 제거됨. element ref 는 즉시 unref.
+        GstElement* depay = gst_bin_get_by_name( GST_BIN( pipeline_ ), "depay" );
+        if( depay ) {
+            GstPad* src_pad = gst_element_get_static_pad( depay, "src" );
+            if( src_pad ) {
+                gst_pad_add_probe( src_pad, GST_PAD_PROBE_TYPE_BUFFER,
+                    &GstRtspReceiver::OnDepayBufferProbe, this, nullptr );
+                gst_object_unref( src_pad );
+            }
+            // 검증 (2026-05-22): depay SINK probe(rtp_in, ~1800/s/cam) 제거 — per-packet
+            //   prometheus contention 이 loss burst 트리거인지 테스트. burst/stuck 사라지면 계측이 원인.
+            //   (depay src probe 는 per-NAL ~90/s 로 유지, stage 가시성용)
+            gst_object_unref( depay );
         }
 
-        if( !BuildSourceSide() ) {
-            MLOG_ERROR( "GstRtspReceiver[%d] BuildSourceSide 실패", cfg_.cam_id );
-            TeardownPipeline();
-            return false;
+        // 검증 (2026-05-21): rtspsrc 의 rtpbin manager → jitterbuffer 캡처 (stats 추적)
+        jitterbuffer_ = nullptr;
+        GstElement* src = gst_bin_get_by_name( GST_BIN( pipeline_ ), "src" );
+        if( src ) {
+            g_signal_connect( src, "new-manager", G_CALLBACK( &GstRtspReceiver::OnNewManager ), this );
+            gst_object_unref( src );
         }
 
-        // 검증 (2026-05-21): jitterbuffer stats timer (매 EOS rebuild 마다 재등록).
-        //   ResetSourceOnly 가 TeardownSourceSide 안에서 timer 제거 후 BuildSourceSide 다음 단계에서 재추가.
+        // 검증 (2026-05-21): jitterbuffer stats timer 를 BuildPipeline 에서 추가 (매 EOS rebuild 마다 재등록).
+        //   이전 버그: MainLoopThreadFunc 에서 1회만 추가 → 첫 reset 의 Teardown 이 제거 후 재등록 안 됨 → gauge frozen.
         jitter_timer_id_ = g_timeout_add( 2000, &GstRtspReceiver::OnJitterStatsTimer, this );
 
-        MLOG_INFO( "GstRtspReceiver[%d] pipeline 구성 완료 (partial-reset 지원, raw_passthrough=%s)",
-            cfg_.cam_id, cfg_.enable_raw_passthrough ? "ON" : "OFF" );
         return true;
-    }
-
-    bool GstRtspReceiver::BuildDecodeSide()
-    {
-        // DECODE-SIDE (영구 보존) :
-        //   decode_queue (boundary entry) → decoder (avdec_h264, mppvideodec 으로 swap 예정)
-        //                                 → videoconvert → capsfilter(I420) → appsink
-        decode_queue_ = gst_element_factory_make( "queue",        "decodeq" );
-        decoder_      = gst_element_factory_make( "avdec_h264",   "dec"     );
-        videoconvert_ = gst_element_factory_make( "videoconvert", "conv"    );
-        capsfilter_   = gst_element_factory_make( "capsfilter",   "caps"    );
-        GstElement* sink_elem = gst_element_factory_make( "appsink", "sink" );
-
-        if( !decode_queue_ || !decoder_ || !videoconvert_ || !capsfilter_ || !sink_elem ) {
-            MLOG_ERROR( "GstRtspReceiver[%d] DecodeSide element_factory_make 실패", cfg_.cam_id );
-            return false;
-        }
-
-        // decode_queue (boundary entry): leaky=downstream, decoder backpressure 흡수.
-        //   기존 (gst_parse_launch 단일 desc) 의 "queue name=decodeq max-size-buffers=4 leaky=downstream" 동등.
-        g_object_set( decode_queue_,
-            "max-size-buffers", 4u,
-            "leaky",            2,  // 2 = downstream
-            nullptr );
-
-        // capsfilter: I420 강제 (downstream NV12 우려 차단)
-        GstCaps* i420_caps = gst_caps_new_simple( "video/x-raw",
-            "format", G_TYPE_STRING, "I420",
-            nullptr );
-        g_object_set( capsfilter_, "caps", i420_caps, nullptr );
-        gst_caps_unref( i420_caps );
-
-        // appsink callback 설정
-        g_object_set( sink_elem,
-            "emit-signals", TRUE,
-            "sync",         FALSE,
-            "max-buffers",  static_cast<guint>( cfg_.appsink_max_buffers ),
-            "drop",         TRUE,
-            nullptr );
-        appsink_ = GST_APP_SINK( sink_elem );  // non-owning cast, bin 이 소유
-        GstAppSinkCallbacks cbs {};
-        cbs.new_sample = &GstRtspReceiver::OnNewSample;
-        gst_app_sink_set_callbacks( appsink_, &cbs, this, nullptr );
-
-        gst_bin_add_many( GST_BIN( pipeline_ ),
-            decode_queue_, decoder_, videoconvert_, capsfilter_, sink_elem,
-            nullptr );
-
-        if( !gst_element_link_many( decode_queue_, decoder_, videoconvert_, capsfilter_, sink_elem, nullptr ) ) {
-            MLOG_ERROR( "GstRtspReceiver[%d] DecodeSide link_many 실패", cfg_.cam_id );
-            return false;
-        }
-        return true;
-    }
-
-    bool GstRtspReceiver::BuildSourceSide()
-    {
-        // SOURCE-SIDE (매 reset 마다 swap) :
-        //   rtspsrc(dyn pad) → rtph264depay → h264parse → [tee → raw 분기 if raw_passthrough]
-        //   boundary: parse.src (또는 tee.src_%u) → decode_queue.sink
-        rtspsrc_ = gst_element_factory_make( "rtspsrc",       "src"   );
-        depay_   = gst_element_factory_make( "rtph264depay",  "depay" );
-        parse_   = gst_element_factory_make( "h264parse",     "parse" );
-
-        if( !rtspsrc_ || !depay_ || !parse_ ) {
-            MLOG_ERROR( "GstRtspReceiver[%d] SourceSide element_factory_make 실패", cfg_.cam_id );
-            return false;
-        }
-
-        // rtspsrc 설정 — 기존 desc 의 property 동등 적용.
-        g_object_set( rtspsrc_,
-            "location",          cfg_.url.c_str(),
-            "latency",           cfg_.latency_ms,
-            "timeout",           static_cast<guint64>( cfg_.timeout_us ),
-            "tcp-timeout",       static_cast<guint64>( cfg_.tcp_timeout_us ),
-            "do-retransmission", cfg_.do_retransmission ? TRUE : FALSE,
-            "udp-buffer-size",   2097152,
-            nullptr );
-        if( !cfg_.user_id.empty() ) {
-            g_object_set( rtspsrc_,
-                "user-id", cfg_.user_id.c_str(),
-                "user-pw", cfg_.user_pw.c_str(),
-                nullptr );
-        }
-
-        gst_bin_add_many( GST_BIN( pipeline_ ), rtspsrc_, depay_, parse_, nullptr );
-
-        // depay → parse 정적 link
-        if( !gst_element_link( depay_, parse_ ) ) {
-            MLOG_ERROR( "GstRtspReceiver[%d] depay → parse link 실패", cfg_.cam_id );
-            return false;
-        }
-
-        // rtspsrc dynamic pad → depay.sink (pad-added 신호)
-        g_signal_connect( rtspsrc_, "pad-added",
-            G_CALLBACK( &GstRtspReceiver::OnRtspsrcPadAdded ), this );
-        // rtpbin manager (jitterbuffer 캡처)
-        g_signal_connect( rtspsrc_, "new-manager",
-            G_CALLBACK( &GstRtspReceiver::OnNewManager ), this );
-
-        // depay src buffer probe (METRIC_DEPAY_BUFFER_TOTAL)
-        GstPad* depay_src = gst_element_get_static_pad( depay_, "src" );
-        if( depay_src ) {
-            gst_pad_add_probe( depay_src, GST_PAD_PROBE_TYPE_BUFFER,
-                &GstRtspReceiver::OnDepayBufferProbe, this, nullptr );
-            gst_object_unref( depay_src );
-        }
-
-        // boundary 결정 — 기본 parse, raw_passthrough 면 tee.src_%u
-        GstElement* boundary_src_elem = parse_;
-
-        if( cfg_.enable_raw_passthrough ) {
-            // tee 분기: parse → tee → [boundary_src → decode_queue], [raw_queue → raw_pay → raw_sink]
-            raw_tee_   = gst_element_factory_make( "tee",          "tee_h264"  );
-            raw_queue_ = gst_element_factory_make( "queue",        "raw_queue" );
-            raw_pay_   = gst_element_factory_make( "rtph264pay",   "raw_pay"   );
-            GstElement* raw_sink_elem = gst_element_factory_make( "appsink", "raw_sink" );
-
-            if( !raw_tee_ || !raw_queue_ || !raw_pay_ || !raw_sink_elem ) {
-                MLOG_ERROR( "GstRtspReceiver[%d] Raw branch element_factory_make 실패", cfg_.cam_id );
-                return false;
-            }
-
-            g_object_set( raw_queue_,
-                "max-size-buffers", 8u,
-                "leaky",            2,
-                nullptr );
-            g_object_set( raw_pay_,
-                "pt",              96,
-                "config-interval", 1,
-                nullptr );
-            g_object_set( raw_sink_elem,
-                "emit-signals", TRUE,
-                "sync",         FALSE,
-                "max-buffers",  20u,
-                "drop",         TRUE,
-                nullptr );
-            raw_appsink_ = GST_APP_SINK( raw_sink_elem );  // non-owning cast
-            GstAppSinkCallbacks raw_cbs {};
-            raw_cbs.new_sample = &GstRtspReceiver::OnNewRawSample;
-            gst_app_sink_set_callbacks( raw_appsink_, &raw_cbs, this, nullptr );
-
-            gst_bin_add_many( GST_BIN( pipeline_ ),
-                raw_tee_, raw_queue_, raw_pay_, raw_sink_elem, nullptr );
-
-            if( !gst_element_link( parse_, raw_tee_ ) ) {
-                MLOG_ERROR( "GstRtspReceiver[%d] parse → tee link 실패", cfg_.cam_id );
-                return false;
-            }
-            if( !gst_element_link_many( raw_tee_, raw_queue_, raw_pay_, raw_sink_elem, nullptr ) ) {
-                MLOG_ERROR( "GstRtspReceiver[%d] tee → raw branch link 실패", cfg_.cam_id );
-                return false;
-            }
-            boundary_src_elem = raw_tee_;
-        }
-
-        // BOUNDARY: boundary_src_elem → decode_queue (= decode-side preserve entry)
-        if( !gst_element_link( boundary_src_elem, decode_queue_ ) ) {
-            MLOG_ERROR( "GstRtspReceiver[%d] boundary link 실패 (%s → decode_queue)",
-                cfg_.cam_id, boundary_src_elem == raw_tee_ ? "tee" : "parse" );
-            return false;
-        }
-
-        return true;
-    }
-
-    void GstRtspReceiver::OnRtspsrcPadAdded( GstElement* /*src*/, GstPad* new_pad, void* user_data )
-    {
-        auto* self = static_cast<GstRtspReceiver*>( user_data );
-        if( !self->depay_ ) return;
-
-        GstPad* depay_sink = gst_element_get_static_pad( self->depay_, "sink" );
-        if( !depay_sink ) return;
-
-        if( gst_pad_is_linked( depay_sink ) ) {
-            gst_object_unref( depay_sink );
-            return;
-        }
-
-        // application/x-rtp media=video 만 link (audio 등 skip)
-        GstCaps* caps = gst_pad_get_current_caps( new_pad );
-        bool linked = false;
-        if( caps ) {
-            const GstStructure* s = gst_caps_get_structure( caps, 0 );
-            const gchar* media = gst_structure_get_string( s, "media" );
-            if( !media || std::strcmp( media, "video" ) == 0 ) {
-                GstPadLinkReturn r = gst_pad_link( new_pad, depay_sink );
-                if( r == GST_PAD_LINK_OK ) {
-                    linked = true;
-                } else {
-                    MLOG_WARN( "GstRtspReceiver[%d] pad_link 실패 ret=%d", self->cfg_.cam_id, r );
-                }
-            }
-            gst_caps_unref( caps );
-        }
-        if( !linked ) {
-            // caps 가 아직 없을 수도 (legacy rtspsrc) → caps 무관 link 시도
-            gst_pad_link( new_pad, depay_sink );
-        }
-        gst_object_unref( depay_sink );
     }
 
     void GstRtspReceiver::OnNewManager( GstElement* /*rtspsrc*/, GstElement* manager, void* user_data )
@@ -422,101 +296,29 @@ namespace MGEN
         return GST_PAD_PROBE_OK;
     }
 
-    void GstRtspReceiver::TeardownSourceSide()
-    {
-        // jitter timer 제거 (jitterbuffer 가 곧 소멸)
-        if( jitter_timer_id_ ) {
-            g_source_remove( jitter_timer_id_ );
-            jitter_timer_id_ = 0;
-        }
-        jitterbuffer_ = nullptr;  // weak ref — rtspsrc 가 곧 destroy
-
-        // boundary unlink (parse 또는 tee → decode_queue)
-        if( decode_queue_ ) {
-            GstElement* bs = cfg_.enable_raw_passthrough ? raw_tee_ : parse_;
-            if( bs ) {
-                gst_element_unlink( bs, decode_queue_ );
-            }
-        }
-
-        // raw_appsink 는 non-owning cast — element 자체를 bin_remove 로 destroy.
-        raw_appsink_ = nullptr;
-        GstElement* raw_sink_elem = nullptr;
-        if( cfg_.enable_raw_passthrough && pipeline_ ) {
-            raw_sink_elem = gst_bin_get_by_name( GST_BIN( pipeline_ ), "raw_sink" );
-        }
-
-        auto null_and_remove = [this]( GstElement** elem ) {
-            if( *elem ) {
-                gst_element_set_state( *elem, GST_STATE_NULL );
-                if( pipeline_ ) {
-                    gst_bin_remove( GST_BIN( pipeline_ ), *elem );  // bin_remove 가 unref
-                }
-                *elem = nullptr;
-            }
-        };
-
-        null_and_remove( &rtspsrc_   );
-        null_and_remove( &depay_     );
-        null_and_remove( &parse_     );
-        null_and_remove( &raw_tee_   );
-        null_and_remove( &raw_queue_ );
-        null_and_remove( &raw_pay_   );
-
-        if( raw_sink_elem ) {
-            gst_element_set_state( raw_sink_elem, GST_STATE_NULL );
-            gst_bin_remove( GST_BIN( pipeline_ ), raw_sink_elem );  // bin 의 ref release
-            gst_object_unref( raw_sink_elem );                       // gst_bin_get_by_name 의 ref release
-        }
-    }
-
-    void GstRtspReceiver::TeardownDecodeSide()
-    {
-        // appsink 는 non-owning cast — element 를 bin_remove 로 destroy.
-        appsink_ = nullptr;
-        GstElement* sink_elem = nullptr;
-        if( pipeline_ ) {
-            sink_elem = gst_bin_get_by_name( GST_BIN( pipeline_ ), "sink" );
-        }
-
-        auto null_and_remove = [this]( GstElement** elem ) {
-            if( *elem ) {
-                gst_element_set_state( *elem, GST_STATE_NULL );
-                if( pipeline_ ) {
-                    gst_bin_remove( GST_BIN( pipeline_ ), *elem );
-                }
-                *elem = nullptr;
-            }
-        };
-
-        null_and_remove( &decode_queue_ );
-        null_and_remove( &decoder_      );
-        null_and_remove( &videoconvert_ );
-        null_and_remove( &capsfilter_   );
-
-        if( sink_elem ) {
-            gst_element_set_state( sink_elem, GST_STATE_NULL );
-            gst_bin_remove( GST_BIN( pipeline_ ), sink_elem );
-            gst_object_unref( sink_elem );
-        }
-    }
-
     void GstRtspReceiver::TeardownPipeline()
     {
         if( pipeline_ ) {
-            // bus watch 제거 (pipeline 영구 자원)
+            if( jitter_timer_id_ ) {
+                g_source_remove( jitter_timer_id_ );
+                jitter_timer_id_ = 0;
+            }
+            jitterbuffer_ = nullptr;  // weak ref — pipeline 이 곧 destroy
             if( bus_watch_id_ ) {
                 g_source_remove( bus_watch_id_ );
                 bus_watch_id_ = 0;
             }
-            // Source-side teardown (jitter timer + 소스 elements 모두)
-            TeardownSourceSide();
-            // Decode-side teardown (보존됐던 elements)
-            TeardownDecodeSide();
-            // pipeline 자체 NULL → unref
             gst_element_set_state( pipeline_, GST_STATE_NULL );
             GstState st;
             gst_element_get_state( pipeline_, &st, nullptr, 5 * GST_SECOND );
+            if( appsink_ ) {
+                gst_object_unref( appsink_ );
+                appsink_ = nullptr;
+            }
+            if( raw_appsink_ ) {
+                gst_object_unref( raw_appsink_ );
+                raw_appsink_ = nullptr;
+            }
             gst_object_unref( pipeline_ );
             pipeline_ = nullptr;
         }
@@ -571,12 +373,6 @@ namespace MGEN
 
     bool GstRtspReceiver::ResetSourceOnly() noexcept
     {
-        // Option A — PARTIAL RESET :
-        //   1. TeardownSourceSide  — source-side elements 만 NULL + bin_remove (decode-side 보존)
-        //   2. BuildSourceSide     — source 재생성 + decode_queue 와 boundary link
-        //   3. sync_state_with_parent — pipeline 이 PLAYING 이라면 새 elements 도 PLAYING 으로
-        //   4. jitter_timer 재등록 — 새 jitterbuffer 캡처 대비
-        //   mppvideodec 가 decode-side 에 들어가면 DMA buffer 영구 보존 → leak 회피.
         const auto t_start = std::chrono::steady_clock::now();
         auto& reg = MetricsRegistry::Instance();
         const std::string cam_id_str = std::to_string( cfg_.cam_id );
@@ -588,45 +384,27 @@ namespace MGEN
         }
 
         reset_source_count_.fetch_add( 1, std::memory_order_relaxed );
-        MLOG_INFO( "ResetSourceOnly[%d] 진입 — PARTIAL reset (decode-side preserved), reset_cnt=%lu",
+        MLOG_INFO( "ResetSourceOnly[%d] 진입 — pipeline destroy/rebuild (single), reset_cnt=%lu",
             cfg_.cam_id, (unsigned long) reset_source_count_.load() );
         reg.IncrementCounter( METRIC_RESET_ATTEMPT, { { "cam_id", cam_id_str }, { "result", "enter" } }, 1.0 );
 
-        TeardownSourceSide();
+        TeardownPipeline();
 
-        if( !BuildSourceSide() ) {
-            MLOG_ERROR( "ResetSourceOnly[%d] — BuildSourceSide 실패", cfg_.cam_id );
+        if( !BuildPipeline() ) {
+            MLOG_ERROR( "ResetSourceOnly[%d] — BuildPipeline 실패", cfg_.cam_id );
             reg.IncrementCounter( METRIC_RESET_ATTEMPT, { { "cam_id", cam_id_str }, { "result", "build_fail" } }, 1.0 );
             return false;
         }
-
-        // 새 source elements 의 state 를 parent(=pipeline=PLAYING) 와 동기화.
-        //   sync_state_with_parent 가 PLAYING 으로 추진. 실패하면 stream 안 흐름.
-        bool sync_ok = true;
-        if( rtspsrc_   && !gst_element_sync_state_with_parent( rtspsrc_   ) ) sync_ok = false;
-        if( depay_     && !gst_element_sync_state_with_parent( depay_     ) ) sync_ok = false;
-        if( parse_     && !gst_element_sync_state_with_parent( parse_     ) ) sync_ok = false;
-        if( raw_tee_   && !gst_element_sync_state_with_parent( raw_tee_   ) ) sync_ok = false;
-        if( raw_queue_ && !gst_element_sync_state_with_parent( raw_queue_ ) ) sync_ok = false;
-        if( raw_pay_   && !gst_element_sync_state_with_parent( raw_pay_   ) ) sync_ok = false;
-        if( cfg_.enable_raw_passthrough ) {
-            GstElement* rsink = gst_bin_get_by_name( GST_BIN( pipeline_ ), "raw_sink" );
-            if( rsink ) {
-                if( !gst_element_sync_state_with_parent( rsink ) ) sync_ok = false;
-                gst_object_unref( rsink );
-            }
+        GstStateChangeReturn r = gst_element_set_state( pipeline_, GST_STATE_PLAYING );
+        if( r == GST_STATE_CHANGE_FAILURE ) {
+            MLOG_ERROR( "ResetSourceOnly[%d] — PLAYING 실패", cfg_.cam_id );
+            reg.IncrementCounter( METRIC_RESET_ATTEMPT, { { "cam_id", cam_id_str }, { "result", "playing_fail" } }, 1.0 );
+            TeardownPipeline();
+            return false;
         }
-        if( !sync_ok ) {
-            MLOG_WARN( "ResetSourceOnly[%d] — 일부 element state sync 실패", cfg_.cam_id );
-            // 치명적 아님 — 일부 element 가 NULL/READY 머물 수 있으나 GStreamer 가 자체 회복 시도.
-        }
-
-        // jitter stats timer 재등록 (TeardownSourceSide 에서 제거됨)
-        jitter_timer_id_ = g_timeout_add( 2000, &GstRtspReceiver::OnJitterStatsTimer, this );
-
         const auto t_end = std::chrono::steady_clock::now();
         const int64_t dur_us = std::chrono::duration_cast<std::chrono::microseconds>( t_end - t_start ).count();
-        MLOG_INFO( "ResetSourceOnly[%d] OK — PARTIAL reset duration=%ldus", cfg_.cam_id, (long) dur_us );
+        MLOG_INFO( "ResetSourceOnly[%d] OK — duration=%ldus", cfg_.cam_id, (long) dur_us );
         reg.IncrementCounter( METRIC_RESET_ATTEMPT, { { "cam_id", cam_id_str }, { "result", "ok" } }, 1.0 );
         return true;
     }

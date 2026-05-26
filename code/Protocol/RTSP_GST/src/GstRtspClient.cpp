@@ -254,18 +254,17 @@ namespace MGEN
             MLOG_INFO( "GstRtspClient[%d] reconnect worker wake — eos_pending=%d", cfg_.cam_id, is_eos_at_wake ? 1 : 0 );
             reconnect_pending_.store( false );
 
-            // EOS 인 경우 — 카메라 mp4 5분 cycle 등 정상 stream 종료.
-            //   → in-place reset 시도 (rtspsrc 만 NULL→PLAYING, mppvideodec 보존)
-            //   → mpp internal hardware DMA buffer leak (~12MB/reconn) 회피
+            // EOS 인 경우 — 카메라 mp4 5분 cycle 등 정상 stream 종료. → in-place reset 시도.
             // error/timeout 인 경우 — full restart + exponential backoff.
             const bool is_eos = eos_reconnect_pending_.exchange( false );
 
             if( is_eos ) {
-                // FIX(reconnect-storm): 동기화 loop 경계 desync — 4 cam 이 같은 순간 in-place
-                //   reset(rtspsrc NULL→PLAYING = 서버 재연결) 하면 herd 가 되므로 cam 별 offset 분산.
+                // FIX(reconnect-storm): 동기화 loop 경계 desync — 4 cam 이 같은 순간 reset 시도
+                //   하면 cluster 가 되어 RTSP handshake ramp-up 가 동기화 → DFPS dip.
+                //   cam 별 offset 으로 분산.
                 sleep_responsive( ( cfg_.cam_id % 4 ) * 500 );
                 if( shutdown_.load() ) break;
-                // In-place reset 시도 (receiver_ 보존)
+                // In-place reset 시도 (receiver_ 보존, ResetSourceOnly = pipeline 전체 destroy/rebuild)
                 bool inplace_ok = false;
                 {
                     std::lock_guard<std::mutex> lk( receiver_mtx_ );
@@ -276,11 +275,11 @@ namespace MGEN
                 if( inplace_ok ) {
                     reconnect_count_.fetch_add( 1 );
                     MetricsRegistry::Instance().IncrementCounter( METRIC_RECONNECT_TOTAL, NO_LABELS, 1.0 );
-                    MLOG_INFO( "GstRtspClient[%d] EOS in-place reset OK — mppvideodec 보존", cfg_.cam_id );
+                    MLOG_INFO( "GstRtspClient[%d] EOS reset OK", cfg_.cam_id );
                     backoff_sec_ = cfg_.reconnect_initial_sec;
                     continue;  // 다음 cycle 으로 (다시 wait)
                 }
-                MLOG_WARN( "GstRtspClient[%d] EOS in-place reset 실패 — full restart 로 fallback", cfg_.cam_id );
+                MLOG_WARN( "GstRtspClient[%d] EOS reset 실패 — full restart 로 fallback", cfg_.cam_id );
                 // fallback: 아래 full restart path 로 (wait_sec=0)
             }
 

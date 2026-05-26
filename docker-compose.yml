@@ -35,16 +35,12 @@ services:
     # RTSP 프록시 / SocketIO 등 다양한 포트 사용에 편리합니다.
     network_mode: host
 
-    # 'devices' : 호스트의 NPU + MPP 디바이스를 컨테이너에 노출합니다.
+    # 'devices' : 호스트의 NPU 디바이스를 컨테이너에 노출합니다.
     # Odroid M2 의 rknpu 드라이버는 /dev/dri/renderD129 를 생성합니다.
     # CLAUDE.md "NPU: insmod rknpu.ko → /dev/dri/renderD129 필요" 참조.
     # P61: NPU device 경로 외부화. 다른 보드/환경에서 .env 의 NPU_DEVICE_PATH 만 변경하면 적용됨.
-    # MPP (Media Process Platform — hardware codec): /dev/mpp_service, /dev/rga (2D engine).
-    #   privileged=true 로도 접근 가능하지만 의도/이식성 위해 명시.
     devices:
       - ${NPU_DEVICE_PATH:-/dev/dri/renderD129}:${NPU_DEVICE_PATH:-/dev/dri/renderD129}
-      - /dev/mpp_service:/dev/mpp_service
-      - /dev/rga:/dev/rga
 
     # 'volumes' 는 호스트의 디렉토리/파일을 컨테이너 내부 경로로 마운트합니다.
     volumes:
