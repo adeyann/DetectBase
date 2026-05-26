@@ -1,6 +1,6 @@
 # DetectBase
 
-**Version**: `0.1.16` (cmake `code/CMakeLists.txt`. master tag `v0.1.0`, develop 누적 cam stuck fix + 권한 모델 + audit 1h. **argv guard + flock single-instance lock (0.1.16)** — Main.cpp 의 `int main()` 가 argv 무수신 → `--version` 같은 일반 호출이 풀 서비스 spawn 하던 사고 (PID 4924, DFPS 50% 하락) 차단. argv 명시 case 외 FATAL exit 2 + `/DetectBase/logs/.detectbase.lock` 의 `flock(2)` advisory lock 으로 두 번째 instance 부팅 차단. monitor.sh 에 threshold alert 7 종 (storm/err/dfps_low/memory/wd/ftc/cam_loss) + warmup grace 4 cycle 추가. **REST response JSON parse silent catch 가시화 (0.1.15)** — `rest_impl.cpp` 의 catch 에 `MLOG_WARN` 추가. **MPP + Option A 완전 폐기 (0.1.14)** — mppvideodec 미사용 상태에서 Option A 의 14ms partial reset 이 multi-cam cluster sync 강화 → DFPS dip 증폭 확인. 5/24 Full reset baseline (mean DFPS 115.6, ≥110: 98.8%) 복귀. snapshot: tag `mpp-architecture-snapshot-v0.1.13` + `.backup/mpp_purged_20260526/`. **per-cam stage FPS counter (0.1.12) revert (0.1.13)** — global mutex hot path 으로 wd 빈도 증가 회귀, A-B-A control test 검증.)
+**Version**: `0.1.17` (cmake `code/CMakeLists.txt`. master tag `v0.1.0`, develop 누적 cam stuck fix + 권한 모델 + audit 1h. **git workflow 정책 갱신 + pre-push docs check 절대 규칙 + memory 영어화 (0.1.17)** — code/cmake bump 분리 (push 후 별도 commit), 머지 시 사용자 버전 확인, post-merge placeholder bump, 모든 commit push 시 docs 전수 점검. AI-only memory 디렉토리 영어 단일 언어화. **argv guard + flock single-instance lock (0.1.16)** — Main.cpp 의 `int main()` 가 argv 무수신 → `--version` 같은 일반 호출이 풀 서비스 spawn 하던 사고 (PID 4924, DFPS 50% 하락) 차단. argv 명시 case 외 FATAL exit 2 + `/DetectBase/logs/.detectbase.lock` 의 `flock(2)` advisory lock 으로 두 번째 instance 부팅 차단. monitor.sh 에 threshold alert 7 종 (storm/err/dfps_low/memory/wd/ftc/cam_loss) + warmup grace 4 cycle 추가. **REST response JSON parse silent catch 가시화 (0.1.15)** — `rest_impl.cpp` 의 catch 에 `MLOG_WARN` 추가. **MPP + Option A 완전 폐기 (0.1.14)** — mppvideodec 미사용 상태에서 Option A 의 14ms partial reset 이 multi-cam cluster sync 강화 → DFPS dip 증폭 확인. 5/24 Full reset baseline (mean DFPS 115.6, ≥110: 98.8%) 복귀. snapshot: tag `mpp-architecture-snapshot-v0.1.13` + `.backup/mpp_purged_20260526/`. **per-cam stage FPS counter (0.1.12) revert (0.1.13)** — global mutex hot path 으로 wd 빈도 증가 회귀, A-B-A control test 검증.)
 
 Odroid M2 NPU 기반 RTSP 비디오 분석 베이스 프로젝트. 객체 탐지 + 트래킹 + 침입 감지 + 이벤트 송신을 통합한 production-ready 시스템.
 
@@ -979,7 +979,7 @@ grep "PROGRAM QUIT SUCCESS" logs/DetectBase.log
 
 | 문서 | 내용 |
 |---|---|
-| **[logs/NEXT_SESSION.md](logs/NEXT_SESSION.md)** | v0.1.16 진입점 — argv guard + flock single-instance lock + monitor threshold alerts (5/26 PID 4924 사고 재발 방지) |
+| **[logs/NEXT_SESSION.md](logs/NEXT_SESSION.md)** | v0.1.17 진입점 — git workflow 정책 정착 (post-push bump + pre-push docs check 절대 규칙) + v0.1.16 작업 누적 (argv guard + flock + monitor threshold alerts) |
 | **[.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md)** | v2.0.0 multi-engine (Search 등) 도입 가이드 — MAIA 기반, event-driven 패턴, Phase 1-5 ~3-4주 작업 |
 | [.DOCS/STUCK_ANALYSIS_cam659_20260520.md](.DOCS/STUCK_ANALYSIS_cam659_20260520.md) | cam 659 stuck 사건 분석 (2026-05-20) + 진단 도구 (PR #16) 활용 절차 — legacy |
 | [.DOCS/MISMATCH_SURGE_ANALYSIS_20260520.md](.DOCS/MISMATCH_SURGE_ANALYSIS_20260520.md) | `correlation_mismatch` 폭증 분석 (2026-05-20) — delta=10 stable backlog — legacy |

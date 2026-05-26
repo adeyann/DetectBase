@@ -1,7 +1,7 @@
-# NEXT_SESSION — v0.1.16 (argv guard + flock + monitor threshold alerts) 진입점
+# NEXT_SESSION — v0.1.17 (git workflow 정책 + pre-push docs check + memory 영어화) 진입점
 
 **최종 갱신**: 2026-05-26 18:00 KST
-**현 develop HEAD**: `31d9aa9` (cmake VERSION `0.1.17` placeholder — 마지막 released = v0.1.16)
+**현 develop HEAD**: `0dcf725` (cmake VERSION `0.1.17` — README/code/README Version 라인과 sync. 마지막 released = v0.1.16)
 **현 상태**: **PID 4924 사고 분석 + 재발 방지 패치 적용 완료**. baseline 안정 운영 중 (DFPS 115+, RSS 600MB, monitor `bthk32wqw` 가동).
 
 ---
@@ -69,7 +69,8 @@
 3. **버전 불일치 시**: 사용자 지정 버전이 commit 의 cmake VERSION 과 다르면 머지 전에 정렬 (commit 수정 or 새 commit)
 4. **머지 직후 local bump**: cmake 를 (just-merged) + 1 patch 로 placeholder bump
 5. **README / code/README / NEXT_SESSION 등 버전 참조 문서**도 같이 갱신
-6. CLAUDE.md / memory 갱신 — 후속 정책 정착 작업 진행 중
+6. **Pre-push docs check (절대 규칙)** — merge 뿐만 아니라 **모든 commit push 시점**에 모든 문서 (README / code/README / NEXT_SESSION / OPERATIONS / .DOCS/) 전수 점검. 코드 변경과 정합 안 맞으면 즉시 다음 commit 으로 보완. push 전 점검이 원칙.
+7. CLAUDE.md §Work Rules + memory `feedback_git_workflow.md` 에 모두 명시. memory 는 AI-only 문서라 영어로 변환됨 (5/26).
 
 ---
 
@@ -129,7 +130,7 @@
 
 | 문서 | 내용 |
 |------|------|
-| [README.md](../README.md) | 프로젝트 전체 (Version 0.1.16) |
+| [README.md](../README.md) | 프로젝트 전체 (Version 0.1.17) |
 | [CLAUDE.md](../CLAUDE.md) | 코딩 표준 + master merge gate + git workflow 정책 (5/26 갱신) |
 | [OPERATIONS.md](../OPERATIONS.md) | 운영 트러블슈팅 |
 | [.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](../.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md) | v2.0.0 Search engine 도입 가이드 |
