@@ -50,6 +50,41 @@
 - multi-cam 환경에서 잠재적 coupling 원인
 - 영향: Full reset 시기 (5/24) 에는 큰 dip 없었으므로 critical 아님. 다만 미래 cleanup 후보.
 
+### NPU batch_size — code 가 batch=1 hard-assumed (5/26 발견)
+
+`engines/engine.profile.json` 의 `InferenceBatchSize` 와 RKNN model 의 input tensor batch 차원이 일치해야 한다. 그런데 현 코드의 검증 + buffer 할당이 **batch=1 환경에서만 우연히 동작** :
+
+1. **잘못된 검증** (`code/Engine/NPU/YoloV5_Torch_Onnx_RKNN_NPU/YoloV5_Torch_Onnx_RKNN_NPU.cpp:412`)
+   ```cpp
+   if( batch_size_ != rknn_app_ctx_.io_num.n_input ) { ... return false; }
+   ```
+   - `io_num.n_input` = **입력 tensor 개수** (YOLOv5 = `"images"` 1개)
+   - `batch_size_` = **batch 차원 크기** (profile InferenceBatchSize)
+   - 두 개념이 다른데 동등 비교. 우연히 둘 다 1 이라 통과.
+   - 진짜 batch dim 검증은 `input_attrs[0].dims[0] vs batch_size_` 비교 해야 함.
+
+2. **input buffer 단일 frame 만 할당** (line 505-517)
+   ```cpp
+   input.size = rknn_model_w * rknn_model_h * rknn_model_c;  // batch 무시
+   rknn_inputs_.push_back( input );  // n_input 만큼 (=1)
+   ```
+   - batch_size_ 만큼 데이터 들어가야 하는데 buffer 가 1 frame 크기.
+
+3. **accumulator 만 batch 의식** (line 594-609)
+   ```cpp
+   current_batch_inputs_.push_back( input );
+   return current_batch_inputs_.size() >= batch_size_;  // IsBatchReady
+   ```
+   - 누적 로직은 batch>1 인식하지만 그 input 을 rknn_run 에 어떻게 전달하는지 buffer 가 일치 안 함.
+
+batch>1 사용 시 필요한 fix:
+- line 412 검증을 `input_attrs[0].dims[0] != batch_size_` 로 수정 (n_input → dims[0])
+- line 505 input.size 를 `* batch_size_` 반영
+- 모델 자체를 batch>1 로 RKNN 재변환 (`--target_platform RK3588 --batch_size N`)
+- 모든 변경 후 audit + 모니터링 필수
+
+영향: **현재 batch=1 hard-locked**. 6+ cam scale-up 시 NPU 천장 (140 FPS) 도달하면 batch>1 검토할 가치 있는데 그때 위 3가지 동시 fix 필요.
+
 ### NEW-2. `correlation_mismatch` 폭증 root cause
 - 현 빈도 0.056/cam/sec (5/24 측정) — surge 사라짐. close 가능.
 
