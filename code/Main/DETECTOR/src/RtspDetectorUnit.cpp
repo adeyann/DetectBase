@@ -250,15 +250,13 @@ namespace MGEN
         }
     } // namespace
 
-    // [DEBUG VIRTUAL LINES — REMOVABLE BLOCK START]
-    // Phase 2 (IO Worker) 효과 검증 / 시연 / 이벤트 빈발 시뮬레이션 목적.
+    // [DEBUG VIRTUAL LINES] 디버깅 / 시연 / 이벤트 빈발 시뮬레이션 목적.
+    // ServerSetting `debug_virtual_lines_enabled` (default false) 가 true 일 때만 호출됨.
     // 모든 카메라에 가상 schedule 2개 추가:
     //   - ID 99999: LineIntrusion (사람) — 가로 3 + 세로 3 = 6개 라인
     //   - ID 99998: VehicleIntrusion (차량) — 동일 6개 라인
-    // 지울 때:
-    //   grep -n "DEBUG VIRTUAL LINES" 로 4곳 (block 시작/끝 + 호출 2곳) 식별 후 모두 제거.
-    //   상세 안내: README.md 의 "Debug 하드코딩 제거" 섹션
-    static void AddDebugVirtualLines_REMOVABLE( ScheduleSettingData& data ) noexcept
+    // 사용법: README.md §14 참조.
+    static void AddDebugVirtualLines( ScheduleSettingData& data ) noexcept
     {
         // 6개 라인 (가로 3 + 세로 3) — LineIntrusion / VehicleIntrusion 공통 사용
         const auto build_two_way_lines = []() {
@@ -300,7 +298,6 @@ namespace MGEN
         vehicle_sch.loitering_require_dur_sec     = 0;                    // VehicleParking 만 의미 있음
         data.schedules.push_back( std::move( vehicle_sch ) );
     }
-    // [DEBUG VIRTUAL LINES — REMOVABLE BLOCK END]
 
     RtspDetectorUnit::RtspDetectorUnit
     (
@@ -444,13 +441,17 @@ namespace MGEN
         // 예외 영역 없을 수도 있음 (정상 시나리오)
 
         // Init setting data first value : schedule setting
-        // [DEBUG VIRTUAL LINES] schedule 없는 카메라에도 가상 라인 강제 적용 → lock 항상 잡고 처리
+        // [DEBUG VIRTUAL LINES] ServerSetting toggle 기반 — enable 시 모든 카메라에 가상 boundary 주입.
+        // schedule 없는 카메라에도 toggle ON 이면 가상 라인 적용 → lock 항상 잡고 처리.
         {
             std::lock_guard<std::mutex> sch_lck { this->schedule_settings_mtx };
             if( auto schedule_data_opt = sm->GetScheduleSetting( id_ ); schedule_data_opt.has_value() ) {
                 this->schedule_settings_ = *schedule_data_opt;
             }
-            AddDebugVirtualLines_REMOVABLE( this->schedule_settings_ ); // [DEBUG VIRTUAL LINES — REMOVE]
+            if( auto srv_opt = sm->GetServerSetting(); srv_opt.has_value() && srv_opt->debug_virtual_lines_enabled ) {
+                AddDebugVirtualLines( this->schedule_settings_ );
+                MLOG_INFO( "CAM[%d] debug_virtual_lines_enabled=true — schedule 99999 (LineIntrusion) + 99998 (VehicleIntrusion) 강제 주입", static_cast<int>( this->id_ ) );
+            }
             if( this->schedule_settings_.schedules.size() > 0 ){
                 this->is_schedule_updated_.store( true );
             }
@@ -470,11 +471,13 @@ namespace MGEN
         );
 
         SubscribeSetting<ScheduleSettingData>(
-            [this](const ScheduleSettingData& newData)
+            [this, sm](const ScheduleSettingData& newData)
             {
                 std::lock_guard<std::mutex> lck { this->schedule_settings_mtx };
                 this->schedule_settings_ = newData;
-                AddDebugVirtualLines_REMOVABLE( this->schedule_settings_ ); // [DEBUG VIRTUAL LINES — REMOVE]
+                if( auto srv_opt = sm->GetServerSetting(); srv_opt.has_value() && srv_opt->debug_virtual_lines_enabled ) {
+                    AddDebugVirtualLines( this->schedule_settings_ );
+                }
                 this->is_schedule_updated_.store( true );
             },
             id_,
