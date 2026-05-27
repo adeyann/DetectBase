@@ -2,7 +2,7 @@
 
 **최종 갱신**: 2026-05-27 12:30 KST
 **현 develop HEAD**: PR #21 (cmake 0.1.18 정렬 + master_logs 보관 절차 + cmake bump README 동기 절대 규칙) merged. PR #22 (정합성 다중 round — master_logs step 3 PR 명시 + skill OLD bump rule 제거 + branch -d / -D 정합 + DFPS 13→29 multi-core 갱신 + RTSP_GST 모듈 description + shutdown 순서 code 정합 + yaml-cpp 잘못된 TODO + 메트릭 표 ~23→~38 + 누적 53→57 + 1h→11.3h 솔직 표기 + 외 다수) 10+ commit 누적, 사용자 허가 대기 중. cmake VERSION = `0.1.18`. last released master = `v0.1.0` (5/19). develop 누적 = v0.1.18 (TeardownPipeline fix 포함).
-**현 상태**: **v0.1.18 master merge 준비 중**. monitor `v018_teardown_fix` 11.3h 안정 (wd=1 boot-only, cam_loss=0, 단 fix path 미발화). audit 5종 5/27 09:14 ~ 14:35 진행 중 (clang-tidy/cppcheck PASS, ASan/TSan run 중).
+**현 상태**: **v0.1.18 master merge 준비 중**. monitor `v018_teardown_fix` 11.3h 안정 (wd=1 boot-only, cam_loss=0, 단 fix path 미발화). **audit 5종 5/27 09:14 ~ 14:33 완료 — 자체 코드 회귀 0건 ✅** (cppcheck 59 동일, clang-tidy 0 동일, ASan/TSan 자체 코드 leak/race 모두 0건, 외부 lib 부분만 run time 비례 증가). 산출물 `logs/audit_20260527_091456/`.
 
 ---
 
@@ -67,7 +67,7 @@ ResetSourceOnly 가 호출한 TeardownPipeline 의 unref 가 hang. ReconnectWork
 
 **대응 — 5/27 진행 상태**:
 1. **cam 서버 4대 (192.168.2.111-114) 의 happytime rtsp daemon 재시작** — 가장 직접 검증 후보. 실행 여부 확인 필요 (이번 세션 외부 actor 가 수행했을 수 있음). 5/26 22:00 ~ 5/27 09:06 11.3h 운영 결과 wd=1 (boot only) / cam_loss=0 으로 안정 — server 측 정상화 (재시작 또는 자연 복구) 추정 가능.
-2. v0.1.18 baseline 24h 안정성 재측정 — **현재 11.3h 누적, 24h 미달**. cam_loss=0 추세 유지 중. 5/27 14:00 이후 추가 모니터링으로 24h 도달 가능.
+2. v0.1.18 baseline 24h 안정성 재측정 — **5/26 22:00 ~ 5/27 09:06 누적 11.3h** 모니터 후 audit 진행 (5/27 09:14 ~ 14:33) 으로 monitor 끊김. 24h 도달 미달. audit 종료 후 service 자동 재시작 (14:33+), 24h 추가 누적 필요 시 새 monitor session 시작 필요.
 
 **부수 발견**:
 - DetectBase 가 server-side close 받았을 때 socket close 누락 → CLOSE-WAIT 패턴 관찰. fd leak 누적 위험은 낮지만 (소량), defensive 코드 추가 후보 (future).
