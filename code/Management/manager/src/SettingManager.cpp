@@ -85,12 +85,12 @@ namespace MGEN
         this->SetServerSetting( server_setter_js ); // Initialize SetterBase<ServerSettingData>
 
         // Get Camera List via Cluster
-        if( this->SetCameraCluster_DETECTOR( init_data ) == false || !this->camera_cluster ) {
+        if( this->SetCameraCluster_DETECTOR( init_data ) == false ) {
             MLOG_ERROR("Initialize: Failed to SetCameraCluster_DETECTOR()");
             return false;
         }
 
-        auto cams = this->camera_cluster->GetDeviceSet();
+        auto cams = this->camera_id_set_;
 
         // Get Camera Settings
         if( !cams.empty() ) {
@@ -167,19 +167,16 @@ namespace MGEN
             return false;
         }
 
-        this->camera_cluster = std::make_shared<CameraCluster_DETECTOR>();
-        if( !this->camera_cluster ) {
-            MLOG_ERROR("SetCameraCluster_DETECTOR(), create NormalCameraCluster failed");
-            return false;
-        }
-
-        this->camera_cluster->SetDeviceKeyname( "CameraId" );
-        this->camera_cluster->ClearAll();
-
-        if( this->camera_cluster->AddClusterData( cluster_rsp_body ) == false ) {
-            MLOG_ERROR("SetCameraCluster_DETECTOR(), AddClusterData() failed:\n%s",
-                cluster_rsp_body.dump(2).c_str() );
-            return false;
+        // 이전 CameraCluster_DETECTOR::AddClusterData() 의 parse 로직을 직접 인라인 (2026-05-27 폐기).
+        constexpr int JSON_PARSE_ID_VALUE_NOT_SET = -1;
+        this->camera_id_set_.clear();
+        for( const auto& object : cluster_rsp_body ) {
+            if( object.is_object() && object.contains( "CameraId" ) ) {
+                const auto cam_id = object.value( "CameraId", JSON_PARSE_ID_VALUE_NOT_SET );
+                if( cam_id != JSON_PARSE_ID_VALUE_NOT_SET ) {
+                    this->camera_id_set_.insert( cam_id );
+                }
+            }
         }
         return true;
     }
@@ -386,15 +383,7 @@ namespace MGEN
     // --- Public Getters for Camera Info / Server ID ---
     CameraIDSet SettingManager::GetCameraIDSet( void ) const noexcept
     {
-        if( !this->camera_cluster )
-            return CameraIDSet {};
-        return this->camera_cluster->GetDeviceSet();
-    }
-
-
-    std::shared_ptr<CameraCluster_DETECTOR> SettingManager::GetCameraCluster_DETECTOR( void ) const
-    {
-        return this->camera_cluster;
+        return this->camera_id_set_;
     }
 
     int SettingManager::GetServerServiceID( void ) const noexcept
