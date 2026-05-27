@@ -38,7 +38,7 @@ gst_object_unref(pipeline_);  // ← 여기서 internal thread join 에서 hang
 
 ---
 
-## FIX (commit b? — fix/teardown-pipeline-unref-hang)
+## FIX (commit `d320571` + docs `da79293` → merge `daddd27` v0.1.18, branch fix/teardown-pipeline-unref-hang)
 
 ```cpp
 gst_element_set_state(pipeline_, GST_STATE_NULL);
