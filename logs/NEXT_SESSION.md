@@ -1,8 +1,52 @@
-# NEXT_SESSION — v0.1.17 (git workflow 정책 + pre-push docs check + memory 영어화) 진입점
+# NEXT_SESSION — v0.1.18 (cam_loss root cause fix: TeardownPipeline unref-skip) 진입점
 
-**최종 갱신**: 2026-05-26 18:55 KST
-**현 develop HEAD**: `c15701b` (cmake VERSION `0.1.18` placeholder. README/code/README "Version" 라인 = 마지막 released **v0.1.17**)
-**현 상태**: **v0.1.18 baseline 가동** (monitor `b4nzajj8j`, `v018_post_ab`). wd 회귀 A/B test 결론 = v0.1.16 patch 결백, cam 서버 측 state 결함이 원인. **내일 (5/27) cam 서버 재시작 예정.**
+**최종 갱신**: 2026-05-26 22:50 KST
+**현 develop HEAD**: (이 commit 기준 — fix/teardown-pipeline-unref-hang 머지 대기)
+**현 상태**: **v0.1.18 + TeardownPipeline fix 가동** (monitor `bl4c785is`, `v018_teardown_fix`). 1h 운영 wd=1/cam_loss=0 ✅. cam_loss 의 진짜 root cause 식별 + fix 검증.
+
+---
+
+## 🎯 5/26 22:00 — cam_loss 진짜 ROOT CAUSE 식별 + FIX (must read)
+
+**증상**: cam 661 의 42분 cam_loss (19:10-19:54). 자가 회복 불가, process restart 만이 해결.
+
+**ROOT CAUSE 확정**: `GstRtspReceiver::TeardownPipeline()` 의 `gst_object_unref(pipeline_)` 가 GStreamer 내부 thread join 에서 **unbounded block**. cam 661 의 backup log:
+```
+10:09:33  ResetSourceOnly[661] 진입 — pipeline destroy/rebuild
+... 매칭되는 OK 로그 없음 (45분 침묵) ...
+10:54:54  process restart (escape)
+```
+
+ResetSourceOnly 가 호출한 TeardownPipeline 의 unref 가 hang. ReconnectWorker thread (cam 661) 가 receiver_mtx_ 들고 stuck. 같은 thread 안 watchdog cycle 도 발화 불가. process restart 만이 escape.
+
+**FIX**: `gst_element_get_state` timeout 시 `gst_object_unref` 건너뛰고 의도된 leak (process restart 시 OS cleanup) + WARN log.
+
+**검증 (1h)**:
+| 측면 | pre-fix (v016/v014_ab) | post-fix (v018+fix) |
+|---|---|---|
+| Duration | 50min / 8min | **63min** |
+| wd | 6 / 1 | **1** (boot 직후) |
+| cam_loss | 영구 sustained | **0건** ✅ |
+| DFPS | 60-90 osc | **116.1** baseline |
+| cam_active | 3/4 sustained | **4/4 stable** |
+
+자세한 분석: [.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md](../.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md) (doc 진화 이력 + 이전 틀린 가설 정리 + escalation playbook 포함).
+
+### 솔직한 fix 평가 (사용자 비판적 검증 반영)
+- fix 는 **사후조치 (defensive workaround)** — stuck 의 진짜 원인 ([1] stream 끊김 + [5] GStreamer thread join 실패) 미식별
+- 162분 운영 결과 fix path 자체가 발화 X → fix 의 effectiveness empirical 검증 0
+- 안정성 회복은 stuck 조건 사라진 환경 변화 (cam server state cleanup) 때문일 가능성 → **사실상 162분간 아무것도 안 고친 것**일 수도
+- 진짜 검증은 다음 자연 stuck 시
+
+### Escalation 순서 (stuck 재발 시 단계별)
+1. **Step 1 (현 상태)**: 자연 stuck 대기 + monitor + fix path 발화 검증
+2. **Step 2**: `GST_DEBUG=2,rtspsrc:5,udpsrc:5,rtpsession:5` env var 추가 후 재실행 — GStreamer 내부 동작 추적
+3. **Step 3**: tcpdump packet capture (RTP/RTCP/RTSP protocol-level)
+4. **Step 4 (최후 수단)**: **happytimesoft RTSP 모듈로 rollback A/B test** — `37dae37` parent commit (GStreamer 통합 직전) 빌드 + 동일 환경에서 stuck 발생 여부 비교. happytimesoft 도 stuck 시 외부 원인 (cam server / 네트워크), 멀쩡하면 GStreamer 통합 결함
+
+자세한 Step 4 절차: [.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md §"다음 단계"](../.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md)
+
+---
 
 ---
 
@@ -129,6 +173,52 @@
 ### monitor.sh threshold tuning — 운영 중 false-positive 발생 시 env override 로 조정
 - 현 기본값: `ALERT_DFPS_LOW_THRESHOLD=100`, `ALERT_DFPS_LOW_STREAK=2`, `ALERT_RSS_MB_THRESHOLD=1100`, `ALERT_WARN_DELTA_PER_CYCLE=500`, `ALERT_WARMUP_CYCLES=4`
 - 운영 1-2주 데이터 누적 후 임계값 재검토 권장
+
+### BasicLibs 정리 권장 (legacy 출처: [.DOCS/BASICLIBS_AUDIT.md](../.DOCS/BASICLIBS_AUDIT.md) §6 P3)
+**누락됐다가 복원 (5/27)**. v1.0.0 정리 단계에서 같이 진행 가능:
+
+1. **ClassChecker YAML → JSON 마이그레이션 + vendored yaml-cpp 제거**
+   - 현 `code/BasicLibs/core/parser/yaml-cpp/` (.a 포함) 사용처 = `code/BasicLibs/core/types/ClassChecker.h` 1개
+   - YAML 파일 1개 (engines/engine.classes.yaml or similar) JSON 변환 + 사용 코드 nlohmann::json 로 교체
+   - 효과: ~3,000 LOC 제거 (vendored yaml-cpp)
+   - 작업 ~1-2 시간
+
+2. **SafeThread → ThreadPool 도입** (확장 시점에)
+   - 현 SafeThread 29건 사용. cam 별 인스턴스 분리 (no pool)
+   - 카메라 8~16대 확장 계획 있을 시 검토. 6+ cam scale-up 시 batch>1 fix 와 묶어서 가능
+   - 사전 작업 아님 — scale-up 의사결정 후
+
+3. **DeviceCluster 인라인화** — 1개 파일 사용 (SettingManager) → 흡수 가능. 작은 정리.
+
+### v1.0.0 후 GStreamer upgrade (legacy 출처: [.DOCS/SESSION_DFPS_B3_B4_PLATEAU_20260519.md](../.DOCS/SESSION_DFPS_B3_B4_PLATEAU_20260519.md))
+**누락됐다가 복원 (5/27)**.
+
+**GStreamer 1.20.3 → 1.24+ upgrade** — rtpmanager long-running leak (`CLAUDE.md` "외부 lib, ~340 MB/year, accepted") 의 fix 가능성 검증.
+- 비용: 1.5~2시간 + Ubuntu 22.04 → 24.04 base 변경 + librknnrt ABI 호환 위험 + protobuf/grpc source rebuild
+- 시점: **v1.0.0 release 후** 별도 phase (master 안정화 후)
+- 기대 효과: rtpmanager leak 사라지면 1년 운영 RSS plateau 확정. 단 1.24 changelog 에 명확한 본 케이스 fix 단서는 없음 → 불확실
+- 만약 cam_loss 의 root cause [5] (GStreamer thread join 실패) 가 1.24 에서 fix 됐다면 우리 fix 의 leak 압력 도 해소될 수 있음 — bonus
+
+### v1.0.0 cleanup 묶음 (legacy 출처: [.DOCS/SESSION_DFPS_B3_B4_PLATEAU_20260519.md](../.DOCS/SESSION_DFPS_B3_B4_PLATEAU_20260519.md))
+**누락됐다가 복원 (5/27 사용자 지적)**. v0.1.16-sync NEXT_SESSION rewrite 시 빠짐.
+
+1. **ThreadProfiler 모듈 신규** — 현 RspProf / InfProf / EvtProf inline struct (각 thread 내부 변수) 통합 → 별도 thread + PUSH (stage timing) / PULL (counter / queue size) API. RtspDetectorUnit.cpp 의 inline instrument 분리. ~4시간 예상.
+
+2. **DEBUG virtual lines 제거** — 매 cycle emit 되는 노이즈성 MLOG_INFO 라인 강등 (`MLOG_INFO` → `MLOG_DEBUG`):
+   - `RtspDetectorUnit.cpp:1268` `INF-thread (avg over 100 cycles...)` — 매 100 inference cycle, 4 cam × ~3.3s = 분당 ~75줄
+   - `RtspDetectorUnit.cpp:1624 / 1747` `RSP-thread (avg over 100 cycles...)` — 동일 빈도, 라인 길이 매우 김 (50+ field)
+   - `RtspDetectorUnit.cpp:1931` `event_detected type=X cam=N count=M` — traffic burst 시 분당 100-200줄 (5/24 storm 분석 시 진짜 시그널 찾기 어려운 노이즈)
+   - `RtspDetectorUnit.cpp:2034` `EVT-thread (avg over 100 event cycles...)`
+   - **효과**: Release build (`DEBUG_MODE` off) 에서 compile-out (`MgenLogger.h:47-50` cutoff = INFO) → 운영 log volume 대폭 감소 + 실 incident (frame-age watchdog / ResetSourceOnly / EOS) 신호 명확. cam_loss 분석 시 SignalNoise 비율 ↑.
+
+3. **TSan SafeQueue 잔존 race cleanup** — 5/19 audit baseline 시점 자체 코드 race 0건 ✅. 단 v1.0.0 시점 SafeQueue 의 shared_ptr ref counting / max_size 변경 path / drop_count 경합 등 deep review 권장.
+
+4. **v4 instrument 의 `t_*_set` dead code** — `knownConditionTrueFalse` 9건 (cppcheck audit_20260519). ThreadProfiler 마이그레이션 (#1) 시 자연 정리.
+
+순서 의존성:
+- #1 (ThreadProfiler) 가 먼저. 그 부수효과로 #4 정리.
+- #2 (DEBUG virtual lines 강등) 은 독립. #1 과 묶거나 별도.
+- #3 (TSan deep review) 은 #1 진행 중 동시 가능.
 
 ---
 

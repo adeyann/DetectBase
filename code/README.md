@@ -121,11 +121,12 @@ GRPC 활성화 / 운영 정책은 [상위 README §"GRPC 통신"](../README.md) 
 | graceful shutdown | 10초, PROGRAM QUIT SUCCESS |
 | 운영 leak (RSS/FD/Thread) | 0건 (10h sanity baseline: RSS plateau ±20MB, FD/Threads stable) |
 
-### v0.1.13 ~ v0.1.16 변경 (5/26)
+### v0.1.13 ~ v0.1.18 변경 (5/26)
 - v0.1.13: per-cam stage FPS counter (0.1.12) revert — global mutex hot path 회귀
 - v0.1.14: MPP + Option A 완전 폐기 — Full reset 복귀 (5/24 baseline)
 - v0.1.15: REST `get_json_from_resp_body` silent catch → MLOG_WARN 추가 (운영 가시화)
 - v0.1.16: `Main.cpp` argv guard + `flock(2)` single-instance lock — PID 4924 사고 재발 방지 (Main.cpp 가 argv 무수신이라 `--version` 같은 호출이 풀 서비스 spawn → NPU 양분 → DFPS 50% 하락). 부수: monitor.sh 에 threshold alert 7 종 (storm/err/dfps_low/memory/wd/ftc/cam_loss) + boot ramp warmup grace 4 cycle.
+- v0.1.18: `GstRtspReceiver::TeardownPipeline` 의 `gst_object_unref(pipeline_)` 가 GStreamer 내부 thread join 에서 unbounded block 하던 결함 fix. cam 661 의 42분 cam_loss 의 root cause 였음 (backup log 10:09:33 ResetSourceOnly[661] 진입 후 영원히 return 안 함). `gst_element_get_state` timeout 시 unref 건너뛰고 의도된 leak. 1h 검증 wd=1/cam_loss=0 (pre-fix 50min wd=6/cam_loss 영구).
 
 이 변경들은 cmake 0.1.10 시점 audit 결과를 영향 안 줌 (코드 단순화 + log 추가 + 사고 차단 가드). 다음 audit 갱신 권장.
 

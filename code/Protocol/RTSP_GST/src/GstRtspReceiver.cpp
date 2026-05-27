@@ -310,7 +310,16 @@ namespace MGEN
             }
             gst_element_set_state( pipeline_, GST_STATE_NULL );
             GstState st;
-            gst_element_get_state( pipeline_, &st, nullptr, 5 * GST_SECOND );
+            // FIX(cam-stuck-deadlock 2026-05-26): NULL transition 이 5s 안에 끝나지 않으면
+            //   gst_object_unref(pipeline_) 가 내부 thread join 에서 unbounded block 가능
+            //   (udpsrc socket close / rtspsrc teardown 가 hang 하는 경우). 이 path 가 cam
+            //   661 의 42분 cam_loss 의 root cause (backup log 2026-05-26T10:09:33 ~ 10:54).
+            //   대응: state 가 NULL 도달 못 했으면 unref 건너뛰고 의도된 leak. process 종료 시
+            //   OS 가 정리. 1회 leak ~few MB. infinite hang 보다 운영상 우월.
+            const GstStateChangeReturn state_result =
+                gst_element_get_state( pipeline_, &st, nullptr, 5 * GST_SECOND );
+            const bool state_ok = ( state_result == GST_STATE_CHANGE_SUCCESS && st == GST_STATE_NULL );
+
             if( appsink_ ) {
                 gst_object_unref( appsink_ );
                 appsink_ = nullptr;
@@ -319,7 +328,18 @@ namespace MGEN
                 gst_object_unref( raw_appsink_ );
                 raw_appsink_ = nullptr;
             }
-            gst_object_unref( pipeline_ );
+
+            if( state_ok ) {
+                gst_object_unref( pipeline_ );
+            }
+            else {
+                MLOG_WARN(
+                    "TeardownPipeline[%d] — pipeline NULL transition 실패 (result=%d, state=%d). "
+                    "gst_object_unref 건너뜀 (의도된 leak — hang 방지). process restart 시 OS 가 정리.",
+                    cfg_.cam_id, static_cast<int>( state_result ), static_cast<int>( st ) );
+                // pipeline_ 는 의도적으로 unref 안 함. 다음 단계에서 pipeline_ = nullptr 만
+                // 처리해 후속 BuildPipeline 가 새 pipeline 할당.
+            }
             pipeline_ = nullptr;
         }
     }
