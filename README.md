@@ -484,7 +484,7 @@ code/
 |---|---|---|---|---|
 | **REST API** | restclient-cpp | DetectBase → MVAS | 카메라 / 스케줄 / 서버 설정 조회 (한 번씩) | ON |
 | **SocketIO** | sioclient | 양방향 | 이벤트 송신 (out) + 설정 변경 수신 (in) | ON |
-| **RTSP Proxy** | (외부 lib) | DetectBase → 외부 viewer | 분석 결과 video stream | ON |
+| **RTSP Proxy** | GStreamer `gst-rtsp-server` (v0.1.14 자체 통합 후) | DetectBase → 외부 viewer | 분석 결과 video stream | ON |
 | **gRPC** | grpc-cpp | 양방향 | 노드 간 이벤트 / counter 송수신 (선택) | OFF |
 
 ### REST API

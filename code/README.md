@@ -80,7 +80,7 @@ DETECTOR 분기에서 활성인 EventClass:
 |---|---|---|---|
 | REST API | restclient-cpp | MVAS 카메라/스케줄 조회 | ON |
 | SocketIO | sioclient | MVAS 이벤트 송신 + 설정 변경 수신 | ON |
-| RTSP Proxy | (외부 lib) | 분석 결과 video stream 출력 | ON |
+| RTSP Proxy | GStreamer `gst-rtsp-server` (v0.1.14 부터 RTSP_GST 자체 통합) | 분석 결과 video stream 출력 | ON |
 | **GRPC (옵션)** | grpc-cpp | 노드 간 이벤트 / counter sync | OFF (NetworkSettings 로 활성화) |
 
 GRPC 활성화 / 운영 정책은 [상위 README §"GRPC 통신"](../README.md) 참고.
