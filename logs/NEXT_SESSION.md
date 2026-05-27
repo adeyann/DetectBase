@@ -8,14 +8,13 @@
 
 ## 📋 남은 작업
 
-### 🟢 즉시 가능
+### 🟢 검증 대기
 
-#### 1. GStreamer GMainContext 공유 결함 cleanup
-- `GstRtspReceiver` (1곳) + `GstRtspProxyServer` (1곳, 5/27 추가 발견) 모두 `g_main_loop_new(nullptr, FALSE)` → default global GMainContext 공유
-- multi-cam 환경 잠재 coupling 원인 (한 cam reset 이 다른 cam timing 영향 가능)
-- Full reset 시 큰 dip 없음, critical 아님. 미래 cleanup 후보.
-- 작업: per-instance dedicated `GMainContext` 생성 + source attach + thread-default push + receiver/server 양쪽 검증
-- 비용 ~5-6h, 위험 중 (GStreamer behavior 변경 + ASan/TSan 재검증)
+#### 1. audit 5종 재검증 (GStreamer GMainContext cleanup 후)
+- 0f9ae2c (Receiver/ProxyServer 각자 dedicated GMainContext) 변경 후 cppcheck / clang-tidy / ASan / UBSan / TSan 자체 코드 회귀 검증 필요
+- Release 빌드만 통과 확인됨 — Debug 빌드 (audit 시 자동) + 동적 분석 (ASan/TSan) 재실행 필요
+- 실행: `./detectbase.sh audit` (전체 5종, ~4-5시간)
+- 통과 조건: 자체 코드 결함 baseline (master_logs/v0.1.18/audit_20260527_091456/) 대비 회귀 0건
 
 ---
 
