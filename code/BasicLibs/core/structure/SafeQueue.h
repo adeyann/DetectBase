@@ -122,10 +122,14 @@ namespace MGEN
             return this->size() == 0;
         }
 
+        // MO-1 (2026-05-27): notify_all() 을 lock 밖으로 이동 (enqueue 패턴과 일관성).
+        //   b_terminate write 의 happens-before edge 는 lock release 시 발생, notify_all 은 그 edge 의 receiver. semantic 동일.
         void terminate() noexcept
         {
-            std::lock_guard<std::mutex> lck { m };
-            b_terminate = true;
+            {
+                std::lock_guard<std::mutex> lck { m };
+                b_terminate = true;
+            }
             c.notify_all();
         }
 
