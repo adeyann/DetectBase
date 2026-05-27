@@ -979,7 +979,7 @@ grep "PROGRAM QUIT SUCCESS" logs/DetectBase.log
 
 | 문서 | 내용 |
 |---|---|
-| **[logs/NEXT_SESSION.md](logs/NEXT_SESSION.md)** | v0.1.17 진입점 — git workflow 정책 정착 (post-push bump + pre-push docs check 절대 규칙) + v0.1.16 작업 누적 (argv guard + flock + monitor threshold alerts) |
+| **[logs/NEXT_SESSION.md](logs/NEXT_SESSION.md)** | v0.1.18 진입점 — cam_loss root cause fix (TeardownPipeline unref-skip) + master_logs 보관 절차 (5/27) + cmake bump README 동기 절대 규칙 (5/27) |
 | **[.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md)** | v2.0.0 multi-engine (Search 등) 도입 가이드 — MAIA 기반, event-driven 패턴, Phase 1-5 ~3-4주 작업 |
 | [.DOCS/STUCK_ANALYSIS_cam659_20260520.md](.DOCS/STUCK_ANALYSIS_cam659_20260520.md) | cam 659 stuck 사건 분석 (2026-05-20) + 진단 도구 (PR #16) 활용 절차 — legacy |
 | [.DOCS/MISMATCH_SURGE_ANALYSIS_20260520.md](.DOCS/MISMATCH_SURGE_ANALYSIS_20260520.md) | `correlation_mismatch` 폭증 분석 (2026-05-20) — delta=10 stable backlog — legacy |

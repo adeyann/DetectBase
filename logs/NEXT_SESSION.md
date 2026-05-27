@@ -1,8 +1,8 @@
 # NEXT_SESSION — v0.1.18 (cam_loss root cause fix: TeardownPipeline unref-skip) 진입점
 
-**최종 갱신**: 2026-05-26 22:50 KST
-**현 develop HEAD**: `daddd27` (cmake VERSION `0.1.19` placeholder. last released = **v0.1.18** = TeardownPipeline fix)
-**현 상태**: **v0.1.18 + TeardownPipeline fix 가동** (monitor `bl4c785is`, `v018_teardown_fix`). 1h 운영 wd=1/cam_loss=0 ✅. cam_loss 의 진짜 root cause 식별 + fix 검증.
+**최종 갱신**: 2026-05-27 10:50 KST
+**현 develop HEAD**: chore branch (`chore/v0.1.18-master-prep`) — cmake VERSION `0.1.18` 정렬 (master merge target). last released master = `v0.1.0` (5/19). develop 누적 = v0.1.18 (TeardownPipeline fix 포함).
+**현 상태**: **v0.1.18 master merge 준비 중**. monitor `v018_teardown_fix` 11.3h 안정 (wd=1 boot-only, cam_loss=0). audit 5종 5/27 09:14 ~ 14:35 진행 중 (clang-tidy/cppcheck PASS, ASan/TSan 진행 중).
 
 ---
 
@@ -245,7 +245,7 @@ ResetSourceOnly 가 호출한 TeardownPipeline 의 unref 가 hang. ReconnectWork
 | 문서 | 내용 |
 |------|------|
 | [README.md](../README.md) | 프로젝트 전체 (Version 0.1.18) |
-| [CLAUDE.md](../CLAUDE.md) | 코딩 표준 + master merge gate + git workflow 정책 (5/26 갱신) |
+| [CLAUDE.md](../CLAUDE.md) | 코딩 표준 + master merge gate + git workflow 정책 (5/27 갱신 — master_logs 보관 절차 + cmake bump README 동기 절대 규칙 추가) |
 | [OPERATIONS.md](../OPERATIONS.md) | 운영 트러블슈팅 |
 | [.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](../.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md) | v2.0.0 Search engine 도입 가이드 |
 | [.backup/mpp_purged_20260526/MPP_PURGE_NOTES.md](../.backup/mpp_purged_20260526/MPP_PURGE_NOTES.md) | MPP + Option A 폐기 결정 + 복원 방법 |

@@ -36,6 +36,7 @@ logs/bisect*
 *.log
 *.txt
 *.csv
+*.lock
 
 # logs/ 임시 파일 (확장자 .log 외 — AI 작업 중 생성)
 logs/.current_*
