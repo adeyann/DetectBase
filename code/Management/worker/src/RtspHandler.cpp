@@ -43,7 +43,7 @@ namespace MGEN
         }
 
         // Phase 2: output RTSP server 생성 + start.
-        //   외부 viewer 가 rtsp://<host>:<port>/cam<id> 로 영상 + ONVIF metadata 수신.
+        //   외부 viewer 가 rtsp://<host>:<port>/<id> 로 영상 + ONVIF metadata 수신.
         GstRtspProxyServer::Config srv_cfg;
         srv_cfg.bind_port = this->proxy_server_port_;
         this->proxy_server_ = std::make_unique<GstRtspProxyServer>( srv_cfg );

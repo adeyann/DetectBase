@@ -4,7 +4,7 @@
  *
  * @details
  * 책임:
- *   - gst-rtsp-server 위에 per-camera mount point 등록 (예: /cam658, /cam659, ...)
+ *   - gst-rtsp-server 위에 per-camera mount point 등록 (예: /658, /659, ...)
  *   - 각 mount point 의 factory 가 video(H.264 pre-payloaded RTP) + metadata(ONVIF) 두 stream 노출
  *   - 인증: basic auth (admin/admin + user/123456) + permissions
  *   - Graceful shutdown 10단계
@@ -34,7 +34,7 @@ namespace MGEN
     public:
         struct Config
         {
-            std::string bind_port = "8554";    ///< RTSP listen port (PoC 기본 8554)
+            std::string bind_port = "555";     ///< RTSP listen port (default 555, ServerSetting.RtspPort 로 override)
             // 인증 — happytimesoft 호환 default
             std::string admin_user = "admin";
             std::string admin_pw   = "admin";
@@ -70,7 +70,7 @@ namespace MGEN
         /**
          * @brief 카메라 등록 — mount point 생성.
          *
-         * @param cam_id      카메라 ID (mount path = "/cam<id>")
+         * @param cam_id      카메라 ID (mount path = "/<id>")
          * @param on_sink     클라이언트 연결 시 appsrc 핸들 전달 콜백 (외부에서 buffer push)
          * @param include_metadata true 면 ONVIF metadata stream 도 등록 (pay1)
          * @return true 성공
@@ -123,7 +123,7 @@ namespace MGEN
         bool                    attach_done_ = false;
 
         // FactoryContext lifetime: 등록 시 heap allocate, factory destroyed 시 GDestroyNotify 로 해제
-        std::map<int, std::string>                       mount_paths_;     ///< cam_id → "/cam<id>"
+        std::map<int, std::string>                       mount_paths_;     ///< cam_id → "/<id>"
         std::map<int, std::unique_ptr<FactoryContext>>   factory_ctxs_;
         mutable std::mutex                               cameras_mtx_;
 

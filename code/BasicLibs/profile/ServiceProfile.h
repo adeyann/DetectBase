@@ -22,6 +22,8 @@ namespace MGEN
         ServiceProfile() = delete;
 
         // Base constructor
+        // std::string_view (16B) 는 by-value pass 가 권장.
+        // cppcheck-suppress passedByValue
         explicit ServiceProfile( std::string_view service_name, const EntireServiceBlockProfileGraph& service_block_graph ) noexcept
             : service_name_ ( std::string { service_name } )
             , service_graph_( service_block_graph )

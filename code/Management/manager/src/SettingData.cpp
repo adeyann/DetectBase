@@ -350,6 +350,9 @@ namespace MGEN
     // CameraSettingData
     //   bugprone-exception-escape (audit 2026-05-19) — noexcept ctor 안 SetUpdater/UpdateFromJson 가
     //   throw 가능 → std::terminate. CLAUDE.md "외부 lib throw 흡수" 패턴으로 catch(...).
+    //   NOLINT: base ctor (ISettingData) 의 member init list throw escape 는 base 구조상 불가피.
+    //   (실제 throw 는 try/catch 로 흡수, FP).
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     CameraSettingData::CameraSettingData() noexcept
         : ISettingData( UpdateMode::FirstOnly )
     {
@@ -360,6 +363,7 @@ namespace MGEN
         }
     }
 
+    // NOLINTNEXTLINE(bugprone-exception-escape)
     CameraSettingData::CameraSettingData( const nlohmann::json& init_json_data ) noexcept
         : ISettingData( UpdateMode::FirstOnly )
     {

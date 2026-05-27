@@ -24,6 +24,11 @@ namespace MGEN
 
         const std::map<std::string, std::string> NO_LABELS;
 
+        // FIX(silent-stuck, 변종 B): frame-age watchdog 임계.
+        //   EOS/error 가 bus 에 안 와서 재연결이 트리거되지 않는 '침묵 stuck' 을 잡는 안전망.
+        //   정상 loop reset gap(+desync 지연)보다 충분히 커서 오발동 없음.
+        constexpr int64_t WATCHDOG_STALE_SEC = 12;
+
         // TSan: 여러 GstRtspClient ctor 가 동시에 register 시 race. call_once 로 한 번만 실행 보장.
         std::once_flag g_metrics_once;
 
@@ -108,11 +113,24 @@ namespace MGEN
         rcfg.latency_ms    = cfg_.latency_ms;
         rcfg.enable_raw_passthrough = cfg_.enable_raw_passthrough;
 
+        // 진단 (debug/gst-rtsp-stale-trace 2026-05-20) — cam_id 전달
+        rcfg.cam_id = cfg_.cam_id;
+
         // bus 스레드 콜백 → 비동기 reconnect 요청 (deadlock 회피)
-        rcfg.on_error   = [this]{ RequestReconnect(); };
-        rcfg.on_timeout = [this]{ RequestReconnect(); };
+        rcfg.on_error   = [this]{
+            MLOG_WARN( "GstRtspClient[%d] on_error trigger → RequestReconnect", cfg_.cam_id );
+            RequestReconnect();
+        };
+        rcfg.on_timeout = [this]{
+            MLOG_WARN( "GstRtspClient[%d] on_timeout trigger → RequestReconnect", cfg_.cam_id );
+            RequestReconnect();
+        };
         // BISECTION 복구: EOS reconnect 재활성
-        rcfg.on_eos     = [this]{ eos_reconnect_pending_.store( true ); RequestReconnect(); };
+        rcfg.on_eos     = [this]{
+            MLOG_WARN( "GstRtspClient[%d] on_eos trigger → RequestReconnect (eos_pending=true)", cfg_.cam_id );
+            eos_reconnect_pending_.store( true );
+            RequestReconnect();
+        };
 
         auto frame_cb = [this]( std::shared_ptr<AVFrame> frame ) {
             if( !frame || !queue_ ) return;
@@ -168,10 +186,18 @@ namespace MGEN
 
     void GstRtspClient::RequestReconnect() noexcept
     {
-        if( shutdown_.load() ) return;
+        if( shutdown_.load() ) {
+            MLOG_DEBUG( "GstRtspClient[%d] RequestReconnect ignored (shutdown)", cfg_.cam_id );
+            return;
+        }
         bool expected = false;
         if( reconnect_pending_.compare_exchange_strong( expected, true ) ) {
+            MLOG_INFO( "GstRtspClient[%d] reconnect_pending set → notify worker (eos_pending=%d)",
+                cfg_.cam_id, eos_reconnect_pending_.load() ? 1 : 0 );
             cv_.notify_one();
+        } else {
+            MLOG_INFO( "GstRtspClient[%d] RequestReconnect ignored (already pending, eos_pending=%d)",
+                cfg_.cam_id, eos_reconnect_pending_.load() ? 1 : 0 );
         }
     }
 
@@ -179,24 +205,66 @@ namespace MGEN
     {
         MLOG_INFO( "GstRtspClient[%d] reconnect worker 시작", cfg_.cam_id );
 
+        // FIX(reconnect-storm): shutdown 응답형 분할 sleep + cam 별 시간기반 지터.
+        //   동기화 loop 경계에서 4 cam 이 동시에 재연결하면 서버가 이전 RTSP 세션을
+        //   release 하기 전에 새 SDP connect 가 몰려 timeout → reconnect storm 이 됨.
+        auto sleep_responsive = [this]( int ms ) {
+            for( int s = 0; s < ms && !shutdown_.load(); s += 50 )
+                std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+        };
+        auto reconnect_jitter_ms = []() -> int {
+            const int64_t t = std::chrono::steady_clock::now().time_since_epoch().count();
+            return static_cast<int>( ( t / 1000 ) % 1300 );  // 0~1.3s 시간기반 지터
+        };
+
         while( !shutdown_.load() )
         {
             {
                 std::unique_lock<std::mutex> lk( cv_mtx_ );
-                cv_.wait( lk, [this]{ return reconnect_pending_.load() || shutdown_.load(); } );
+                // wait_for(5s): 재연결 요청이 없어도 주기적으로 깨어 frame-age watchdog 를 점검.
+                cv_.wait_for( lk, std::chrono::seconds( 5 ),
+                    [this]{ return reconnect_pending_.load() || shutdown_.load(); } );
             }
             if( shutdown_.load() ) break;
 
+            // FIX(silent-stuck, 변종 B): EOS/error 가 bus 에 도달하지 않아 on_eos/on_error 가
+            //   안 불려 재연결이 트리거되지 않는 침묵 stuck 복구. 무프레임 WATCHDOG_STALE_SEC 초면
+            //   강제로 in-place reset 을 트리거한다 (패킷은 오는데 udpsrc 가 멈춘 경우 등).
+            if( !reconnect_pending_.load() ) {
+                int64_t last_ns = 0;
+                {
+                    std::lock_guard<std::mutex> lk( receiver_mtx_ );
+                    if( receiver_ ) last_ns = receiver_->GetLastFrameNs();
+                }
+                if( last_ns > 0 ) {
+                    const int64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                               std::chrono::steady_clock::now().time_since_epoch() ).count();
+                    const int64_t age_sec = ( now_ns - last_ns ) / 1'000'000'000LL;
+                    if( age_sec >= WATCHDOG_STALE_SEC ) {
+                        MLOG_WARN( "GstRtspClient[%d] frame-age watchdog: %llds 무프레임 → 강제 reset",
+                            cfg_.cam_id, static_cast<long long>( age_sec ) );
+                        eos_reconnect_pending_.store( true );  // in-place reset 경로 사용
+                        reconnect_pending_.store( true );
+                    }
+                }
+                if( !reconnect_pending_.load() ) continue;  // watchdog 미발동 → 다시 대기
+            }
+
+            const bool is_eos_at_wake = eos_reconnect_pending_.load();
+            MLOG_INFO( "GstRtspClient[%d] reconnect worker wake — eos_pending=%d", cfg_.cam_id, is_eos_at_wake ? 1 : 0 );
             reconnect_pending_.store( false );
 
-            // EOS 인 경우 — 카메라 mp4 5분 cycle 등 정상 stream 종료.
-            //   → in-place reset 시도 (rtspsrc 만 NULL→PLAYING, mppvideodec 보존)
-            //   → mpp internal hardware DMA buffer leak (~12MB/reconn) 회피
+            // EOS 인 경우 — 카메라 mp4 5분 cycle 등 정상 stream 종료. → in-place reset 시도.
             // error/timeout 인 경우 — full restart + exponential backoff.
             const bool is_eos = eos_reconnect_pending_.exchange( false );
 
             if( is_eos ) {
-                // In-place reset 시도 (receiver_ 보존)
+                // FIX(reconnect-storm): 동기화 loop 경계 desync — 4 cam 이 같은 순간 reset 시도
+                //   하면 cluster 가 되어 RTSP handshake ramp-up 가 동기화 → DFPS dip.
+                //   cam 별 offset 으로 분산.
+                sleep_responsive( ( cfg_.cam_id % 4 ) * 500 );
+                if( shutdown_.load() ) break;
+                // In-place reset 시도 (receiver_ 보존, ResetSourceOnly = pipeline 전체 destroy/rebuild)
                 bool inplace_ok = false;
                 {
                     std::lock_guard<std::mutex> lk( receiver_mtx_ );
@@ -207,11 +275,11 @@ namespace MGEN
                 if( inplace_ok ) {
                     reconnect_count_.fetch_add( 1 );
                     MetricsRegistry::Instance().IncrementCounter( METRIC_RECONNECT_TOTAL, NO_LABELS, 1.0 );
-                    MLOG_INFO( "GstRtspClient[%d] EOS in-place reset OK — mppvideodec 보존", cfg_.cam_id );
+                    MLOG_INFO( "GstRtspClient[%d] EOS reset OK", cfg_.cam_id );
                     backoff_sec_ = cfg_.reconnect_initial_sec;
                     continue;  // 다음 cycle 으로 (다시 wait)
                 }
-                MLOG_WARN( "GstRtspClient[%d] EOS in-place reset 실패 — full restart 로 fallback", cfg_.cam_id );
+                MLOG_WARN( "GstRtspClient[%d] EOS reset 실패 — full restart 로 fallback", cfg_.cam_id );
                 // fallback: 아래 full restart path 로 (wait_sec=0)
             }
 
@@ -227,11 +295,34 @@ namespace MGEN
             if( shutdown_.load() ) break;
 
             StopReceiver();
+            // FIX(reconnect-storm): teardown 직후 즉시 재연결하면 서버가 이전 RTSP 세션/소켓을
+            //   미처 release 못 해 SDP connect 가 timeout 됨("Failed to connect"). 서버 release
+            //   시간 확보(고정 3s) + cam offset + 지터로 4 cam 동시 reconnect(herd) 분산.
+            sleep_responsive( 3000 + ( cfg_.cam_id % 4 ) * 500 + reconnect_jitter_ms() );
+            if( shutdown_.load() ) break;
+
             if( StartReceiver() ) {
-                reconnect_count_.fetch_add( 1 );
-                MetricsRegistry::Instance().IncrementCounter( METRIC_RECONNECT_TOTAL, NO_LABELS, 1.0 );
-                MLOG_INFO( "GstRtspClient[%d] reconnect 성공 — backoff reset", cfg_.cam_id );
-                backoff_sec_ = cfg_.reconnect_initial_sec; // 성공 시 backoff 초기화
+                // FIX(reconnect-storm): StartReceiver()=true 는 pipeline 빌드 성공일 뿐 실제
+                //   서버 연결/stream 흐름을 보장하지 않음. 이전 코드는 빌드만으로 backoff 를
+                //   초기화 → 연결이 ~4s 후 실패해도 backoff 가 안 커져 1s tight 재시도 storm.
+                //   frame 이 실제로 흐르는지 확인한 뒤에만 '성공' 으로 판정한다.
+                bool flowing = false;
+                for( int i = 0; i < 60 && !shutdown_.load(); ++i ) {  // 최대 ~6s frame 관찰
+                    std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
+                    if( GetFrameCount() > 0 ) { flowing = true; break; }
+                }
+                if( flowing ) {
+                    reconnect_count_.fetch_add( 1 );
+                    MetricsRegistry::Instance().IncrementCounter( METRIC_RECONNECT_TOTAL, NO_LABELS, 1.0 );
+                    MLOG_INFO( "GstRtspClient[%d] reconnect 성공 — frame 흐름 확인 (backoff reset)", cfg_.cam_id );
+                    backoff_sec_ = cfg_.reconnect_initial_sec; // 실제 성공 시에만 backoff 초기화
+                } else {
+                    // 빌드는 됐으나 frame 미수신 = 실질 연결 실패 → backoff 증가 (storm self-throttle)
+                    backoff_sec_ = std::min( backoff_sec_ * 2, cfg_.reconnect_max_sec );
+                    MLOG_ERROR( "GstRtspClient[%d] reconnect frame 미수신 — 실질 실패, backoff 증가 (%ds)", cfg_.cam_id, backoff_sec_ );
+                    reconnect_pending_.store( true );
+                    cv_.notify_one();
+                }
             } else {
                 // 실패 시 backoff 2배 증가 (상한)
                 backoff_sec_ = std::min( backoff_sec_ * 2, cfg_.reconnect_max_sec );
@@ -260,6 +351,12 @@ namespace MGEN
     {
         std::lock_guard<std::mutex> lk( const_cast<std::mutex&>( receiver_mtx_ ) );
         return receiver_ ? receiver_->GetResetSourceCount() : 0;
+    }
+
+    int64_t GstRtspClient::GetLastFrameNs() const noexcept
+    {
+        std::lock_guard<std::mutex> lk( const_cast<std::mutex&>( receiver_mtx_ ) );
+        return receiver_ ? receiver_->GetLastFrameNs() : 0;
     }
 
 } // namespace MGEN

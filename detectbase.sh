@@ -279,9 +279,13 @@ _audit_run_asan_ubsan() {
         ' > "${OUT_DIR}/asan_build.log" 2>&1
 
     if [[ -x "${OUT_DIR}/asan_pkg/DetectBase" ]]; then
-        # ASan run duration. ASAN_DURATION_MIN env var override (default 240 min = 4h).
+        # ASan run duration. ASAN_DURATION_MIN env var override (default 240 min = 4h, min 60 min = 1h).
         # SIGUSR1 시점: T+5min, T+15min, T+30min, T+60min, T+120min, T+240min (interval mid-run leak check)
         local ASAN_DURATION_MIN="${ASAN_DURATION_MIN:-240}"
+        if [[ $ASAN_DURATION_MIN -lt 60 ]]; then
+            log_warn "  ASAN_DURATION_MIN=${ASAN_DURATION_MIN}분 → 최소 60분으로 강제 (init 비중 분리 위함)"
+            ASAN_DURATION_MIN=60
+        fi
         local ASAN_DURATION_SEC=$(( ASAN_DURATION_MIN * 60 ))
         log_info "  ASan binary OK. 운영 정지 + ${ASAN_DURATION_MIN}분 실행 (interval SIGUSR1 leak check)..."
         docker-compose -f "${DOCKER_COMPOSE_FILE}" stop >/dev/null 2>&1
@@ -328,8 +332,13 @@ _audit_run_asan_ubsan() {
 _audit_run_tsan() {
     local OUT_DIR="$1"
     local STAMP="$2"
-    local TSAN_DURATION_SEC="${TSAN_DURATION_SEC:-300}"
-    log_info "[tsan] 빌드 + 실행 (~5-10분 + 운영 ${TSAN_DURATION_SEC}s 정지)..."
+    # TSan run duration. TSAN_DURATION_SEC env var override (default 3600s = 1h, min 3600s).
+    local TSAN_DURATION_SEC="${TSAN_DURATION_SEC:-3600}"
+    if [[ $TSAN_DURATION_SEC -lt 3600 ]]; then
+        log_warn "  TSAN_DURATION_SEC=${TSAN_DURATION_SEC}s → 최소 3600s(1h)으로 강제"
+        TSAN_DURATION_SEC=3600
+    fi
+    log_info "[tsan] 빌드 + 실행 (~5-10분 빌드 + 운영 ${TSAN_DURATION_SEC}s 정지)..."
     log_warn "  → TSan 100x 느림. race report 는 stderr 즉시 출력 (timeout 후 SIGKILL)"
     log_warn "  → 깊이 검증 시 SettingData.cpp 의 __SANITIZE_THREAD__ guard 로 fps=1 강제 적용됨"
     mkdir -p "${OUT_DIR}/tsan_pkg"

@@ -47,8 +47,8 @@ namespace MGEN
         {
             l = bbox[0] - bbox[2] / 2.f;
             r = bbox[0] + bbox[2] / 2.f;
-            t = bbox[1] - bbox[3] / 2.f - (YOLOV5_RKNN::INPUT_H - r_w * img.rows) / 2.0f;
-            b = bbox[1] + bbox[3] / 2.f - (YOLOV5_RKNN::INPUT_H - r_w * img.rows) / 2.0f;
+            t = bbox[1] - bbox[3] / 2.f - (YOLOV5_RKNN::INPUT_H - r_w * static_cast<float>( img.rows )) / 2.0f;
+            b = bbox[1] + bbox[3] / 2.f - (YOLOV5_RKNN::INPUT_H - r_w * static_cast<float>( img.rows )) / 2.0f;
             l = l / r_w;
             r = r / r_w;
             t = t / r_w;
@@ -56,8 +56,8 @@ namespace MGEN
         }
         else
         {
-            l = bbox[0] - bbox[2] / 2.f - (YOLOV5_RKNN::INPUT_W - r_h * img.cols) / 2.0f;
-            r = bbox[0] + bbox[2] / 2.f - (YOLOV5_RKNN::INPUT_W - r_h * img.cols) / 2.0f;
+            l = bbox[0] - bbox[2] / 2.f - (YOLOV5_RKNN::INPUT_W - r_h * static_cast<float>( img.cols )) / 2.0f;
+            r = bbox[0] + bbox[2] / 2.f - (YOLOV5_RKNN::INPUT_W - r_h * static_cast<float>( img.cols )) / 2.0f;
             t = bbox[1] - bbox[3] / 2.f;
             b = bbox[1] + bbox[3] / 2.f;
             l = l / r_h;
@@ -78,6 +78,7 @@ namespace MGEN
         return u <= 0.f ? 0.f : (i / u);
     }
 
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     static const int nms( int validCount, const std::vector<float>& outputLocations, const std::vector<int>& classIds, std::vector<int>& order, int filterId, float threshold )
     {
         for( int i = 0; i < validCount; ++i )
@@ -178,12 +179,14 @@ namespace MGEN
         return ( static_cast<float>( qnt ) - static_cast<float>( zp ) ) * scale;
     }
 
+    // NOLINTBEGIN(bugprone-easily-swappable-parameters)
     static int rknn_process_impl
     (
         int8_t* input, const int* anchor, int grid_h, int grid_w, int height, int width, int stride,
         std::vector<float>& boxes, std::vector<float>& objProbs, std::vector<int>& classId, float threshold,
         int32_t zp, float scale, size_t class_num
     )
+    // NOLINTEND(bugprone-easily-swappable-parameters)
     {
         int    validCount = 0;
         int    grid_len   = grid_h * grid_w;

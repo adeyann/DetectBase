@@ -181,6 +181,8 @@ namespace MGEN
         // 4. 정렬된 UUID만 추출하여 최종 결과 벡터 생성
         std::vector<InferEngineID> sorted_candidates;
         sorted_candidates.reserve(candidate_pairs.size()); // 메모리 미리 할당
+        // raw loop 가독성 우선.
+        // cppcheck-suppress useStlAlgorithm
         for (const auto& pair : candidate_pairs) {
             sorted_candidates.push_back(pair.second); // UUID (pair의 두 번째 요소)만 저장
         }

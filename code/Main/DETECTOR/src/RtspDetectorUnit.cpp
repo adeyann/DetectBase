@@ -53,6 +53,23 @@ namespace MGEN
         return std::abs(diff) > lapse.count();
     }
 
+    // correlation_mismatch_total metric registration (PR #9 결함 fix 2026-05-20).
+    //   IncrementCounter (line 1442) 는 unregistered metric 호출 시 silently no-op 이라
+    //   PR #9 이후 4882건 발생한 mismatch 가 metric 으로 노출 안 됐었음.
+    //   ctor 에서 std::call_once 로 한 번만 register.
+    namespace
+    {
+        std::once_flag g_correlation_mismatch_metric_once;
+        void RegisterCorrelationMismatchMetricOnce() noexcept
+        {
+            std::call_once( g_correlation_mismatch_metric_once, []{
+                MGEN::MetricsRegistry::Instance().RegisterCounter(
+                    "detectbase_correlation_mismatch_total",
+                    "Correlation ID mismatch between inflight frame and NPU response per cam_id (frame ordering defense counter)" );
+            } );
+        }
+    }
+
     // ============================================================================
     // P54 — /frame 디스크 방어 정책 (3 Layer)
     //   Layer 1: imwrite 직전 사전 차단 (>= 90% 사용 시 skip)
@@ -78,18 +95,6 @@ namespace MGEN
             return 100.0 *
                 static_cast<double>( s.f_blocks - s.f_bavail ) /
                 static_cast<double>( s.f_blocks );
-        }
-
-        // /frame 디스크 used / capacity bytes. 실패 시 둘 다 0.
-        struct FrameDiskBytes { double used; double capacity; };
-        FrameDiskBytes GetFrameDiskBytes() noexcept
-        {
-            struct statvfs s {};
-            if( ::statvfs( FRAME_DISK_PATH, &s ) != 0 ) return { 0.0, 0.0 };
-            const double frsize = static_cast<double>( s.f_frsize );
-            const double cap    = static_cast<double>( s.f_blocks ) * frsize;
-            const double avail  = static_cast<double>( s.f_bavail ) * frsize;
-            return { cap - avail, cap };
         }
 
         // /frame/<YYYY>/<MM>/<DD>/ 형태의 일자 폴더 중 cutoff 보다 오래된 것 삭제.
@@ -201,6 +206,8 @@ namespace MGEN
             // case 2: 폴더 1개만 남고 (당일) 여전히 high — 그 안 파일의 오래된 절반 삭제.
             if( day_dirs.size() == 1 && pct >= FRAME_DISK_EMERGENCY_PCT ) {
                 std::vector<fs::directory_entry> files;
+                // raw loop 가독성 우선.
+                // cppcheck-suppress useStlAlgorithm
                 for( const auto& f : fs::directory_iterator( day_dirs.front(), ec ) ) {
                     if( f.is_regular_file( ec ) ) files.push_back( f );
                 }
@@ -308,7 +315,7 @@ namespace MGEN
         , network_manager_ ( std::move( network_manager )   )
         , iostream_manager_( std::move( io_stream_manager ) )
     {
-        //
+        RegisterCorrelationMismatchMetricOnce();
     }
 
     RtspDetectorUnit::~RtspDetectorUnit()
@@ -559,7 +566,7 @@ namespace MGEN
         const static std::string postXml =
             "</tt:Frame>"
             "</tt:VideoAnalytics>"
-            "</tt:MetadataStream>\0\0";
+            "</tt:MetadataStream>";
 
         metadata_string.reserve( 2048 );
         metadata_string = "";
@@ -964,6 +971,21 @@ namespace MGEN
                     MLOG_INFO("Cam[%d] decoded frame not recieved... maybe RTSP stream not activate", id_ );
                     last_interval_log_print_time = current_check_time;
                 }
+                // 진단 (debug/gst-rtsp-stale-trace 2026-05-20) — 매 timeout 시 last_frame_age gauge update.
+                //   stuck 시 InferenceThread 의 100-cycle 영역 도달 안 함 → 이 위치에서만 gauge update.
+                //   monotonic increase 면 cam stream stuck 의 외부 signal.
+                if( proxy_ptr_ ) {
+                    const int64_t last_ns = proxy_ptr_->GetLastFrameNs();
+                    if( last_ns > 0 ) {
+                        const int64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                  std::chrono::steady_clock::now().time_since_epoch() ).count();
+                        const double age_sec = static_cast<double>( now_ns - last_ns ) / 1e9;
+                        MGEN::MetricsRegistry::Instance().SetGauge(
+                            "detectbase_gst_rtsp_last_frame_age_sec",
+                            { { "cam_id", std::to_string( id_ ) } },
+                            age_sec );
+                    }
+                }
                 continue;
             }
             else
@@ -1034,6 +1056,7 @@ namespace MGEN
                 consecutive_mismatch_count_ = 0;
             }
 
+            // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores) — Phase 2 placeholder
             int  last_realtime_fps = realtime_fps_;
             bool need_update_fps   = false;
 
@@ -1299,10 +1322,6 @@ namespace MGEN
         // Response thread 자체 origin_ctx — cam thread 의 origin_ctx 와 분리.
         // 이벤트 발생 시 1080p frame 의 cv::Mat 변환 + cv::imwrite 위해 io_work_queue 에 넘김.
         FrameFormattingContext resp_origin_ctx;
-
-        // Response thread 자체 timing.
-        EventTime last_interval_log_print_time = std::chrono::system_clock::now();
-        const auto long_timelapse_log_interval = 10min;
 
         // ResponseThread stage profile — 모든 단계 us 단위 평균.
         struct RspProf {

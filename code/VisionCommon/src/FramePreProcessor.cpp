@@ -40,6 +40,7 @@ namespace MGEN
         return ( src_w != new_src_w || src_h != new_src_h || target_w != new_target_w || target_h != new_target_h );
     }
 
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     bool FrameFormattingContext::Update( int new_src_w, int new_src_h, int new_target_w, int new_target_h, int format )
     {
         // 해상도가 바뀌었는지 확인

@@ -77,9 +77,17 @@ namespace MGEN
         explicit YoloV5_Torch_Onnx_RKNN_NPU( const EngineProfile& profile, const InferDeviceID device_id ) noexcept;
 
         /**
-         * @brief 소멸자 (자원 해제는 TerminateEngine -> ReleaseDeviceResources 에서 처리)
+         * @brief 소멸자.
+         *   derived dtor 가 살아있는 동안 TerminateEngine() 호출 → ReleaseDeviceResources()
+         *   는 derived override (정상 호출). base dtor 의 fallback (pure virtual UB) 회피.
+         *   normal path (DETECTOR.cpp:410) 에서 이미 TerminateEngine() 명시 호출됨 → IsActive()=false.
+         *   abnormal path 진입 시에만 여기서 호출. (audit cleanup PR §H, 2026-05-19)
          */
-        ~YoloV5_Torch_Onnx_RKNN_NPU() override = default;
+        ~YoloV5_Torch_Onnx_RKNN_NPU() override {
+            if( IsActive() ) {
+                TerminateEngine();
+            }
+        }
 
         // 복사 및 이동 생성자/대입 연산자 삭제 (Rule of Five/Zero)
         YoloV5_Torch_Onnx_RKNN_NPU( const YoloV5_Torch_Onnx_RKNN_NPU& ) = delete;

@@ -47,11 +47,14 @@ namespace MGEN
             std::string user_id;
             std::string user_pw;
             int  latency_ms          = 200;
-            int  timeout_us          = 2000000;
+            int  timeout_us          = 2000000;  // 원복 (2026-05-21): 2s. RTCP timeout 은 timeout property 와 무관 확인됨 (EOS cycle 종속)
             int  tcp_timeout_us      = 5000000;
             bool do_retransmission   = true;
             bool keepalive           = true;
             int  appsink_max_buffers = 2;
+
+            /// 진단용 cam_id (log/metric 에 명시). 0 = 미지정.
+            int  cam_id = 0;
 
             std::function<void()> on_error;
             std::function<void()> on_timeout;
@@ -95,10 +98,24 @@ namespace MGEN
         // leak hunt v4 — ResetSourceOnly 호출 누적 카운터 (EOS reconn 빈도 측정 + 매 reconn 시 leak 감시).
         uint64_t GetResetSourceCount() const noexcept { return reset_source_count_.load(); }
 
+        // 진단 (debug/gst-rtsp-stale-trace 2026-05-20) — 마지막 frame 수신 시각 (steady_clock ns).
+        int64_t GetLastFrameNs() const noexcept { return last_frame_ns_.load(); }
+
     private:
         static GstFlowReturn OnNewSample   ( GstAppSink* sink, void* user_data );
         static GstFlowReturn OnNewRawSample( GstAppSink* sink, void* user_data );
         static gboolean      OnBusMessage  ( GstBus* bus, GstMessage* msg, void* user_data );
+        // 측정 (2026-05-21): depay src pad probe — RTP/pre-decode buffer flow per cam.
+        //   stuck 시 이 counter 가 멈추면 data 가 decode 전(rtspsrc/socket)에서 정지,
+        //   계속 증가하면 decode 단계 stall. decoded counter(OnNewSample)와 비교해 stuck 위치 확정.
+        static GstPadProbeReturn OnDepayBufferProbe( GstPad* pad, GstPadProbeInfo* info, void* user_data );
+        // 검증 (2026-05-21): depay SINK probe — rtspsrc 가 depay 로 내보내는 buffer.
+        //   stuck 시 rtp_in=0 이면 block 이 rtspsrc 내부 (udpsrc/jitterbuffer), >0 이면 depay+ 단계.
+        static GstPadProbeReturn OnRtpInProbe( GstPad* pad, GstPadProbeInfo* info, void* user_data );
+        // 검증 (2026-05-21): rtpjitterbuffer stats 추적 — packet loss / RTX 대기 정지 확인.
+        static void     OnNewManager     ( GstElement* rtspsrc, GstElement* manager, void* user_data );
+        static void     OnNewJitterbuffer( GstElement* rtpbin, GstElement* jb, guint session, guint ssrc, void* user_data );
+        static gboolean OnJitterStatsTimer( void* user_data );
 
         bool BuildPipeline();
         void TeardownPipeline();
@@ -116,6 +133,10 @@ namespace MGEN
         std::thread     loop_thread_;
         guint           bus_watch_id_ = 0;
 
+        // 검증 (2026-05-21): rtpjitterbuffer stats 추적용
+        GstElement*     jitterbuffer_   = nullptr;  // weak ref, owner: pipeline (rtpbin 내부)
+        guint           jitter_timer_id_ = 0;
+
         std::atomic<bool>     running_         { false };
         std::atomic<uint64_t> frame_count_     { 0 };
         std::atomic<uint64_t> reconnect_count_ { 0 };
@@ -123,6 +144,9 @@ namespace MGEN
 
         // leak hunt v4 — ResetSourceOnly 호출 누적.
         std::atomic<uint64_t> reset_source_count_ { 0 };
+
+        // 진단 (debug/gst-rtsp-stale-trace 2026-05-20) — 마지막 frame 수신 시각 (steady_clock ns).
+        std::atomic<int64_t>  last_frame_ns_      { 0 };
 
         // leak hunt v4 — process-wide AVFrame alive count (ConvertSampleToAVFrame deleter wrap).
         static std::atomic<uint64_t> s_avframe_alive_;

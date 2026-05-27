@@ -166,6 +166,13 @@ namespace MGEN
         rtsp_setting.my_local_ip                    = this->init_profile_.local_ip;
         rtsp_setting.is_rtsp_proxy_static_with_init = camera_xml_is_static_in_service;
 
+        // ServerSetting.RtspPort (MVAS dynamic) 로 publish port 결정. 미존재 시 default 555.
+        if( auto setting_manager = MGEN::GetSettingManager() ) {
+            if( auto opt_server_setting = setting_manager->GetServerSetting(); opt_server_setting.has_value() ) {
+                rtsp_setting.proxy_server_port = std::to_string( opt_server_setting->rtsp_proxy_publish_port );
+            }
+        }
+
         return rtsp_setting;
     }
 

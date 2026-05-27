@@ -18,10 +18,15 @@ code/Engine/NPU/librknn_api/aarch64/librknnrt.so
 
 # Runtime logs (binary/rotated — .md 분석 문서만 추적)
 logs/*.log
+logs/*.txt
+logs/*.csv
 logs/*.out
+logs/*.json
+logs/*.jsonl
 logs/*.log.*
 logs/*.gz
 logs/*.sh
+!logs/monitor.sh
 logs/test_*/
 logs/audit_*/
 logs/gst_*/
@@ -29,14 +34,23 @@ logs/asan_*
 logs/massif*
 logs/bisect*
 *.log
+*.txt
+*.csv
+*.lock
+
+# master_logs/ 는 master 머지 증빙 archival — 위 *.log / *.txt 등 ignore 패턴 무력화 (모든 파일 추적)
+!master_logs/**
 
 # logs/ 임시 파일 (확장자 .log 외 — AI 작업 중 생성)
 logs/.current_*
 logs/.backup_*
 logs/sanity_*
+logs/.detectbase.lock
 
-# Trash (mv destination for deprecated artifacts)
-.deleted_backup/
+# Trash (abandoned/superseded artifacts; user runs real rm)
+.deleted/
+# Rollback / reusable snapshots (binaries, *.diagbak, *_rollback_* dirs)
+.backup/
 
 # Bundled static libraries (ABI incompatible — source build in docker)
 code/Protocol/REST/lib/
@@ -73,6 +87,9 @@ settings/NetworkSettings.local.json
 
 # Test data
 .test/
+
+# 임시 분석 도구 (세션 한정)
+scripts/permission_marker_audit.py
 
 # 그 외 임시 파일
 /tmp/

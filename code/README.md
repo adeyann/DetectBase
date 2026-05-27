@@ -21,7 +21,7 @@ code/
 ├── Protocol/
 │   ├── REST/         curl + restclient-cpp
 │   ├── SocketIO/     sioclient
-│   ├── RTSP/         RTSP 프록시 서버 (외부 라이브러리)
+│   ├── RTSP_GST/     GStreamer 기반 RTSP receiver (rtspsrc + avdec_h264) + proxy server (Full reset architecture, v0.1.14 부터 MPP/Option A 폐기)
 │   └── GRPC/         gRPC + protobuf — 분석 6 fix (shared_ptr handler registry) 적용
 ├── AbnormalActions/  침입/체류 이벤트 검사 (Line/Area Intrusion, Vehicle Intrusion/Parking)
 ├── Management/
@@ -80,7 +80,7 @@ DETECTOR 분기에서 활성인 EventClass:
 |---|---|---|---|
 | REST API | restclient-cpp | MVAS 카메라/스케줄 조회 | ON |
 | SocketIO | sioclient | MVAS 이벤트 송신 + 설정 변경 수신 | ON |
-| RTSP Proxy | (외부 lib) | 분석 결과 video stream 출력 | ON |
+| RTSP Proxy | GStreamer `gst-rtsp-server` (v0.1.14 부터 RTSP_GST 자체 통합) | 분석 결과 video stream 출력 | ON |
 | **GRPC (옵션)** | grpc-cpp | 노드 간 이벤트 / counter sync | OFF (NetworkSettings 로 활성화) |
 
 GRPC 활성화 / 운영 정책은 [상위 README §"GRPC 통신"](../README.md) 참고.
@@ -108,16 +108,30 @@ GRPC 활성화 / 운영 정책은 [상위 README §"GRPC 통신"](../README.md) 
 - const 정확성 필수
 - 공개 API 에 Doxygen 주석
 
-## 검증 상태 (3차 코드리뷰 후, 2026-05-09)
+## 검증 상태 (2026-05-27 — `master_logs/v0.1.18/audit_20260527_091456/` baseline, cmake 0.1.18 시점, ASan 4h + TSan 1h default run)
 
 | 항목 | 결과 |
 |---|---|
 | 자체 throw | 0건 (CLAUDE.md 100% 준수) |
 | C-style cast 자체 코드 | 0건 |
-| 자체 코드 ASan/UBSan 검출 | 0건 (외부 librknnrt.so init leak 만) |
-| 자체 코드 TSan 진짜 race | 0건 (NEW-8 fix 후 187건 모두 false positive) |
-| 자체 코드 cppcheck 결함 | 0건 (Tracker SORT 외부 알고리즘 7건만) |
+| 자체 코드 ASan/UBSan 검출 | 0건 (외부 librknnrt.so init leak + GStreamer rtpmanager runtime leak — 모두 수용) |
+| 자체 코드 TSan 진짜 race | **0건 ✅** (4 root cause 모두 fix: SioHandler UAF, InferenceCounter map, RegisterMetricsOnce init, SafeQueue shared_ptr ref) |
+| 자체 코드 cppcheck 결함 | **59건** (false positive + Profiler 자연정리 + cppcheck syntax quirk suppress 보존) |
+| 자체 코드 clang-tidy warning | **0건 ✅** (PR #9 NOLINT 24 + PR #13 EngineHandlerBase dtor pure virtual UB 진짜 fix) |
 | graceful shutdown | 10초, PROGRAM QUIT SUCCESS |
-| 운영 leak (RSS/FD/Thread) | 0건 (12분 측정) |
+| 운영 leak (RSS/FD/Thread) | 0건 (10h sanity baseline: RSS plateau ±20MB, FD/Threads stable) |
 
-자세한 내용: [.DOCS/REVIEW3/SUMMARY.md](../.DOCS/REVIEW3/SUMMARY.md) (레거시)
+### v0.1.13 ~ v0.1.18 변경 (5/26)
+- v0.1.13: per-cam stage FPS counter (0.1.12) revert — global mutex hot path 회귀
+- v0.1.14: MPP + Option A 완전 폐기 — Full reset 복귀 (5/24 baseline)
+- v0.1.15: REST `get_json_from_resp_body` silent catch → MLOG_WARN 추가 (운영 가시화)
+- v0.1.16: `Main.cpp` argv guard + `flock(2)` single-instance lock — PID 4924 사고 재발 방지 (Main.cpp 가 argv 무수신이라 `--version` 같은 호출이 풀 서비스 spawn → NPU 양분 → DFPS 50% 하락). 부수: monitor.sh 에 threshold alert 7 종 (storm/err/dfps_low/memory/wd/ftc/cam_loss) + boot ramp warmup grace 4 cycle.
+- v0.1.18: `GstRtspReceiver::TeardownPipeline` 의 `gst_object_unref(pipeline_)` 가 GStreamer 내부 thread join 에서 unbounded block 하던 결함 fix. cam 661 의 42분 cam_loss 의 root cause 였음 (backup log 10:09:33 ResetSourceOnly[661] 진입 후 영원히 return 안 함). `gst_element_get_state` timeout 시 unref 건너뛰고 의도된 leak. **5/26 22:00 ~ 5/27 09:06 누적 11.3h 후속 모니터 wd=1 (boot only) / cam_loss=0** (pre-fix 50min wd=6/cam_loss 영구). 단 fix path 미발화 — 다음 자연 stuck 시 실효성 동적 검증 가능.
+
+이 변경들 모두 5/27 audit 으로 검증 — 자체 코드 회귀 0건 (cppcheck 59 동일, clang-tidy 0, ASan/TSan 자체 코드 leak/race 0). 산출물: `master_logs/v0.1.18/audit_20260527_091456/`.
+
+자세한 내용:
+- [.DOCS/REVIEW3/SUMMARY.md](../.DOCS/REVIEW3/SUMMARY.md) (3차 review baseline, 레거시)
+- [../.DOCS/AUDIT_REPORT_20260519.md](../.DOCS/AUDIT_REPORT_20260519.md) (v0.1.0 audit baseline, legacy)
+- [../.DOCS/STUCK_ANALYSIS_cam659_20260520.md](../.DOCS/STUCK_ANALYSIS_cam659_20260520.md) (GstRtsp stale 추적, legacy)
+- [../.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](../.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md) (v2.0.0 Search engine 도입 가이드)

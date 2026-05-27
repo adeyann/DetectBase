@@ -10,17 +10,31 @@
 #include "IOStreamManager.h"
 
 #include "DETECTOR.h"
+#include "InitMain.h"
 
 #include <atomic>
+#include <cerrno>
 #include <csignal>
 #include <cstring>
+#include <iostream>
+#include <string>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/file.h>
 
 #ifdef __SANITIZE_ADDRESS__
 #include <sanitizer/lsan_interface.h>
 #endif
 
 using namespace MGEN;
+
+// 단일 instance lock — main() 진입점에서 획득. process 종료 시 kernel 이 자동 해제.
+//   목적: 동일 컨테이너 내에 DetectBase 가 두 번 떠서 NPU/cam 경쟁이 일어나는 사고 차단
+//         (예: 운영자가 실수로 `DetectBase --version` 같이 인자 무시 호출 → 풀 서비스 spawn).
+// 위치: /DetectBase/logs/ — DetectBase.log 쓰는 경로라 권한 확보됨.
+//       lock file 자체에는 내용 안 씀 (flock 은 file 내용 무관 / inode 의 advisory lock).
+static constexpr const char* DETECTBASE_LOCK_FILE = "/DetectBase/logs/.detectbase.lock";
+int g_lock_fd = -1; // process lifetime — 의도적으로 close 안 함 (lock 유지).
 
 std::atomic<bool>         g_terminate_flag    { false }; // 종료 요청 플래그
 volatile sig_atomic_t     g_force_exit_count  { 0 };     // signal handler 진입 카운트 (async-signal-safe)
@@ -41,8 +55,53 @@ void IgnoreSignalHandler( int Signal );
 void LeakCheckSignalHandler( int /*Signal*/ );
 #endif
 
-int main()
+int main( int argc, char* argv[] )
 {
+	// -------------------------------------------------------------------------
+	// argv guard — 모든 인자는 명시적 case 만 허용. 그 외는 silent ignore 안 하고 FATAL.
+	//   배경: Main.cpp 가 과거 int main() 형태로 argv 무수신 → 어떤 인자라도 silent ignore.
+	//         실수로 `DetectBase --version` 같은 통상적 호출이 풀 서비스를 한 번 더 spawn 하는
+	//         사고로 이어졌음 (2026-05-26, NPU 양분 → DFPS 50% 하락).
+	// -------------------------------------------------------------------------
+	for( int i = 1; i < argc; ++i ) {
+		const std::string a( argv[i] );
+		if( a == "--version" || a == "-v" ) {
+			std::cout << "DetectBase " << GetApplicationVersion() << std::endl;
+			return 0;
+		}
+		if( a == "--help" || a == "-h" ) {
+			std::cout
+				<< "Usage: DetectBase\n"
+				<< "  --version, -v   Print version and exit\n"
+				<< "  --help,    -h   Print this help and exit\n"
+				<< "(no positional or other flag arguments accepted)\n";
+			return 0;
+		}
+		std::cerr << "[FATAL] Unknown argument: " << a
+		          << " (use --help for usage)" << std::endl;
+		return 2;
+	}
+
+	// -------------------------------------------------------------------------
+	// Single-instance lock — argv 우회 (직접 호출 / 다른 인자 / supervisor 중복 spawn) 까지 차단.
+	//   flock(2) advisory lock — process 종료 시 kernel 이 자동 해제, stale lock file 무관.
+	//   Logger init 보다 먼저 수행 — duplicate process 가 log file 에 banner 찍지 못하게.
+	// -------------------------------------------------------------------------
+	g_lock_fd = open( DETECTBASE_LOCK_FILE, O_CREAT | O_RDWR, 0644 );
+	if( g_lock_fd < 0 ) {
+		std::cerr << "[FATAL] cannot open lock file " << DETECTBASE_LOCK_FILE
+		          << ": " << std::strerror( errno ) << std::endl;
+		return 4;
+	}
+	if( flock( g_lock_fd, LOCK_EX | LOCK_NB ) < 0 ) {
+		std::cerr << "[FATAL] another DetectBase instance is running "
+		          << "(lock " << DETECTBASE_LOCK_FILE << " held). Aborting."
+		          << std::endl;
+		// g_lock_fd 는 close 안 해도 process exit 시 자동 해제됨.
+		return 3;
+	}
+	// g_lock_fd 는 의도적으로 close 안 함 — lock 을 process lifetime 동안 유지.
+
 	// Logger initialize first
 	InitLogger();
 

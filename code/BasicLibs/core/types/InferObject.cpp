@@ -95,9 +95,11 @@ namespace MGEN
     // --- Coordinate Conversion Helper Functions ---
 
     // 내부 헬퍼 함수: 입력 BBox를 중간 형식(ratio_float, ltx_type)으로 변환
+    // NOLINTBEGIN(bugprone-easily-swappable-parameters)
     static bool ConvertToIntermediateRatioLtx(
         const InferBBox& bbox, BBoxReferenceType ref_type, BBoxCoordinateFormat format,
         int src_width, int src_height, float& ratio_ltx_x, float& ratio_ltx_y, float& ratio_w, float& ratio_h )
+    // NOLINTEND(bugprone-easily-swappable-parameters)
     {
         if( src_width <= 0 || src_height <= 0 ){
             MLOG_ERROR("ConvertToIntermediateRatioLtx: Source dimensions must be positive (%dx%d).", src_width, src_height);
@@ -153,10 +155,12 @@ namespace MGEN
     }
 
     // 내부 헬퍼 함수: 중간 형식(ratio_float, ltx_type) -> 최종 목표 형식으로 변환
+    // NOLINTBEGIN(bugprone-easily-swappable-parameters)
     static bool ConvertFromIntermediateRatioLtx(
         float ratio_ltx_x, float ratio_ltx_y, float ratio_w, float ratio_h,
         const ImageExpressStyle& dst_style, // 목표 스타일 정보 사용
         InferBBox& result_bbox )            // 결과를 직접 수정
+    // NOLINTEND(bugprone-easily-swappable-parameters)
     {
         if( dst_style.width <= 0 || dst_style.height <= 0 )
         {

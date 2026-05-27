@@ -80,6 +80,7 @@ namespace MGEN::Abnormal
         return true;
     }
 
+    // NOLINTBEGIN(bugprone-branch-clone) — event type 별 case 명시 (향후 확장 의도, 가독성 우선).
     const int Schedule::GetAbnormalRequireFrame( const EventClass event_type ) const noexcept
     {
         switch( event_type ) {
@@ -99,6 +100,7 @@ namespace MGEN::Abnormal
         default:                         return MGEN::DefineDefault::DEFAULT_EVENT_FRAME_RELEASE_S_SEC;
         }
     }
+    // NOLINTEND(bugprone-branch-clone)
 
     string Schedule::GetEventName( const EventClass event_type ) noexcept
     {
@@ -111,6 +113,7 @@ namespace MGEN::Abnormal
         }
     }
 
+    // NOLINTBEGIN(bugprone-branch-clone) — event type 별 case 명시 (향후 확장 의도, 가독성 우선).
     TrackFlag Schedule::GetTrackType( const EventClass event_type ) noexcept
     {
         switch( event_type ) {
@@ -121,6 +124,7 @@ namespace MGEN::Abnormal
         default:                           return TRACK_ALL_OFF;
         }
     }
+    // NOLINTEND(bugprone-branch-clone)
 
     void Schedule::SetExtendedDataToJson( nlohmann::json& json_object, const MGEN::InferObject& infer_object, const EventClass event_type ) noexcept
     {
@@ -151,6 +155,7 @@ namespace MGEN::Abnormal
         }
     }
 
+    // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
     const int Schedule::GetUidSuffixNumber( const int track_id, const int non_track_suffix_identifier ) const noexcept
     {
         switch( this->sch_info.event_code ) {
@@ -198,6 +203,8 @@ namespace MGEN::Abnormal
         std::strftime( fmt_date, sizeof( fmt_date ), "%Y-%m-%d", time_info );
         const string str_date { fmt_date };
 
+        // raw loop 가독성 우선.
+        // cppcheck-suppress useStlAlgorithm
         for( const string& dateString : black_list ) {
             if( dateString == str_date )
                 return true;
