@@ -140,7 +140,7 @@ This gate is DetectBase's definition of "verified" (A4). Unit tests are not the 
 - 검증 부족 시 master 가까이 가지 않음 — develop 에 그대로 두고 모니터링 시간 채우기.
 
 ### Directory Structure
-- code/ source · engines/ NPU engines · bin/ build output · settings/ config · scripts/ service scripts · logs/ active artifacts · .DOCS/ legacy md · .backup/ rollback/reusable snapshots · .deleted/ trash · .claude/ agents+skills
+- code/ source · engines/ NPU engines · bin/ build output (gitignored) · settings/ config · scripts/ service scripts · logs/ active artifacts (audit_*/, monitor JSONL — gitignored) · master_logs/ master merge 증빙 archival (per-version, git-tracked) · .DOCS/ legacy md · .backup/ rollback/reusable snapshots · .deleted/ trash · .claude/ agents+skills
 
 ### Document Lifecycle
 Active (logs/) → Legacy (.DOCS/, md only) → Trash (.deleted/) or rollback Backup (.backup/). Update references on move.
@@ -152,4 +152,4 @@ Active (logs/) → Legacy (.DOCS/, md only) → Trash (.deleted/) or rollback Ba
 - NPU: `insmod rknpu.ko` → `/dev/dri/renderD129` required.
 - Memory allocator: jemalloc via LD_PRELOAD; glibc-only patterns (malloc_trim) are no-op under jemalloc.
 - GStreamer rtpmanager long-running leak (external lib, ~340 MB/year, accepted; do not "fix" in our code).
-- GstRtspClient cam stale/stuck (under investigation): RTP frames stop mid-stream, TCP ESTAB held, no EOS. Confirmed client-side (UDP socket fills to cap, kernel drops rising = server still sending, GStreamer not draining). Stage localization in progress.
+- GstRtspClient cam stale/stuck (root cause still unknown for the stream-stop itself): RTP frames stop mid-stream, TCP ESTAB held, no EOS. Confirmed client-side (UDP socket fills to cap, kernel drops rising = server still sending, GStreamer not draining). **Defensive workaround applied at v0.1.18**: `GstRtspReceiver::TeardownPipeline()` skips `gst_object_unref(pipeline_)` on state-NULL-transition timeout (intentional leak, OS cleanup on process restart) so cam_loss escalates no longer requires process restart. Underlying stream-stop cause `[1]` + GStreamer thread-join failure cause `[5]` still unidentified — next natural stuck = empirical fix-path validation opportunity.

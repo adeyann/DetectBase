@@ -186,11 +186,7 @@ CLAUDE.md §Work Rules + .claude/skills/git-workflow.md + memory `feedback_git_w
 ### BasicLibs 정리 권장 (legacy 출처: [.DOCS/BASICLIBS_AUDIT.md](../.DOCS/BASICLIBS_AUDIT.md) §6 P3)
 **누락됐다가 복원 (5/27)**. v1.0.0 정리 단계에서 같이 진행 가능:
 
-1. **ClassChecker YAML → JSON 마이그레이션 + vendored yaml-cpp 제거**
-   - 현 `code/BasicLibs/core/parser/yaml-cpp/` (.a 포함) 사용처 = `code/BasicLibs/core/types/ClassChecker.h` 1개
-   - YAML 파일 1개 (engines/engine.classes.yaml or similar) JSON 변환 + 사용 코드 nlohmann::json 로 교체
-   - 효과: ~3,000 LOC 제거 (vendored yaml-cpp)
-   - 작업 ~1-2 시간
+1. ~~**ClassChecker YAML → JSON 마이그레이션 + vendored yaml-cpp 제거**~~ — ✅ **이미 완료 (P3, 2026-05-14)**. `code/BasicLibs/core/parser/yaml-cpp/` 디렉토리 제거 + ClassChecker 가 nlohmann::json 사용 ([ClassChecker.h:14-16](../code/BasicLibs/core/types/ClassChecker.h#L14)) + `engines/engine.classes.json` 으로 변환 완료. [code/BasicLibs/CMakeLists.txt:36](../code/BasicLibs/CMakeLists.txt#L36) 코멘트 참조. 본 항목은 historical only — 5/27 점검 시 false TODO 였음 발견.
 
 2. **SafeThread → ThreadPool 도입** (확장 시점에)
    - 현 SafeThread 29건 사용. cam 별 인스턴스 분리 (no pool)

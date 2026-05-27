@@ -226,7 +226,7 @@ if( this->use_search_service_ ) {
 
 ### 7.2 신규 작성
 - `code/Engine/NPU/Resnet_Torch_Onnx_RKNN_NPU/` — Search engine handler
-- `engines/Search/` — RKNN 모델 + profile.json + classes.yaml
+- `engines/Search/` — RKNN 모델 + profile.json + classes.json (P3 2026-05-14 YAML → JSON 마이그레이션 후 .json 사용)
 - `settings/EngineSettings.json` — Search engine entry 추가
 - `code/Main/DETECTOR/include/SearchClassConverter.h` — MAIA `RAID_SearchClassConverter` 참고
 
