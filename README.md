@@ -65,8 +65,8 @@ Odroid M2 NPU 기반 RTSP 비디오 분석 베이스 프로젝트. 객체 탐지
 │  ┌───── 입력 ─────┐   ┌──── 분석 ────┐   ┌─── 출력 ───┐                   │
 │  │ RTSP 카메라 N  │   │  NPU 추론     │   │ SocketIO   │ → MVAS broker     │
 │  │ (외부 호스트)  │ → │  (YOLOv5)     │ → │ REST       │ → MVAS API        │
-│  │ rtsp_proxy_*  │   │  + SORT       │   │ RTSP proxy │ → 외부 viewer     │
-│  │ (디코딩)       │   │  + Abnormal   │   │ GRPC (선택) │ → 다른 노드       │
+│  │ GstRtsp       │   │  + SORT       │   │ RTSP proxy │ → 외부 viewer     │
+│  │ Receiver      │   │  + Abnormal   │   │ GRPC (선택) │ → 다른 노드       │
 │  └──────────────┘   └──────────────┘   │ 이미지 저장 │ → /frame 디스크   │
 │                                       └────────────┘                    │
 │                                                                          │
@@ -107,7 +107,7 @@ Odroid M2 NPU 기반 RTSP 비디오 분석 베이스 프로젝트. 객체 탐지
 [T+0ms]    카메라 RTSP RTP 송신
               │
               ▼
-[T+5ms]    rtsp_proxy 라이브러리 디코드 (FFmpeg)
+[T+5ms]    GStreamer rtspsrc + avdec_h264 디코드 (GstRtspReceiver)
               │   AVFrame 생성
               ▼
 [T+5ms]    RtspDetectorUnit::avframe_q_ 에 enqueue
@@ -165,14 +165,13 @@ Odroid M2 NPU 기반 RTSP 비디오 분석 베이스 프로젝트. 객체 탐지
 | **객체 트래킹** | SORT (Simple Online Realtime Tracking) | 자체 구현 | Kalman 필터 + Hungarian 매칭. 가벼움 |
 | **영상 디코딩** | FFmpeg (libav*) | apt | RTSP / RTP / H.264 / H.265 표준 |
 | **영상 처리** | OpenCV | apt | resize, color convert, imwrite |
-| **RTSP** | 자체 라이브러리 (외부 포팅) | — | RTSP 서버 + proxy + client 통합 |
+| **RTSP** | GStreamer 1.20.3 (`rtspsrc` + `avdec_h264`) | apt | RTSP 수신 (`GstRtspReceiver`) + Proxy 서버 (`GstRtspProxyServer`) + Client wrapper (`GstRtspClient`) + ONVIF metadata payloader (자체 구현). v0.1.14 부터 happytimesoft 외부 RTSP 라이브러리 폐기 → GStreamer 통합. |
 | **REST 통신** | restclient-cpp | 0.5.3 | MVAS API 호출 (카메라/스케줄 조회) |
 | **WebSocket 유사 통신** | socket.io-client-cpp | 3.1.0 | MVAS broker 와 이벤트 송수신 (양방향) |
 | **RPC** | gRPC + protobuf | v1.30.2 | 노드 간 이벤트/counter 송신 (선택, Master/Slave) |
 | **메트릭 exporter** | prometheus-cpp | v1.3.0 | Prometheus 표준 메트릭 endpoint |
 | **JSON 파싱** | nlohmann/json | apt | 설정 / 로그 / SocketIO payload |
 | **YAML 파싱** | yaml-cpp | apt | 클래스 정의 (classes.yaml) |
-| **XML 파싱** | tinyxml (자체 포함) | — | RTSP 설정 (외부 라이브러리 호환) |
 | **빌드** | CMake 3.17+ + GCC 11 | apt | aarch64 native |
 | **컨테이너** | Docker + docker-compose | — | aarch64 격리 빌드/실행 |
 | **로그 회전** | logrotate | apt | 100MiB × 7개 자동 보관 |
@@ -259,10 +258,10 @@ Odroid M2 NPU 기반 RTSP 비디오 분석 베이스 프로젝트. 객체 탐지
 | main thread | 1 | 부팅 + 종료 대기 + signal handling |
 | **InferenceThread** (per camera) | N (=4) | avframe_q dequeue → 전처리 → engine 요청 → 응답 대기 → tracker → abnormal |
 | **IOWorker thread** (per camera) | N (=4) | io_work_queue dequeue → cv::imwrite + L2 정기/비상 청소 |
-| **RTSP receive thread** (per camera, 외부 라이브러리) | N (=4) | RTSP packet 수신 + 디코드 → avframe_q enqueue |
+| **RTSP receive thread** (per camera, GStreamer `rtspsrc` + `avdec_h264`) | N (=4) | RTSP packet 수신 + 디코드 → avframe_q enqueue |
 | NPU EngineHandler thread | 1 | engine_input_q dequeue → rknn_run (동기) → infer_respond_q enqueue |
 | ReplyDispatcher thread | 1 | infer_respond_q dequeue → unit_id 별 분배 |
-| RTSP server thread (외부 라이브러리) | 2~3 | 분석 결과 RTSP proxy 출력 |
+| RTSP server thread (GStreamer `gst-rtsp-server`) | 2~3 | 분석 결과 RTSP proxy 출력 |
 | SocketIO emit control thread | 1 | emit_queue dequeue → 외부 broker 송신 |
 | SocketIO inbound thread (외부 라이브러리) | 1~2 | 설정 변경 수신 |
 | GRPC server / client thread (조건부) | 0~2 | 노드 간 통신 |
@@ -294,15 +293,17 @@ Odroid M2 NPU 기반 RTSP 비디오 분석 베이스 프로젝트. 객체 탐지
 ```
 SIGINT/SIGTERM
    ↓
-#01. Stop Detector Block         (모든 Unit thread join)
-#02. Stop Engines                (NPU 추론 종료)
-#03. Stop Service Implements     (InferenceCounter / LoadBalancer)
+###. PROGRAM QUIT START
+#00. Stop GRPC Server            (외부 client 의 새 요청 수신 차단 — Phase 2 fix 후 detached thread shared_from_this 안전)
+#01. Terminate Engines           (NPU 추론 종료)
+#02. Terminate Load Balancer     (engine_input_q dispatcher 종료)
+#03. Stop Service Implements     (Detector Block / 모든 Unit thread join)
 #04. Stop Network Flow           (SocketIO / REST / GRPC client)
 #05. Stop IO Stream Manager      (모든 큐 terminate)
 ###. PROGRAM QUIT SUCCESS        (이 출력 후 컨테이너 종료)
 ```
 
-**순서 변경 금지** — DETECTOR.cpp 의 "DO NOT REORDER" 코멘트 참조. UAF 위험.
+**순서 변경 금지** — [DETECTOR.cpp:391-393](code/Main/DETECTOR/src/DETECTOR.cpp#L391) `!!! DO NOT REORDER !!!` 코멘트 참조. UAF 위험. (SocketIO close 진행 중 RtspDetectorUnit destroy 시 setting callback 이 stale unit 접근.)
 
 ---
 
@@ -330,7 +331,7 @@ code/
 ├── Protocol/          외부 통신 (4 가지 채널)
 │   ├── REST/          curl + restclient-cpp
 │   ├── SocketIO/      sioclient
-│   ├── RTSP/          외부 라이브러리 (rtsp 서버 + proxy + client)
+│   ├── RTSP_GST/      GStreamer 기반 (rtspsrc + avdec_h264) + proxy server + ONVIF payloader. v0.1.14 부터 happytimesoft 폐기 후 자체 통합
 │   └── GRPC/          gRPC + protobuf — 분석 6 fix 적용 (shared_ptr handler registry)
 │
 ├── AbnormalActions/   침입/체류 이벤트 검사
@@ -338,7 +339,7 @@ code/
 │
 ├── Management/
 │   ├── manager/       SettingManager / NetworkManager / EngineLoadBalancer / IOStreamManager
-│   └── worker/        ApiHandler / SioHandler / RtspHandler / SettingMonitor / InferenceCounter
+│   └── worker/        ApiHandler / SioHandler / RtspHandler / EngineClient / SettingMonitor / InferenceCounter
 │
 ├── Main/
 │   ├── BASE/          main() + signal handler + logger init
@@ -507,7 +508,7 @@ code/
 
 - 분석 결과 (탐지 박스 overlay 등) 를 video stream 으로 출력
 - 외부 viewer (예: VLC) 가 `rtsp://<host>:555/<cam_id>` 로 접근 (2026-05-19 PR #12 로 mount path `/cam<id>` → `/<id>`, port 8554 → 555 변경)
-- 외부 라이브러리 호환성 패턴 (rua_proxy_init 등) — 변경 안 함
+- 구현: [code/Protocol/RTSP_GST/src/GstRtspProxyServer.cpp](code/Protocol/RTSP_GST/src/GstRtspProxyServer.cpp) (GStreamer `gst-rtsp-server` 기반, v0.1.14 부터 자체 통합 — 이전 happytimesoft 외부 라이브러리 폐기)
 
 ### gRPC (선택, 분기 프로젝트용)
 

@@ -46,7 +46,7 @@ done
 ```
 
 Launch via Monitor:
-- `description`: e.g., `"happytimesoft baseline 60min sanity (10min × 6)"`
+- `description`: e.g., `"v018_teardown_fix 60min sanity (10min × 6)"` (label-driven; happytimesoft was the pre-v0.1.14 baseline name)
 - `timeout_ms`: `3600000` (1 h max), or shorter for shorter watches
 - `persistent`: `false` (auto-end on exit)
 
@@ -63,7 +63,7 @@ Distinguish ramp-up from leak before declaring failure:
 | Burst growth | +30, +1, +1 | One-time large allocation. Compare against known patterns (e.g., `fs::directory_iterator` burst during emergency cleanup). |
 | Hard leak | +50, +60, +70 | Stop the run, snapshot `/proc/PID/smaps`, capture with ASan or pmap. |
 
-For this project specifically: **48h baseline tolerates +47 MB / 48 h** (RtspDetectorUnit.cpp:230 comment). Anything within that envelope after plateau is normal. Plateau reaches around Up 60~80 min on this system.
+For this project specifically: **48h baseline tolerates +47 MB / 48 h** (RtspDetectorUnit.cpp:240 comment, "48h 테스트 시 후반 10h 에서 RssAnon +47 MB 증가 관측"). Anything within that envelope after plateau is normal. Plateau reaches around Up 60~80 min on this system.
 
 ## Metric Endpoints (this project)
 

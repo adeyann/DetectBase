@@ -23,12 +23,14 @@
 
 **graceful shutdown 순서** (정상):
 ```
-#01 Stop Detector Block      (cam thread join, 5초 정도)
-#02 Stop Engines             (NPU 추론 종료)
-#03 Stop Service Implements
-#04 Stop Network Flow        (SocketIO/REST/GRPC client)
+###. PROGRAM QUIT START
+#00 Stop GRPC Server          (외부 client 의 새 요청 수신 차단)
+#01 Terminate Engines         (NPU 추론 종료)
+#02 Terminate Load Balancer   (engine_input_q dispatcher 종료)
+#03 Stop Service Implements   (Detector Block / 모든 Unit thread join, 5초 정도)
+#04 Stop Network Flow         (SocketIO/REST/GRPC client)
 #05 Stop IO Stream Manager
-###. PROGRAM QUIT SUCCESS    (이 줄 출력 후 docker container 종료)
+###. PROGRAM QUIT SUCCESS     (이 줄 출력 후 docker container 종료)
 ```
 
 PROGRAM QUIT SUCCESS 안 나오면 비정상 — §5 트러블슈팅 §5.1 참고.

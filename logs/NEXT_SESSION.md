@@ -80,7 +80,7 @@ ResetSourceOnly 가 호출한 TeardownPipeline 의 unref 가 hang. ReconnectWork
 - 초기 증상: DFPS 115→66, RSS 671→1306MB (정확히 2배), warn 분당 ~10k sustained, MetricsRegistry::Failed ERROR 1건
 - 처음엔 5/24 와 동형의 baseline storm 으로 추정. 정밀 분석 결과 cause 가 다름 (자연 회복 안 되는 점)
 - **root cause 확정**: PID 4924 = `docker exec ... DetectBase --version` 호출이 풀 서비스 spawn
-  - [Main.cpp:44](../code/Main/BASE/src/Main.cpp#L44) 가 `int main()` 형태로 argv 무수신 → `--version` 무시되고 그대로 서비스 부팅
+  - [Main.cpp:62](../code/Main/BASE/src/Main.cpp#L62) 의 코멘트 "과거 `int main()` 형태로 argv 무수신" 가 사고 배경 설명. L58 `int main( int argc, char* argv[] )` + L67~76 argv parser 가 fix.
   - 두 instance 가 같은 4 cam + 3 NPU core 동시 점유 → 영구 2x producer 부하 → queue 영구 saturation
 - PID 4924 kill 시점에 DFPS / RSS / CPU 모두 정확히 1/2 로 복귀 — duplicate process 가 원인이라는 결정적 증거
 
@@ -172,7 +172,7 @@ CLAUDE.md §Work Rules + .claude/skills/git-workflow.md + memory `feedback_git_w
 - 영향: Full reset 에는 큰 dip 없음, critical 아님. 미래 cleanup 후보
 
 ### NPU batch_size — code 가 batch=1 hard-assumed (5/26 발견)
-[YoloV5_Torch_Onnx_RKNN_NPU.cpp:412](../code/Engine/NPU/YoloV5_Torch_Onnx_RKNN_NPU/YoloV5_Torch_Onnx_RKNN_NPU.cpp#L412) 의 잘못된 검증 + line 505 input.size 단일 frame 만 할당. 현재 batch=1 hard-locked. 6+ cam scale-up 시 NPU 천장 도달하면 batch>1 검토 가치. 그때 3가지 동시 fix 필요.
+[YoloV5_Torch_Onnx_RKNN_NPU.cpp:412](../code/Engine/NPU/YoloV5_Torch_Onnx_RKNN_NPU/YoloV5_Torch_Onnx_RKNN_NPU.cpp#L412) 의 잘못된 검증 + [line 512](../code/Engine/NPU/YoloV5_Torch_Onnx_RKNN_NPU/YoloV5_Torch_Onnx_RKNN_NPU.cpp#L512) `input.size = rknn_model_w * rknn_model_h * rknn_model_c` 단일 frame 만 할당. 현재 batch=1 hard-locked. 6+ cam scale-up 시 NPU 천장 도달하면 batch>1 검토 가치. 그때 3가지 동시 fix 필요.
 
 ### v2.0.0 Multi-engine (Search 등) 도입 가이드 — [.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](../.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md)
 - MAIA 참고. event-driven 패턴이라 NPU 부담 미미 (~2.4 inference/sec)
@@ -218,7 +218,7 @@ CLAUDE.md §Work Rules + .claude/skills/git-workflow.md + memory `feedback_git_w
    - `RtspDetectorUnit.cpp:1624 / 1747` `RSP-thread (avg over 100 cycles...)` — 동일 빈도, 라인 길이 매우 김 (50+ field)
    - `RtspDetectorUnit.cpp:1931` `event_detected type=X cam=N count=M` — traffic burst 시 분당 100-200줄 (5/24 storm 분석 시 진짜 시그널 찾기 어려운 노이즈)
    - `RtspDetectorUnit.cpp:2034` `EVT-thread (avg over 100 event cycles...)`
-   - **효과**: Release build (`DEBUG_MODE` off) 에서 compile-out (`MgenLogger.h:47-50` cutoff = INFO) → 운영 log volume 대폭 감소 + 실 incident (frame-age watchdog / ResetSourceOnly / EOS) 신호 명확. cam_loss 분석 시 SignalNoise 비율 ↑.
+   - **효과**: Release build (`DEBUG_MODE` off) 에서 compile-out (`MgenLogger.h:48-53` `LOG_LEVEL_CUTOFF = LogLevel::INFO` — DEBUG_MODE 분기) → 운영 log volume 대폭 감소 + 실 incident (frame-age watchdog / ResetSourceOnly / EOS) 신호 명확. cam_loss 분석 시 SignalNoise 비율 ↑.
 
 3. **TSan SafeQueue 잔존 race cleanup** — 5/19 audit baseline 시점 자체 코드 race 0건 ✅. 단 v1.0.0 시점 SafeQueue 의 shared_ptr ref counting / max_size 변경 path / drop_count 경합 등 deep review 권장.
 
