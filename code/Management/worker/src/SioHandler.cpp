@@ -225,7 +225,10 @@ namespace MGEN
                     ack_data["status"]        = "success";
                     ack_resp.push(createObject(ack_data));
 
+#ifdef DEBUG_MODE
+                    // ack 보냄 진단 — Release 빌드 compile-out (per-ack noisy).
                     MLOG_INFO( " * Ack response sended for event : %s", recv_event_name.c_str() );
+#endif
                 }
 
                 self->event_binders[recv_event_name]->Run( sio_js );

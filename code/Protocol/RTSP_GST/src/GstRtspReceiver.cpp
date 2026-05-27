@@ -69,9 +69,13 @@ namespace MGEN
                 reg.RegisterCounter( METRIC_RTP_IN_TOTAL,       "Buffers entering rtph264depay sink pad per cam_id (rtspsrc output — stuck-stage trace)" );
 #endif
                 reg.RegisterCounter( METRIC_RTCP_TIMEOUT_TOTAL, "GstRTSPSrcTimeout cause=RTCP occurrences per cam_id (measurement — behavior unchanged)" );
+#ifdef DEBUG_MODE
+                // jitterbuffer stats — production 가치 모호 (RTCP_TIMEOUT_TOTAL 와 부분 중복).
+                //   incident 분석 용도라 DEBUG_MODE wrap. Debug 빌드에선 OnJitterStatsTimer 가 5초 주기 update.
                 reg.RegisterGauge  ( METRIC_JB_PUSHED,          "rtpjitterbuffer num-pushed per cam_id" );
                 reg.RegisterGauge  ( METRIC_JB_LOST,            "rtpjitterbuffer num-lost per cam_id" );
                 reg.RegisterGauge  ( METRIC_JB_RTX_COUNT,       "rtpjitterbuffer rtx-count per cam_id" );
+#endif
             } );
         }
     } // anonymous
@@ -260,6 +264,7 @@ namespace MGEN
 
     gboolean GstRtspReceiver::OnJitterStatsTimer( void* user_data )
     {
+#ifdef DEBUG_MODE
         auto* self = static_cast<GstRtspReceiver*>( user_data );
         if( !self->running_.load() || !self->jitterbuffer_ ) return TRUE;
 
@@ -278,6 +283,10 @@ namespace MGEN
             reg.SetGauge( METRIC_JB_RTX_COUNT, labels, static_cast<double>( rtx_count ) );
             gst_structure_free( stats );
         }
+#else
+        // Release 빌드에선 timer callback 이 noop. timer 자체 cost 미미 (5초 주기, 1회 g_timeout_add).
+        (void) user_data;
+#endif
         return TRUE;  // 반복
     }
 

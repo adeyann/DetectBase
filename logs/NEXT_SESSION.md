@@ -1,7 +1,7 @@
 # NEXT_SESSION — v0.1.19 작업 진입
 
 **최종 갱신**: 2026-05-27 KST
-**현 develop HEAD**: cmake VERSION = `0.1.22` (작업 D carry). last master tag = `v0.1.18` (2026-05-27, PR #25). 마지막 push commit cmake = `0.1.21` (작업 C — placeholder dead code 제거).
+**현 develop HEAD**: cmake VERSION = `0.1.23` (작업 E carry). last master tag = `v0.1.18` (2026-05-27, PR #25). 마지막 push commit cmake = `0.1.22` (작업 D — GstRtsp debug metric + GRPC trace DEBUG_MODE wrap).
 **진입 branch**: `cleanup/debug-virtual-lines` (develop fork).
 
 ---
@@ -156,7 +156,7 @@ v0.1.18 TeardownPipeline unref-skip 패치 ([GstRtspReceiver.cpp:314-340](../cod
 
 | 문서 | 내용 |
 |------|------|
-| [README.md](../README.md) | 프로젝트 전체 (Version 0.1.22) |
+| [README.md](../README.md) | 프로젝트 전체 (Version 0.1.23) |
 | [CLAUDE.md](../CLAUDE.md) | 코딩 표준 + master merge gate + git workflow 정책 (source of truth) |
 | [OPERATIONS.md](../OPERATIONS.md) | 운영 트러블슈팅 |
 | [.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](../.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md) | v2.0.0 Search engine 도입 가이드 |
