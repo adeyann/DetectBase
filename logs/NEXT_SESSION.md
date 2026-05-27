@@ -244,7 +244,7 @@ ResetSourceOnly 가 호출한 TeardownPipeline 의 unref 가 hang. ReconnectWork
 
 | 문서 | 내용 |
 |------|------|
-| [README.md](../README.md) | 프로젝트 전체 (Version 0.1.17) |
+| [README.md](../README.md) | 프로젝트 전체 (Version 0.1.18) |
 | [CLAUDE.md](../CLAUDE.md) | 코딩 표준 + master merge gate + git workflow 정책 (5/26 갱신) |
 | [OPERATIONS.md](../OPERATIONS.md) | 운영 트러블슈팅 |
 | [.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](../.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md) | v2.0.0 Search engine 도입 가이드 |
