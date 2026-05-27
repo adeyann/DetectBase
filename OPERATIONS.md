@@ -113,21 +113,27 @@ curl -s http://localhost:9090/metrics | grep -E "^detectbase_grpc_"
 
 | 메시지 패턴 | 의미 | 대응 |
 |---|---|---|
-| `Engine ... timeout` | NPU 추론 5초 timeout (1회는 일시 — 5초 초과 시 ERROR) | 일시 발생은 무시. 지속 시 NPU 디바이스 + RKNN 모델 호환성 점검 |
-| `imwrite ... failed` | 디스크 쓰기 실패 (권한 / 디스크 가득 / IO 에러) | df / 디렉토리 권한 확인. emergency_cleanup 작동 여부 확인 |
-| `socketio connection lost` | SocketIO 단절 | reconnect 자동 (지수 백오프). reconnect_total 증가 추이 확인 |
-| `RTSP ... failed` | RTSP 카메라 연결 실패 | 카메라 IP / 인증 / 네트워크 점검. RTSP unit 자동 재연결 |
-| `GRPC ... init failed` | GRPC peer 연결 실패 | peer 주소 점검. NetworkSettings.json grpc_peers 확인 |
+| `Engine ... timeout (Waited max 5000 ms)` | NPU 추론 5초 timeout (1회는 일시 — 5초 초과 시 ERROR) | 일시 발생은 무시. 지속 시 NPU 디바이스 + RKNN 모델 호환성 점검 |
+| `SocketIO Connection Faild, Timeout(10s)` | SocketIO 단절 (10s connect timeout) | reconnect 자동 (지수 백오프, max 30s). socketio_reconnect_total 증가 추이 확인 |
+| `SocketIOEventBind() Failed` | SocketIO event handler 등록 실패 (init 단계) | SocketIO listener 설정 점검. 단발이면 재시도, 지속 시 broker 호환성 |
+| `RtspHandler->RunRTSP() failed` / `InitializeRTSPWithStaticCameraList FAILED` | RTSP unit start 실패 (init 단계) | 카메라 IP / 인증 / NetworkSettings.json 점검. RTSP unit 자동 재연결 (운영 중 단발) |
+| `GRPC Client[<name>] init exception: <msg>` | GRPC peer 연결 실패 (init 단계 throw 발생) | peer 주소 점검. NetworkSettings.json `GRPC_Peers` 확인. exception 메시지로 cause 식별 |
+| `[GRPC FAIL][Response/CounterSnapshot] trace_id=...` | GRPC server 응답 실패 | peer 호스트 점검. NetworkSettings.json `GRPC_Server_*` 확인 |
 | `RenewAfterReset: skip UnitID ... (Update failed)` | 설정 부분 실패 (graceful degradation) | setting_partial_failure_total 메트릭 확인. 실패 unit 의 설정 형식 점검 |
+
+**비고**: `imwrite ... failed` 같은 ERROR 메시지는 현 코드에 없음 (디스크 가득 시 WARN `imwrite skipped` 로 처리, ERROR 단계 아님). 디스크 권한 issue 는 emergency_cleanup 작동 안 함 + L1 차단 외 별도 ERROR 출력은 없음.
 
 ### WARN
 
 | 메시지 패턴 | 의미 | 대응 |
 |---|---|---|
-| `decoded frame not received...` | RTSP stream 일시 단절 (1분 timeout) | 재연결 진행 중. 5분 이상 지속 시 카메라 점검 |
+| `GstRtspClient[N] frame-age watchdog: <s>s 무프레임 → 강제 reset` | RTSP stream 일시 단절 — 12s 무프레임 시 force reset 트리거 (v0.1.18 부터 TeardownPipeline unref-skip 적용) | 재연결 자동. 빈발 시 cam server / 네트워크 점검 |
+| `GstRtspReceiver[N] EOS received src=...` | RTSP stream EOS (5분 mp4 cycle 또는 server 명시 종료) | 자동 재연결. 정상 동작 |
+| `GstRtspReceiver[N] GstRTSPSrcTimeout cause=<n>` | RTSP/RTCP 통신 timeout (RTCP / TEARDOWN 등) | RTCP cause 는 measure 만 (reconnect 안 함). 다른 cause 는 자동 reconnect. 빈발 시 server 점검 |
+| `GstRtspReceiver[N] bus WARNING src=... debug=...` | GStreamer pipeline 내부 warning (rtpmanager / udpsrc 등) | 대부분 무해. 동일 패턴 빈발 시 GST_DEBUG=2 진단 |
+| `TeardownPipeline[N] — pipeline NULL transition 실패 (result=%d, state=%d). gst_object_unref 건너뜀` | v0.1.18 TeardownPipeline unref-skip 발화 (5s timeout 시 의도된 leak, OS cleanup 의존) | **v0.1.18 fix path 발화 시그널**. 빈발 시 → stuck 재발 → escalation Step 2-4 (자세한 내용 NEXT_SESSION) |
 | `imwrite skipped — frame disk ... ≥ 90%` | L1 사전 차단 작동 (디스크 90%) | 정상 동작. emergency cleanup 작동 확인. 만성이면 디스크 증설 |
 | `EMERGENCY cleanup` | L2-Emergency 작동 (80% 도달) | 정상 동작. 주기 빈도 높으면 retention 일수 줄이거나 디스크 증설 |
-| `Packet queue full ... Dropping non-key frame` | RTSP packet drop (대부분 startup 또는 instrumentation 빌드) | 정상 운영에선 거의 발생 X. TSan 빌드 시 정상 |
 | `Engine Input Queue Full (128/128). Dropping request to prevent lag.` | NPU 입력 큐 backpressure (EngineLoadBalancer.cpp:218) — drop new request | **정상 운영에선 거의 발생 X**. ASan/TSan 등 sanitizer 빌드 시 frequent (instrument 2-3x slowdown 으로 NPU pipeline throughput < cam supply → queue 누적 → drop). audit run 의 결론은 LeakSanitizer/TSan WARNING 만 보면 됨, Queue Full 빈도는 무시 |
 | `Engine ... timeout (Waited max 5000 ms)` | NPU 추론 5초 timeout | 한두 번은 자연. 빈발 시 NPU 점검 |
 | `GRPC peer ...` | GRPC peer 연결 일시 끊김 | 자동 재연결. 잦으면 peer 호스트 점검 |
