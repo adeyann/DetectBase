@@ -108,7 +108,7 @@ GRPC 활성화 / 운영 정책은 [상위 README §"GRPC 통신"](../README.md) 
 - const 정확성 필수
 - 공개 API 에 Doxygen 주석
 
-## 검증 상태 (2026-05-24 — audit_20260524_115656 baseline, cmake 0.1.10 시점)
+## 검증 상태 (2026-05-27 — `master_logs/v0.1.18/audit_20260527_091456/` baseline, cmake 0.1.18 시점, ASan 4h + TSan 1h default run)
 
 | 항목 | 결과 |
 |---|---|
@@ -128,7 +128,7 @@ GRPC 활성화 / 운영 정책은 [상위 README §"GRPC 통신"](../README.md) 
 - v0.1.16: `Main.cpp` argv guard + `flock(2)` single-instance lock — PID 4924 사고 재발 방지 (Main.cpp 가 argv 무수신이라 `--version` 같은 호출이 풀 서비스 spawn → NPU 양분 → DFPS 50% 하락). 부수: monitor.sh 에 threshold alert 7 종 (storm/err/dfps_low/memory/wd/ftc/cam_loss) + boot ramp warmup grace 4 cycle.
 - v0.1.18: `GstRtspReceiver::TeardownPipeline` 의 `gst_object_unref(pipeline_)` 가 GStreamer 내부 thread join 에서 unbounded block 하던 결함 fix. cam 661 의 42분 cam_loss 의 root cause 였음 (backup log 10:09:33 ResetSourceOnly[661] 진입 후 영원히 return 안 함). `gst_element_get_state` timeout 시 unref 건너뛰고 의도된 leak. **5/26 22:00 ~ 5/27 09:06 누적 11.3h 후속 모니터 wd=1 (boot only) / cam_loss=0** (pre-fix 50min wd=6/cam_loss 영구). 단 fix path 미발화 — 다음 자연 stuck 시 실효성 동적 검증 가능.
 
-이 변경들은 cmake 0.1.10 시점 audit 결과를 영향 안 줌 (코드 단순화 + log 추가 + 사고 차단 가드). 다음 audit 갱신 권장.
+이 변경들 모두 5/27 audit 으로 검증 — 자체 코드 회귀 0건 (cppcheck 59 동일, clang-tidy 0, ASan/TSan 자체 코드 leak/race 0). 산출물: `master_logs/v0.1.18/audit_20260527_091456/`.
 
 자세한 내용:
 - [.DOCS/REVIEW3/SUMMARY.md](../.DOCS/REVIEW3/SUMMARY.md) (3차 review baseline, 레거시)

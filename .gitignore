@@ -38,6 +38,9 @@ logs/bisect*
 *.csv
 *.lock
 
+# master_logs/ 는 master 머지 증빙 archival — 위 *.log / *.txt 등 ignore 패턴 무력화 (모든 파일 추적)
+!master_logs/**
+
 # logs/ 임시 파일 (확장자 .log 외 — AI 작업 중 생성)
 logs/.current_*
 logs/.backup_*

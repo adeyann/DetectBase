@@ -1,0 +1,282 @@
+Checking /code/AbnormalActions/src/AbnormalActionChecker.cpp ...
+Checking /code/AbnormalActions/src/GeometricLogic.cpp ...
+Checking /code/AbnormalActions/src/MgenSchedule.cpp ...
+Checking /code/BasicLibs/core/logger/CorrelationContext.cpp ...
+1/49 files checked 0% done
+/code/AbnormalActions/src/MgenSchedule.cpp:209:0: style: Consider using std::any_of algorithm instead of a raw loop. [useStlAlgorithm]
+            if( dateString == str_date )
+^
+/code/AbnormalActions/src/MgenSchedule.cpp:276:31: style: Variable 'xpos_ratio' is not assigned a value. [unassignedVariable]
+            for( const auto& [xpos_ratio, ypos_ratio] : roi_points ) {
+                              ^
+2/49 files checked 2% done
+Checking /code/BasicLibs/core/logger/MgenLogger.cpp ...
+3/49 files checked 2% done
+Checking /code/BasicLibs/core/logger/MgenLoggerMacro.cpp ...
+Checking /code/BasicLibs/core/metrics/MetricsRegistry.cpp ...
+Checking /code/BasicLibs/core/logger/MgenLogger.cpp: DEBUG_MODE...
+/code/AbnormalActions/src/AbnormalActionChecker.cpp:79:27: style: Unused variable: _ [unusedVariable]
+            const auto& [ _, first_tracked_time ] = history_objects.front();
+                          ^
+4/49 files checked 4% done
+Checking /code/BasicLibs/core/logger/MgenLoggerMacro.cpp: DEBUG_MODE...
+5/49 files checked 4% done
+Checking /code/BasicLibs/core/types/DeviceCluster.cpp ...
+Checking /code/BasicLibs/core/types/EngineStreamTypes.cpp ...
+6/49 files checked 5% done
+Checking /code/BasicLibs/core/types/DeviceCluster.cpp: _WIN32;_WIN64...
+Checking /code/BasicLibs/core/types/InferObject.cpp ...
+7/49 files checked 7% done
+8/49 files checked 8% done
+Checking /code/BasicLibs/profile/EngineProfile.cpp ...
+Checking /code/BasicLibs/profile/EngineProfileParser.cpp ...
+/code/BasicLibs/core/types/EngineStreamTypes.h:211:20: style: Consider using std::accumulate algorithm instead of a raw loop. [useStlAlgorithm]
+                h2 ^= std::hash<MGEN::InferObject>()( obj ) + MGEN::HASH_MAGIC_NUMB + ( h2 << 6 ) + ( h2 >> 2 );
+                   ^
+Checking /code/BasicLibs/core/types/EngineStreamTypes.cpp: _WIN32;_WIN64...
+9/49 files checked 8% done
+/code/BasicLibs/profile/EngineProfile.cpp:187:31: style: Consider using std::transform algorithm instead of a raw loop. [useStlAlgorithm]
+            sorted_candidates.push_back(pair.second); // UUID (pair의 두 번째 요소)만 저장
+                              ^
+10/49 files checked 9% done
+Checking /code/BasicLibs/profile/NetworkProfileParser.cpp ...
+Checking /code/BasicLibs/profile/ServiceBlockProfile.cpp ...
+11/49 files checked 11% done
+/code/BasicLibs/profile/ServiceBlockProfile.cpp:117:27: style: Variable 'from_id' is not assigned a value. [unassignedVariable]
+        for( const auto& [from_id, _] : input_sources_ ){
+                          ^
+/code/BasicLibs/profile/ServiceBlockProfile.cpp:187:27: style: Unused variable: _ [unusedVariable]
+        for( const auto& [_, profile] : blocks_ ) {
+                          ^
+12/49 files checked 12% done
+/code/BasicLibs/profile/ServiceBlockProfile.cpp:206:27: style: Unused variable: _ [unusedVariable]
+        for( const auto& [_, type] : extern_streams_ )
+                          ^
+/code/BasicLibs/profile/ServiceBlockProfile.cpp:214:27: style: Variable 'id' is not assigned a value. [unassignedVariable]
+        for (const auto& [id, _] : blocks_)
+                          ^
+/code/BasicLibs/profile/ServiceBlockProfile.cpp:217:27: style: Unused variable: id [unusedVariable]
+        for (const auto& [id, profile] : blocks_)
+                          ^
+/code/BasicLibs/profile/ServiceBlockProfile.cpp:219:31: style: Variable 'to_id' is not assigned a value. [unassignedVariable]
+            for (const auto& [to_id, _] : profile.GetOutputs())
+                              ^
+/code/BasicLibs/profile/ServiceBlockProfile.cpp:262:27: style: Variable 'to_id' is not assigned a value. [unassignedVariable]
+        for (const auto& [to_id, profile] : blocks_) {
+                          ^
+/code/BasicLibs/profile/ServiceBlockProfile.cpp:263:31: style: Variable 'from_id' is not assigned a value. [unassignedVariable]
+            for (const auto& [from_id, stream] : profile.GetInputs()) {
+                              ^
+/code/BasicLibs/profile/ServiceBlockProfile.cpp:278:27: style: Variable 'from_id' is not assigned a value. [unassignedVariable]
+        for (const auto& [from_id, stream] : extern_streams_) {
+                          ^
+13/49 files checked 13% done
+Checking /code/BasicLibs/utils/ip_utils.cpp ...
+Checking /code/BasicLibs/profile/ServiceProfileBuilder.cpp ...
+Checking /code/BasicLibs/utils/file_utils.cpp ...
+14/49 files checked 14% done
+15/49 files checked 14% done
+Checking /code/BasicLibs/utils/math_utils.cpp ...
+16/49 files checked 14% done
+Checking /code/BasicLibs/utils/string_utils.cpp ...
+Checking /code/Engine/EngineBase/src/EngineHandlerBase.cpp ...
+17/49 files checked 14% done
+18/49 files checked 17% done
+19/49 files checked 17% done
+Checking /code/Engine/NPU/EngineBuilder/EngineHandlerBuilder_NPU.cpp ...
+Checking /code/Engine/NPU/YoloV5_Torch_Onnx_RKNN_NPU/YoloV5_Torch_Onnx_RKNN_NPU.cpp ...
+Checking /code/Main/BASE/src/Main.cpp ...
+Checking /code/Main/BASE/src/Main.cpp: __SANITIZE_ADDRESS__...
+20/49 files checked 18% done
+21/49 files checked 19% done
+Checking /code/BasicLibs/core/types/InferObject.cpp: _WIN32;_WIN64...
+Checking /code/Main/DETECTOR/src/DETECTOR.cpp ...
+Checking /code/Main/DETECTOR/src/RtspDetectorBlock.cpp ...
+22/49 files checked 24% done
+23/49 files checked 24% done
+Checking /code/Main/DETECTOR/src/RtspDetectorUnit.cpp ...
+Checking /code/Management/manager/interface/ISettingData.cpp ...
+24/49 files checked 24% done
+/code/Main/DETECTOR/src/DETECTOR.cpp:489:60: style: Consider using std::any_of algorithm instead of a raw loop. [useStlAlgorithm]
+                    if( !e.is_string() && !e.is_number() ) { all_scalar = false; break; }
+                                                           ^
+25/49 files checked 29% done
+Checking /code/Management/manager/interface/ISettingManager.cpp ...
+Checking /code/Management/manager/src/EngineLoadBalancer.cpp ...
+26/49 files checked 29% done
+/code/Management/manager/src/EngineLoadBalancer.cpp:271:25: style: Variable 'uid' is not assigned a value. [unassignedVariable]
+            for( auto& [uid, q] : this->cam_result_qs_ ){
+                        ^
+27/49 files checked 32% done
+Checking /code/Management/manager/src/IOStreamManager.cpp ...
+Checking /code/Management/manager/src/NetworkManager.cpp ...
+/code/Management/manager/src/IOStreamManager.cpp:19:22: style: Unused variable: _ [unusedVariable]
+        for( auto& [ _, q ] : sio_event_internal_q_map_ ) {
+                     ^
+/code/Management/manager/src/IOStreamManager.cpp:24:22: style: Unused variable: _ [unusedVariable]
+        for( auto& [ _, q ] : grpc_client_respond_internal_q_map_ ) {
+                     ^
+/code/Management/manager/src/IOStreamManager.cpp:29:22: style: Unused variable: _ [unusedVariable]
+        for( auto& [ _, q ] : grpc_server_request_json_internal_q_map_ ) {
+                     ^
+/code/Management/manager/src/IOStreamManager.cpp:34:22: style: Unused variable: _ [unusedVariable]
+        for( auto& [ _, q ] : grpc_server_request_image_internal_q_map_ ) {
+                     ^
+/code/Management/manager/src/IOStreamManager.cpp:39:22: style: Unused variable: _ [unusedVariable]
+        for( auto& [ _, d ] : grpc_server_respond_dispatcher_map_ ) {
+                     ^
+/code/Management/manager/src/IOStreamManager.cpp:44:22: style: Unused variable: _ [unusedVariable]
+        for( auto& [ _, q ] : rtsp_proxy_frame_internal_q_map_ ) {
+                     ^
+28/49 files checked 32% done
+Checking /code/Management/manager/src/SettingData.cpp ...
+29/49 files checked 34% done
+Checking /code/Management/manager/src/SettingData.cpp: __SANITIZE_THREAD__...
+Checking /code/Management/manager/src/SettingManager.cpp ...
+30/49 files checked 37% done
+31/49 files checked 40% done
+Checking /code/Management/worker/src/ApiHandler.cpp ...
+32/49 files checked 44% done
+Checking /code/Management/worker/src/EngineClient.cpp ...
+33/49 files checked 45% done
+34/49 files checked 46% done
+Checking /code/Management/worker/src/InferenceCounter.cpp ...
+Checking /code/Management/worker/src/RtspHandler.cpp ...
+Checking /code/Management/worker/src/SettingMonitor.cpp ...
+35/49 files checked 46% done
+36/49 files checked 48% done
+Checking /code/Management/worker/src/SioHandler.cpp ...
+Checking /code/Protocol/GRPC/protos/MgenProto.grpc.pb.cc ...
+37/49 files checked 49% done
+38/49 files checked 53% done
+39/49 files checked 56% done
+Checking /code/Protocol/GRPC/protos/MgenProto.pb.cc ...
+Checking /code/Protocol/GRPC/src/GrpcEventClientBase.cpp ...
+Checking /code/Protocol/GRPC/src/GrpcEventServerBase.cpp ...
+/code/Protocol/GRPC/src/GrpcEventServerBase.cpp:72:26: style: Variable 'released' is assigned a value that is never used. [unreadVariable]
+                released = std::move( it->second );
+                         ^
+40/49 files checked 58% done
+41/49 files checked 73% done
+42/49 files checked 74% done
+Checking /code/Protocol/GRPC/src/GrpcProtoMaker.cpp ...
+Checking /code/Tracker/SORT/MgenHungarian.cpp ...
+Checking /code/Tracker/SORT/MgenKalman.cpp ...
+43/49 files checked 75% done
+44/49 files checked 76% done
+Checking /code/Tracker/SORT/SORTTracker.cpp ...
+Checking /code/VisionCommon/src/FramePreProcessor.cpp ...
+45/49 files checked 77% done
+46/49 files checked 79% done
+/code/Tracker/SORT/MgenHungarian.cpp:107:22: style: Variable 'curValue' is assigned a value that is never used. [unreadVariable]
+  double curValue    = 0.0f;
+                     ^
+/code/Tracker/SORT/MgenHungarian.cpp:108:22: style: Variable 'minValue' is assigned a value that is never used. [unreadVariable]
+  double minValue    = 0.0f;
+                     ^
+/code/Tracker/SORT/MgenHungarian.cpp:112:22: style: Variable 'col' is assigned a value that is never used. [unreadVariable]
+  int    col         = 0;
+                     ^
+47/49 files checked 81% done
+Checking /code/VisionCommon/src/SwsContextManager.cpp ...
+48/49 files checked 81% done
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1254:42: style: Condition 't_req_set' is always true [knownConditionTrueFalse]
+            if( t_dq_set && t_pre_set && t_req_set && t_push_set ) {
+                                         ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1219:25: note: Assignment 't_req_set=true', assigned value is 1
+            t_req_set = true;
+                        ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1230:33: note: Assuming container is not empty
+            for( auto* engine : requested_engines ) {
+                                ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1254:42: note: Condition 't_req_set' is always true
+            if( t_dq_set && t_pre_set && t_req_set && t_push_set ) {
+                                         ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1254:55: style: Condition 't_push_set' is always true [knownConditionTrueFalse]
+            if( t_dq_set && t_pre_set && t_req_set && t_push_set ) {
+                                                      ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1251:26: note: Assignment 't_push_set=true', assigned value is 1
+            t_push_set = true;
+                         ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1254:55: note: Condition 't_push_set' is always true
+            if( t_dq_set && t_pre_set && t_req_set && t_push_set ) {
+                                                      ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1567:34: style: Condition 't_resp_set' is always true [knownConditionTrueFalse]
+                if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
+                                 ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1510:26: note: Assignment 't_resp_set=true', assigned value is 1
+            t_resp_set = true;
+                         ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1526:36: note: Assuming container is not empty
+            for( const auto& obj : merged_results ){
+                                   ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1530:48: note: Assuming container is not empty
+            for( auto& [ class_id, objects ] : classified_objects )
+                                               ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1567:34: note: Condition 't_resp_set' is always true
+                if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
+                                 ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1567:48: style: Condition 't_trk_set' is always true [knownConditionTrueFalse]
+                if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
+                                               ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1556:25: note: Assignment 't_trk_set=true', assigned value is 1
+            t_trk_set = true;
+                        ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1567:48: note: Condition 't_trk_set' is always true
+                if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
+                                               ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1567:61: style: Condition 't_meta_set' is always true [knownConditionTrueFalse]
+                if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
+                                                            ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1562:26: note: Assignment 't_meta_set=true', assigned value is 1
+            t_meta_set = true;
+                         ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1567:61: note: Condition 't_meta_set' is always true
+                if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
+                                                            ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1567:75: style: Condition 't_ev_set' is always true [knownConditionTrueFalse]
+                if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
+                                                                          ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1566:28: note: Assignment 't_ev_set=true', assigned value is 1
+                t_ev_set = true;
+                           ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1567:75: note: Condition 't_ev_set' is always true
+                if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
+                                                                          ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1698:44: style: Condition 't_trk_set' is always true [knownConditionTrueFalse]
+            if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
+                                           ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1556:25: note: Assignment 't_trk_set=true', assigned value is 1
+            t_trk_set = true;
+                        ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1564:43: note: Assuming condition is false
+            if( entire_track_results.empty() ) {
+                                          ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1698:44: note: Condition 't_trk_set' is always true
+            if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
+                                           ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1698:57: style: Condition 't_meta_set' is always true [knownConditionTrueFalse]
+            if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
+                                                        ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1562:26: note: Assignment 't_meta_set=true', assigned value is 1
+            t_meta_set = true;
+                         ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1564:43: note: Assuming condition is false
+            if( entire_track_results.empty() ) {
+                                          ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1698:57: note: Condition 't_meta_set' is always true
+            if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
+                                                        ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1698:71: style: Condition 't_ev_set' is always true [knownConditionTrueFalse]
+            if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
+                                                                      ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1695:24: note: Assignment 't_ev_set=true', assigned value is 1
+            t_ev_set = true;
+                       ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:1698:71: note: Condition 't_ev_set' is always true
+            if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
+                                                                      ^
+/code/Main/DETECTOR/src/RtspDetectorUnit.cpp:212:56: style: Consider using std::copy_if algorithm instead of a raw loop. [useStlAlgorithm]
+                    if( f.is_regular_file( ec ) ) files.push_back( f );
+                                                       ^
+49/49 files checked 100% done

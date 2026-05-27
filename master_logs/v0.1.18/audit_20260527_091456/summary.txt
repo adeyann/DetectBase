@@ -1,0 +1,11 @@
+===== Audit Summary 2026-05-27 14:33:22 KST =====
+결과 위치: /home/claudedev/DetectBase/logs/audit_20260527_091456
+실행 stage: cppcheck clangtidy asan tsan 
+
+[cppcheck]   자체 코드 결함: 59
+[clang-tidy] warning:        0
+0
+[asan/ubsan] SUMMARY: AddressSanitizer: 1244749 byte(s) leaked in 11515 allocation(s).
+[tsan]       WARNING:        172
+
+각 raw log 는 /home/claudedev/DetectBase/logs/audit_20260527_091456/ 안 *.log 참조
