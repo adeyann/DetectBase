@@ -93,7 +93,7 @@ curl -s http://localhost:9090/metrics | grep -E "^detectbase_grpc_"
 
 | 메트릭 | 정상 | 주의 | 위험 |
 |---|---|---|---|
-| `detectbase_dfps_total` | 카메라 수 × 13~14 (예: 4 cam → 52~56) | < 절반 | 0 (NPU/RTSP 장애) |
+| `detectbase_dfps_total` | 카메라 수 × ~29 (예: 4 cam → ~115. NPU multi-core PR #6 이후 baseline. single-core 시절엔 ×13 = 52~56 이었음) | < 절반 (~57) | 0 (NPU/RTSP 장애) |
 | `detectbase_camera_count{state="active"}` | = registered | < registered | 0 |
 | `detectbase_errors_total{type="imwrite_fail"}` | 0/min | > 0/min 지속 | > 10/min |
 | `detectbase_errors_total{type="emit_drop"}` | 0/min | > 0/min (SocketIO 누적) | 빠르게 증가 |
@@ -390,7 +390,7 @@ groups:
 ## §9. 운영 체크리스트
 
 ### 일간
-- [ ] DFPS 정상 (카메라 수 × 13 이상)
+- [ ] DFPS 정상 (카메라 수 × ~29 이상, 4cam → ≥115 권장)
 - [ ] 4 cam active (registered 와 일치)
 - [ ] ERROR 0
 - [ ] frame disk < 80%

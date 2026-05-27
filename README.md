@@ -145,11 +145,11 @@ Odroid M2 NPU 기반 RTSP 비디오 분석 베이스 프로젝트. 객체 탐지
                                                                 └─ L1/L2-Regular/L2-Emergency 정책 적용
 ```
 
-**메인 흐름 latency 약 50-60ms per frame (NPU 19ms + 전후 처리). DFPS 약 13/cam × 4 cam = 52~54**
+**메인 흐름 latency 약 50-60ms per frame (NPU 19ms + 전후 처리). DFPS 약 29/cam × 4 cam ≈ 115~116** (NPU multi-core PR #6 이후 baseline. 이전 single-core 시점엔 ~13/cam × 4 = ~52)
 
 ### 흐름의 핵심 특성
 
-- **NPU 가 bottleneck**: `rknn_run` 동기 호출 ~19ms × 53 inference/sec = 거의 NPU 한계까지 사용 중 (batch_size=1)
+- **NPU 사용량**: `rknn_run` 동기 호출 (~17ms 실측, batch_size=1). NPU 3-core multi-handler (PR #6) 이후 실측 천장 ~140 FPS ([.DOCS/NPU_MODEL_PERFORMANCE.md](.DOCS/NPU_MODEL_PERFORMANCE.md) 참조). 4 cam 환경 baseline ~115~116 inf/sec = NPU 천장의 ~83% 사용. multi-core 도입 전 single-core 시절엔 ~53 inf/sec 으로 NPU 천장 도달. batch_size=1 hard-locked — 6+ cam 확장 시 batch>1 검토 필요.
 - **async/ready 분리**: thread 가 큐에서 대기 (block) — busy-wait 없음
 - **백프레셔**: 모든 큐가 max_size + drop oldest. NPU 따라가지 못해도 메모리 안 누적
 - **IOWorker 비동기**: cv::imwrite 가 50~200ms 걸려도 메인 흐름 영향 없음 (별도 thread)
@@ -259,7 +259,7 @@ Odroid M2 NPU 기반 RTSP 비디오 분석 베이스 프로젝트. 객체 탐지
 | **InferenceThread** (per camera) | N (=4) | avframe_q dequeue → 전처리 → engine 요청 → 응답 대기 → tracker → abnormal |
 | **IOWorker thread** (per camera) | N (=4) | io_work_queue dequeue → cv::imwrite + L2 정기/비상 청소 |
 | **RTSP receive thread** (per camera, GStreamer `rtspsrc` + `avdec_h264`) | N (=4) | RTSP packet 수신 + 디코드 → avframe_q enqueue |
-| NPU EngineHandler thread | 1 | engine_input_q dequeue → rknn_run (동기) → infer_respond_q enqueue |
+| NPU EngineHandler thread | **3** (NPU 3-core, PR #6 multi-handler 이후) | per-core engine_input_q dequeue → rknn_run (동기) → infer_respond_q enqueue. LoadBalancer 가 round-robin 으로 3 handler 분배. |
 | ReplyDispatcher thread | 1 | infer_respond_q dequeue → unit_id 별 분배 |
 | RTSP server thread (GStreamer `gst-rtsp-server`) | 2~3 | 분석 결과 RTSP proxy 출력 |
 | SocketIO emit control thread | 1 | emit_queue dequeue → 외부 broker 송신 |
@@ -676,7 +676,7 @@ curl -s http://localhost:9090/metrics | grep "^detectbase_dfps_total "
 
 | 메트릭 | 정상 | 주의 | 위험 | 대응 |
 |---|---|---|---|---|
-| `dfps_total` | 카메라수×13 (예: 4cam → 52~56) | < 절반 | 0 | NPU/RTSP 점검 |
+| `dfps_total` | 카메라수×~29 (예: 4cam → ~115) | < 절반 (~57) | 0 | NPU/RTSP 점검. NPU multi-core (PR #6) 이후 baseline. |
 | `camera_count{active}` | = registered | < registered | 0 | RTSP 단절 |
 | `errors_total{imwrite_fail}` | 0/min | > 0/min | > 10/min | 디스크 / 권한 |
 | `errors_total{emit_drop}` | 0 | > 0 | 빠르게 증가 | SocketIO 누적 |
