@@ -255,4 +255,7 @@ CLAUDE.md §Work Rules + .claude/skills/git-workflow.md + memory `feedback_git_w
 | [OPERATIONS.md](../OPERATIONS.md) | 운영 트러블슈팅 |
 | [.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](../.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md) | v2.0.0 Search engine 도입 가이드 |
 | [.backup/mpp_purged_20260526/MPP_PURGE_NOTES.md](../.backup/mpp_purged_20260526/MPP_PURGE_NOTES.md) | MPP + Option A 폐기 결정 + 복원 방법 |
-| [logs/audit_20260524_115656/](audit_20260524_115656/) | 최신 audit baseline (5/24, cmake 0.1.10 시점) |
+| [master_logs/v0.1.18/audit_20260527_091456/](../master_logs/v0.1.18/audit_20260527_091456/) | **최신 audit baseline** (5/27 v0.1.18 archival, cmake 0.1.18, ASan 4h + TSan 1h default. 자체 코드 회귀 0건 검증) |
+| [master_logs/v0.1.18/monitor_v018_teardown_fix.jsonl](../master_logs/v0.1.18/monitor_v018_teardown_fix.jsonl) | v0.1.18 머지 검증 모니터 (11.3h, wd=1 boot-only / cam_loss=0) |
+| [master_logs/v0.1.18/README.md](../master_logs/v0.1.18/README.md) | v0.1.18 머지 근거 요약 |
+| [logs/audit_20260524_115656/](audit_20260524_115656/) | 이전 audit baseline (5/24, cmake 0.1.10 시점) — historical |

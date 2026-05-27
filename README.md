@@ -802,14 +802,14 @@ grep -n "DEBUG VIRTUAL LINES" code/Main/DETECTOR/src/RtspDetectorUnit.cpp
 | **UBSan** | 런타임 sanitizer | UB (overflow, null deref) | -fsanitize=undefined (ASan 과 같이) |
 | **ThreadSanitizer (TSan)** | 런타임 sanitizer | data race, lock-order-inversion, double lock | -fsanitize=thread (별도 빌드) |
 
-### 결과 기준 (production-ready baseline) — 2026-05-19 갱신 (PR #9 audit cleanup + PR #13 H fix 후)
+### 결과 기준 (production-ready baseline) — **2026-05-27 v0.1.18 갱신** (master_logs/v0.1.18/audit_20260527_091456/, ASan 4h + TSan 1h default run)
 
-| 도구 | 자체 코드 결함 (audit_20260519_222710) |
+| 도구 | 자체 코드 결함 (master_logs/v0.1.18/audit_20260527_091456) |
 |---|---|
-| cppcheck | **59건** — 18건 false positive (`_` dummy + structured binding unused), 9건 자연 정리 예정 (ThreadProfiler 마이그레이션 시 t_xxx_set), 나머지는 unreadVariable/useStlAlgorithm 등 NOLINT (cppcheck syntax quirk 로 일부 effective 안 됨, FP/intent 보존) |
-| clang-tidy | **0건 ✅** — PR #9 (audit cleanup, NOLINT 24건) + PR #13 (EngineHandlerBase dtor pure virtual UB 진짜 fix) 으로 30 → 0 도달 |
-| ASan / UBSan | **startup leak 0건** (외부 librknnrt.so / glib init), **runtime leak 1건 ~1.2MB** (GStreamer rtpmanager — 외부 lib 내부, 수용. 5분 run 기준) |
-| TSan | **우리 코드 진짜 race 0건 ✅** (5분 run 기준, **137 건** WARNING). 우리 코드 race 4종 (SioHandler UAF / InferenceCounter map / RegisterMetricsOnce / SafeQueue shared_ptr ref count) 모두 fix. 잔여는 SIGKILL `mutex destroyed` false positive + GStreamer 내부 callback race (외부 lib) + SafeQueue happens-before 추적 한계 (mutex 정상 작동) |
+| cppcheck | **59건** — 18건 false positive (`_` dummy + structured binding unused), 9건 자연 정리 예정 (ThreadProfiler 마이그레이션 시 t_xxx_set), 나머지는 unreadVariable/useStlAlgorithm 등 NOLINT (cppcheck syntax quirk 로 일부 effective 안 됨, FP/intent 보존). 5/19 baseline 부터 동일 유지. |
+| clang-tidy | **0건 ✅** — PR #9 (audit cleanup, NOLINT 24건) + PR #13 (EngineHandlerBase dtor pure virtual UB 진짜 fix) 으로 30 → 0 도달. 5/19 부터 5/27 baseline 까지 동일 유지. |
+| ASan / UBSan | **자체 코드 leak 0건** ✅ — 5/27 4h run 기준 leak 발생지 모두 외부 lib (librknnrt rknn_init 175× + GStreamer gst_element_change_state / g_object_unref / g_malloc 등). startup leak (외부 librknnrt.so / glib init) + runtime leak (GStreamer rtpmanager) 모두 수용. ~1.24 MB 누적 (5/19 baseline 1.21 MB 대비 run time 27× 길어졌음에도 거의 증가 X — rtpmanager 정상 cap) |
+| TSan | **자체 코드 진짜 race 0건 ✅** (5/27 1h run 기준, **172 건** WARNING — run time 7.5× 길어진 비례 증가). 우리 코드 race 4종 (SioHandler UAF / InferenceCounter map / RegisterMetricsOnce / SafeQueue shared_ptr ref count) 모두 fix 유지. 잔여는 SIGKILL `mutex destroyed` false positive + GStreamer 내부 callback race (외부 lib) + SafeQueue happens-before 추적 한계 (mutex 정상 작동) |
 
 자체 코드 결함 추가 검출 시 `audit_<timestamp>/summary.txt` 보고서 비교.
 
