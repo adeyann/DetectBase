@@ -8,7 +8,6 @@
 #include "json/json_fwd.hpp" // Forward declaration for nlohmann::json
 #include "ApiHandler.h"      // For initialization data
 
-#include "DeviceCluster.h"
 #include "ServiceBlockProfile.h"
 
 #include <memory>       // For std::shared_ptr, std::make_shared
@@ -42,6 +41,10 @@ namespace MGEN
     // --- Type Aliases for Managers ---
     template <typename T> using UniquenessSettingManager = SetterBase<T>;
     template <typename T> using MultiUintsSettingManager = SettingManagerBase<T>;
+
+    // --- Domain Type Alias ---
+    // MVAS 등록 카메라 ID set. 이전 DeviceCluster.h (CameraCluster_DETECTOR 폐기, 2026-05-27 SettingManager 흡수).
+    using CameraIDSet = std::set<MGEN::Type::DeviceID>;
 
     // --- Main SettingManager Facade Class ---
     class SettingManager final // Mark final as it's a singleton facade
@@ -96,8 +99,6 @@ namespace MGEN
         int                GetServerServiceID( void )    const noexcept;
         CameraIDSet        GetCameraIDSet( void )        const noexcept;
 
-        std::shared_ptr<CameraCluster_DETECTOR> GetCameraCluster_DETECTOR( void ) const;
-
         // --- Callback Registration/Unregistration Methods ---
 
         // Exclude Camera Setting Callbacks (Multi-Unit)
@@ -117,7 +118,9 @@ namespace MGEN
         std::shared_ptr<MultiUintsSettingManager<ScheduleSettingData>>         schedule_settings;
 
         // Cached Info (updated during initialization)
-        std::shared_ptr<CameraCluster_DETECTOR> camera_cluster;
+        // MVAS REST `/cluster` 응답에서 추출된 등록 카메라 ID set.
+        // SetCameraCluster_DETECTOR() 가 직접 채움 (이전 CameraCluster_DETECTOR 폐기, 2026-05-27).
+        CameraIDSet camera_id_set_;
 
         int server_service_id;
 
