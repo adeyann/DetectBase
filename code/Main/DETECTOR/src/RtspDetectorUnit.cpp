@@ -933,12 +933,10 @@ namespace MGEN
         const auto dequeue_timeout                = 100ms;
         const int  inference_wait_ms              = 5000;  // 5sec
         const auto long_timelapse_log_interval = 10min; // 10min
-        const auto fps_update_interval            = 60s;
 
         // set thread internal timer
         EventTime avframe_current_recv_time     = std::chrono::system_clock::now();
         EventTime last_interval_log_print_time  = std::chrono::system_clock::now();
-        EventTime last_interval_update_fps_time = std::chrono::system_clock::now();
 
         // reset members
         this->consecutive_mismatch_count_ = 0;
@@ -1076,37 +1074,8 @@ namespace MGEN
                 consecutive_mismatch_count_ = 0;
             }
 
-            // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores) — Phase 2 placeholder
-            int  last_realtime_fps = realtime_fps_;
-            bool need_update_fps   = false;
-
-            if( IsOverTime( last_interval_update_fps_time, avframe_current_recv_time, fps_update_interval ) )
-            {
-                // Phase 1: GstRtspClient 에 instantaneous fps 메소드 없음 (GetFrameCount
-                // 만 있어서 별도 sample window 계산이 필요). Phase 2 에서 추가 예정 —
-                // 그때까지 realtime_fps 업데이트는 skip.
-                if( false /* proxy_ptr_ && proxy_ptr_->getRealtimeFps().has_value() */ ){
-                    auto opt_fps = std::optional<float> { std::nullopt };  // placeholder
-                    if( opt_fps.has_value() )
-                    {
-                        int curr_realtime_fps = static_cast<int>( std::round( *opt_fps ) );
-
-                        // FPS 변화가 5 이상일 때만 업데이트
-                        if( std::abs( curr_realtime_fps - last_realtime_fps ) >= 5 )
-                        {
-                            realtime_fps_   = curr_realtime_fps;
-                            need_update_fps = true;
-
-                            MLOG_INFO("CAM[%d] Realtime FPS check: %d -> %d ( real : %.2f )",
-                                id_, last_realtime_fps, curr_realtime_fps, *opt_fps );
-                        }
-                    }
-                }
-                last_interval_update_fps_time = avframe_current_recv_time;
-            }
-
             // Schedule update
-            if( this->is_schedule_updated_.load() || need_reset_schedule_n_tracker_cuz_resize || need_update_fps )
+            if( this->is_schedule_updated_.load() || need_reset_schedule_n_tracker_cuz_resize )
             {
                 this->ReleaseSchedules();
 
