@@ -109,18 +109,22 @@ EOF
 )"
 ```
 
-## cmake VERSION Bump Procedure (2026-05-26 — supersedes the "bump in the same PR" rule)
+## cmake VERSION Bump Procedure (2026-05-27 corrected — supersedes the "Post-merge placeholder bump" / "Pre-merge align as separate commit" rules)
 
-The earlier rule "AI applies the bump in the PR being merged" is **retired**. Bundling code+cmake in one commit makes the commit ambiguous about which version it represents.
+**Core principle: NO standalone bump-only commit / push.** Bump happens locally on a work branch between pushes and gets absorbed into the next work commit. The bump trigger is the developer's intent for the next work, NOT a push event.
 
-**5-step procedure**:
-1. **Topic-branch work**: edit code. Leave cmake VERSION unchanged.
-2. **Push topic branch**: commit + push code change only. No cmake bump.
-3. **Pre-merge user confirmation**: compare topic-branch HEAD against the target branch's most recent commit, summarize the change to the user, and **explicitly ask the user for the version of this merge** ("what version should this merge be?").
-4. **Reconcile if the user-specified version differs from the commit's cmake**: align before merging — either add a new commit that only bumps cmake to the user-version, or modify the existing commit to set cmake to the user-version, push, then merge.
-5. **Post-merge local placeholder bump**: bump cmake VERSION to (just-merged) + 1 patch as a **separate commit**, then push. This is the placeholder for the next dev cycle (e.g., after merging 0.1.16 → bump to 0.1.17).
+**Corrected procedure**:
+1. **Topic-branch work**: edit code. cmake VERSION inherits from develop (the branch's fork point).
+2. **Push code commit**: code-change commit + push. Don't touch cmake.
+3. **Local bump (optional, after push)**: if the just-pushed work warrants a new patch version for the next work, bump cmake VERSION locally by +1 patch (no commit, no push — working dir only).
+4. **Next work + push**: subsequent code commit automatically includes the bumped cmake and is pushed normally.
+5. **Pre-merge user confirmation + align**: at merge time, compare topic-branch HEAD vs target, summarize, and **explicitly ask the user for this merge's version**. If user's choice ≠ last commit's cmake, bundle the cmake correction with a code/doc change commit. **Standalone `chore(cmake): bump` commits/PRs are absolutely forbidden.**
 
-**Doc-sync absolute rule (2026-05-27)** — every cmake VERSION change (bump up OR adjust down) must update README.md root `Version`, code/README.md verification-state cmake reference, and logs/NEXT_SESSION.md cmake reference **in the same commit**. Solo cmake bump is forbidden. Pre-commit grep: `grep -nE '0\.[0-9]+\.[0-9]+|VERSION|cmake' README.md code/README.md logs/NEXT_SESSION.md`.
+**NO post-merge placeholder bump**: after master merge, develop's cmake stays at the master tag value. The next work branch bumps cmake itself (steps 1~5).
+
+**Why no infinite loop**: bump trigger = developer's work intent (not a push event). Bump = local-only. The bump never produces a standalone push. The bumped cmake hitchhikes on the next genuine code-change commit.
+
+**Doc-sync rule (2026-05-27)** — every cmake VERSION change must update README.md root `Version` + code/README.md verification-state cmake ref + logs/NEXT_SESSION.md cmake ref **in the same commit as the code/doc change that carries the bump**. Solo cmake bump is forbidden (per the core principle above). Pre-commit grep: `grep -nE '0\.[0-9]+\.[0-9]+|VERSION|cmake' README.md code/README.md logs/NEXT_SESSION.md`.
 
 **Pre-push docs check (2026-05-26 absolute rule)** — at **every commit push** (not just merges), sweep all version/status-referencing docs (README / code/README / NEXT_SESSION / OPERATIONS / .DOCS/) and align them with the commit. If drift is found after push, fix it in the very next commit. Check before push is the principle.
 
