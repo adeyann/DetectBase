@@ -14,7 +14,7 @@ ENV TZ=Asia/Seoul
 # -----------------------------------------------------------------------------
 # 시스템 의존성 (apt - aarch64 native packages)
 #  - libcurl: ubuntu aarch64 패키지가 정상 호환되므로 apt 사용 (소스 빌드 불필요)
-#  - OpenCV / FFmpeg / nlohmann-json / yaml-cpp 도 apt
+#  - OpenCV / FFmpeg / nlohmann-json 도 apt. (yaml-cpp 는 P3 2026-05-14 폐기 — ClassChecker → nlohmann::json 마이그레이션)
 # -----------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
@@ -35,7 +35,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libswscale-dev \
         nlohmann-json3-dev \
     && rm -rf /var/lib/apt/lists/*
-# P1 (2026-05-14): libyaml-cpp-dev 제거 — vendored prebuilt .a (BasicLibs/core/parser/yaml-cpp/lib/NPU/libyaml-cpp.a) 사용 중. apt 패키지는 중복.
+# P1 (2026-05-14): libyaml-cpp-dev apt 패키지 제거 (당시 vendored .a 와 중복이었음).
+# P3 (2026-05-14): vendored yaml-cpp 도 제거 — ClassChecker → nlohmann::json 마이그레이션 + engines/engine.classes.json 으로 변환. 현재 yaml-cpp 의존 0건.
 
 # -----------------------------------------------------------------------------
 # jemalloc (long-running 서버의 RSS 단편화 회피)
