@@ -25,15 +25,38 @@ description: Must read before any git/gh operation. Defines AI's allowed git usa
 
 ## Branch Naming Convention
 
+(Mirrors `feedback-git-workflow` memory.)
+
 | Prefix | Use case | Example |
 |---|---|---|
 | `feature/` | New functionality | `feature/gstreamer-integration` |
 | `fix/` | Bug fix | `fix/rtsp-reconnect-leak` |
-| `docs/` | Documentation only | `docs/update-git-rules` |
-| `cleanup/` | Dead code, refactor | `cleanup/remove-w14-malloc-trim` |
-| `chore/` | Tooling, deps, CI | `chore/bump-grpc-version` |
+| `hotfix/` | Production urgent (still via develop, no direct master) | `hotfix/auth-token-expiry` |
+| `refactor/` | Behavior-preserving refactor | `refactor/safequeue-cleanup` |
+| `perf/` | Performance improvement | `perf/dfps-pipeline` |
+| `chore/` | Tooling, deps, CI, policy/doc-only | `chore/bump-grpc-version` |
+| `docs/` | Documentation only (when not foldable into in-flight PR) | `docs/update-git-rules` |
+| `cleanup/` | Dead code, refactor (legacy alias for refactor/) | `cleanup/remove-w14-malloc-trim` |
+| `test/` | Tests only | `test/sanitizer-suite` |
+| `experiment/` | Experimental / WIP | `experiment/wd-baseline-rollback` |
 
 Use kebab-case after the prefix. Keep names short but descriptive.
+
+**Sub-branch depth**: 2 recommended, 3~4 allowed if needed. Naming: `<parent-prefix>/<parent-name>-<sub-id>` (e.g., `feature/dfps-async-1`).
+
+## Branch Flow (Git Flow variant)
+
+```
+master (last line of defense, user-approved merges only, version tag)
+   ↑ no-ff merge commit via PR (from develop only, on explicit user instruction)
+develop (permanent branch, kept even when identical to master)
+   ↑ no-ff merge commit via PR (from any work branch)
+feature/a · fix/a · chore/a · ... (work units, forked from develop)
+   ├── feature/a-1 (sub-task, depth 2 recommended)
+   └── feature/a-2
+```
+
+Only `develop` merges into `master`. Other branches never merge to master directly. Hotfixes also go through develop.
 
 ## Standard Workflow
 
@@ -113,9 +136,10 @@ Master merge verification artifacts must be archived in develop tree before mast
 3. Land on develop via a **dedicated chore branch + PR → develop merge** (AI does not commit directly to develop). This commit **must NOT bump cmake VERSION** — its code state must equal the version being merged.
 4. After this lands on develop, perform `develop → master --no-ff merge` (only on explicit user instruction). master's tree now owns `master_logs/v<version>/`.
 
-**Master merge verification gate (must pass before user grants approval)**:
+**Master merge verification gate (must pass before user grants approval)** — Mirrors CLAUDE.md §Master merge gate (single source of truth) + `feedback-git-workflow` memory:
 - audit 5종 (clang-tidy / cppcheck / ASan / UBSan / TSan) all PASS — baseline compared
-- monitoring run: patch/minor = 3h+ stable / major = 10h+ aging + 10h+ stress
+- monitoring run: **patch/minor = 3h+** stable trend (DFPS / RSS / FD / Threads / wd) / **major = 10h+ aging + 10h+ stress** (max cam / max load, DFPS dip distribution, wd frequency)
+- Explicit user approval — AI never concludes "verification done, let's merge"; waits for the user.
 
 ## Master Merge Execution (user-instructed)
 
@@ -133,11 +157,13 @@ gh pr merge <PR#> --merge --delete-branch
 
 **After merge, sync local**:
 ```bash
-git checkout master
+git checkout master           # or develop, depending on which was the merge base
 git pull
-# Source branch was auto-deleted on remote. If still present locally:
-git branch -D <branch-name>
+# Source branch was auto-deleted on remote (via --delete-branch).
+# If still present locally, use safe -d (never -D):
+git branch -d <branch-name>
 ```
+Use `-d` (safe, fails if unmerged). `-D` (force) is denied — if `-d` fails, the branch has un-merged commits and needs investigation, not force-deletion.
 
 **Quick verify**:
 ```bash
@@ -193,11 +219,12 @@ Do NOT add any Claude/Claude Code footer or `Co-Authored-By` trailer to commits 
 
 ## Allowed Without Asking
 
-- Branch create / checkout / list / delete (local)
+- Branch create / checkout / list / delete (local, using `git branch -d` safe-delete only)
 - `git status` / `log` / `diff` / `show` (read-only)
-- `git add` / `commit` / `push` on **your own branch**
-- `git merge` / `rebase` between **non-master branches** (with care for shared history)
+- `git add` / `commit` / `push` on **your own (non-develop, non-master) branch**
+- `git merge` / `rebase` between **non-develop, non-master branches** only (e.g., feature/a ← feature/a-1). **Never** `git merge` directly into `develop` or `master` — always via PR.
 - `gh pr create` (creating a PR does not merge)
+- `gh pr merge --merge --delete-branch` for **develop merges** (after self-verification). For master merges only on explicit user instruction.
 - `gh pr view` / `list` / `comment`
 - `git mv` / `git rm` on tracked files **on your own branch**
 

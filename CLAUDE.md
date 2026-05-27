@@ -71,14 +71,14 @@ Pipeline: RTSP input → YOLOv5 NPU inference → SORT tracking → boundary int
 - **Never silently restart the service to make a symptom disappear.** Service restart is an explicit diagnostic action only; state the intent ("재시작해 X 를 확인/적용한다") in the response. Using restart to obscure a problem is forbidden.
 - `sed` is on the deny list — use awk/cut/tr for reads; provide complete files for edits.
 - No `rm`/`unlink`/`rmdir`. Move with intent: trash → `.deleted/`, rollback/reusable snapshot → `.backup/`. Real `rm` by user only.
-- **Git workflow** — AI may use git/gh but never on `master` directly. Work on separate branches; merge to master only via PR on explicit user instruction. Force push / `reset --hard` denied. **Minimize branch proliferation — create only the branches the task needs (instance of A3).**
-- **Version-bump 절차 (5/26 정착)** — code/cmake bump 가 같은 commit 에 묶이면 code 와 git tag 의 호환 어긋남 위험. 그래서:
-  1. **Bump 는 push 후 별도 commit 으로** — code 변경 commit 은 cmake VERSION 그대로 유지. push 끝낸 다음 cmake 만 올린 별도 commit.
-  2. **Develop / master 머지 전**: topic branch HEAD ↔ target branch 의 직전 마지막 commit 비교, 변경 요약을 사용자에게 보고 + **사용자에게 버전 명시적 확인** ("이 머지의 버전은 무엇인가?").
-  3. **버전 불일치 시**: 사용자 지정 버전이 commit 의 cmake VERSION 과 다르면 머지 전에 정렬 (새 commit 으로 cmake 만 user-version 으로 올리거나, 기존 commit 의 cmake 를 user-version 으로 수정).
-  4. **머지 직후 local placeholder bump**: cmake VERSION 을 (just-merged) + 1 patch 로 별도 commit 후 push (다음 개발 placeholder). 예: 0.1.16 머지 후 → cmake 0.1.17 으로 bump.
-  5. **버전 참조 문서 동기**: README / code/README / NEXT_SESSION 등 버전을 직접 인용하는 모든 문서는 머지 시점에 같이 갱신. 코드만 올리고 docs 가 뒤처지면 "cmake vs docs 불일치" 사고 (실제로 v0.1.16 머지 때 발생).
-  6. **cmake bump 시 README 동기 절대 규칙 (5/27)** — cmake VERSION 을 올리거나 내리는 모든 commit 은 README.md (root) 의 Version 표기 + code/README.md 의 검증 상태 cmake 인용 + logs/NEXT_SESSION.md 의 cmake 참조를 같은 commit 에서 함께 맞춘다. cmake 만 단독 bump 금지. 점검 grep 필수: `grep -nE '0\.[0-9]+\.[0-9]+|VERSION|cmake' README.md code/README.md logs/NEXT_SESSION.md`.
+- **Git workflow** — AI may use git/gh but **never commits directly to `master` or `develop`**. All work happens on dedicated branches (feature/fix/chore/...) forked from develop; both develop merge and master merge go via PR (`gh pr create` + `gh pr merge`). Master merge runs only on explicit user instruction. Force push / `reset --hard` / `git branch -D` (force) denied — use `git branch -d` (safe) for cleanup. Co-Authored-By trailer prohibited. **Minimize branch proliferation — create only the branches the task needs (instance of A3).** Full details: `.claude/skills/git-workflow.md` + `feedback-git-workflow` memory (single source of truth for branch naming / sub-branch depth / Master merge gate verification table).
+- **Version-bump 5-step 절차 (5/26 정착 — 이전 "bump in the same PR" 규칙 폐기)** — code/cmake bump 가 같은 commit 에 묶이면 code 와 git tag 의 호환 어긋남 위험.
+  1. **Topic-branch work**: 코드 편집. cmake VERSION 그대로 유지.
+  2. **Push topic branch**: code 변경 commit + push. cmake bump 없음.
+  3. **Pre-merge user confirmation**: topic branch HEAD ↔ target branch 직전 commit 비교, 변경 요약 보고 + **사용자에게 버전 명시적 확인** ("이 머지의 버전은 무엇인가?").
+  4. **Reconcile if disagree**: 사용자 지정 버전 ≠ commit cmake → 머지 전 정렬 (새 commit 으로 cmake bump, 또는 기존 commit 수정 후 push).
+  5. **Post-merge placeholder bump**: 머지 직후 cmake VERSION 을 (just-merged)+1 patch 로 별도 commit + push. 예: 0.1.16 머지 후 → 0.1.17 placeholder.
+- **cmake bump 시 README 동기 절대 규칙 (5/27)** — cmake VERSION 을 올리거나 내리는 **모든** commit (5-step 의 step 4 / step 5 포함) 은 README.md (root) Version + code/README.md 검증 상태 cmake 인용 + logs/NEXT_SESSION.md cmake 참조를 같은 commit 에서 동기. cmake 만 단독 bump 금지. 점검 grep: `grep -nE '0\.[0-9]+\.[0-9]+|VERSION|cmake' README.md code/README.md logs/NEXT_SESSION.md`.
 - **Pre-push docs check (5/26 절대 규칙)** — 머지뿐 아니라 **commit 을 branch 에 push 할 때마다** 모든 문서를 전체적으로 점검하고 변경 사항과 정합되게 최신화. 점검 대상: README / code/README / NEXT_SESSION / OPERATIONS / .DOCS/ 의 버전 참조, 상태 설명, changelog. 정합 안 되어 push 후 발견되면 즉시 다음 commit 으로 보완 — push 전 점검이 원칙.
 - **Master merge gate (release-grade verification)** — develop → master merge 는 사용자 명시 허가 필수 + 다음 검증 통과:
   - **patch / minor bump**: 모든 audit (5종) 통과 + **3시간 이상 운영 모니터링** (DFPS / RSS / FD / Thread / wd 안정 추세, 후술 §Verification 기준)
