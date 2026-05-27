@@ -1,8 +1,8 @@
 # NEXT_SESSION — v0.1.18 (cam_loss root cause fix: TeardownPipeline unref-skip) 진입점
 
-**최종 갱신**: 2026-05-27 10:50 KST
-**현 develop HEAD**: chore branch (`chore/v0.1.18-master-prep`) — cmake VERSION `0.1.18` 정렬 (master merge target). last released master = `v0.1.0` (5/19). develop 누적 = v0.1.18 (TeardownPipeline fix 포함).
-**현 상태**: **v0.1.18 master merge 준비 중**. monitor `v018_teardown_fix` 11.3h 안정 (wd=1 boot-only, cam_loss=0). audit 5종 5/27 09:14 ~ 14:35 진행 중 (clang-tidy/cppcheck PASS, ASan/TSan 진행 중).
+**최종 갱신**: 2026-05-27 12:30 KST
+**현 develop HEAD**: PR #21 (cmake 0.1.18 정렬 + master_logs 보관 절차 + cmake bump README 동기 절대 규칙) merged. PR #22 (정합성 다중 round — master_logs step 3 PR 명시 + skill OLD bump rule 제거 + branch -d / -D 정합 + DFPS 13→29 multi-core 갱신 + RTSP_GST 모듈 description + shutdown 순서 code 정합 + yaml-cpp 잘못된 TODO + 메트릭 표 ~23→~38 + 누적 53→57 + 1h→11.3h 솔직 표기 + 외 다수) 10+ commit 누적, 사용자 허가 대기 중. cmake VERSION = `0.1.18`. last released master = `v0.1.0` (5/19). develop 누적 = v0.1.18 (TeardownPipeline fix 포함).
+**현 상태**: **v0.1.18 master merge 준비 중**. monitor `v018_teardown_fix` 11.3h 안정 (wd=1 boot-only, cam_loss=0, 단 fix path 미발화). **audit 5종 5/27 09:14 ~ 14:33 완료 — 자체 코드 회귀 0건 ✅** (cppcheck 59 동일, clang-tidy 0 동일, ASan/TSan 자체 코드 leak/race 모두 0건, 외부 lib 부분만 run time 비례 증가). 산출물 `logs/audit_20260527_091456/`.
 
 ---
 
@@ -21,7 +21,7 @@ ResetSourceOnly 가 호출한 TeardownPipeline 의 unref 가 hang. ReconnectWork
 
 **FIX**: `gst_element_get_state` timeout 시 `gst_object_unref` 건너뛰고 의도된 leak (process restart 시 OS cleanup) + WARN log.
 
-**검증 (1h)**:
+**초기 검증 (1h, 5/26 22:00 ~ 23:03)** — 이후 5/27 09:06 까지 11.3h 추가 모니터 진행, 같은 추세 유지 (wd=1 boot only, cam_loss=0, fix path 미발화). 본 표는 1h 초기 검증 시점 수치:
 | 측면 | pre-fix (v016/v014_ab) | post-fix (v018+fix) |
 |---|---|---|
 | Duration | 50min / 8min | **63min** |
@@ -34,8 +34,8 @@ ResetSourceOnly 가 호출한 TeardownPipeline 의 unref 가 hang. ReconnectWork
 
 ### 솔직한 fix 평가 (사용자 비판적 검증 반영)
 - fix 는 **사후조치 (defensive workaround)** — stuck 의 진짜 원인 ([1] stream 끊김 + [5] GStreamer thread join 실패) 미식별
-- 162분 운영 결과 fix path 자체가 발화 X → fix 의 effectiveness empirical 검증 0
-- 안정성 회복은 stuck 조건 사라진 환경 변화 (cam server state cleanup) 때문일 가능성 → **사실상 162분간 아무것도 안 고친 것**일 수도
+- 5/26 22:00 ~ 5/27 09:06 누적 **11.3h** 운영 결과 fix path 자체가 발화 X → fix 의 effectiveness empirical 검증 0
+- 안정성 회복은 stuck 조건 사라진 환경 변화 (cam server state cleanup) 때문일 가능성 → **사실상 11.3h 동안 아무것도 안 고친 것**일 수도
 - 진짜 검증은 다음 자연 stuck 시
 
 ### Escalation 순서 (stuck 재발 시 단계별)
@@ -65,9 +65,9 @@ ResetSourceOnly 가 호출한 TeardownPipeline 의 unref 가 hang. ReconnectWork
 
 **Trigger 가설**: 오늘 15:59-16:41 PID 4924 incident (duplicate DetectBase) 동안 각 cam 서버가 2x client load 처리 → happytime rtsp 의 connection table / session state 코럽트. PID 4924 사망 후에도 자가 회복 안 됨.
 
-**대응 — 내일 (5/27) 진행**:
-1. **cam 서버 4대 (192.168.2.111-114) 의 happytime rtsp daemon 재시작** — 가장 직접 검증. 재시작 후 wd 발생 멈추면 hypothesis 확정.
-2. v0.1.18 baseline 24h 안정성 재측정 (cam 서버 정상화 상태에서).
+**대응 — 5/27 진행 상태**:
+1. **cam 서버 4대 (192.168.2.111-114) 의 happytime rtsp daemon 재시작** — 가장 직접 검증 후보. 실행 여부 확인 필요 (이번 세션 외부 actor 가 수행했을 수 있음). 5/26 22:00 ~ 5/27 09:06 11.3h 운영 결과 wd=1 (boot only) / cam_loss=0 으로 안정 — server 측 정상화 (재시작 또는 자연 복구) 추정 가능.
+2. v0.1.18 baseline 24h 안정성 재측정 — **5/26 22:00 ~ 5/27 09:06 누적 11.3h** 모니터 후 audit 진행 (5/27 09:14 ~ 14:33) 으로 monitor 끊김. 24h 도달 미달. audit 종료 후 service 자동 재시작 (14:33+), 24h 추가 누적 필요 시 새 monitor session 시작 필요.
 
 **부수 발견**:
 - DetectBase 가 server-side close 받았을 때 socket close 누락 → CLOSE-WAIT 패턴 관찰. fd leak 누적 위험은 낮지만 (소량), defensive 코드 추가 후보 (future).
@@ -80,7 +80,7 @@ ResetSourceOnly 가 호출한 TeardownPipeline 의 unref 가 hang. ReconnectWork
 - 초기 증상: DFPS 115→66, RSS 671→1306MB (정확히 2배), warn 분당 ~10k sustained, MetricsRegistry::Failed ERROR 1건
 - 처음엔 5/24 와 동형의 baseline storm 으로 추정. 정밀 분석 결과 cause 가 다름 (자연 회복 안 되는 점)
 - **root cause 확정**: PID 4924 = `docker exec ... DetectBase --version` 호출이 풀 서비스 spawn
-  - [Main.cpp:44](../code/Main/BASE/src/Main.cpp#L44) 가 `int main()` 형태로 argv 무수신 → `--version` 무시되고 그대로 서비스 부팅
+  - [Main.cpp:62](../code/Main/BASE/src/Main.cpp#L62) 의 코멘트 "과거 `int main()` 형태로 argv 무수신" 가 사고 배경 설명. L58 `int main( int argc, char* argv[] )` + L67~76 argv parser 가 fix.
   - 두 instance 가 같은 4 cam + 3 NPU core 동시 점유 → 영구 2x producer 부하 → queue 영구 saturation
 - PID 4924 kill 시점에 DFPS / RSS / CPU 모두 정확히 1/2 로 복귀 — duplicate process 가 원인이라는 결정적 증거
 
@@ -130,23 +130,32 @@ ResetSourceOnly 가 호출한 TeardownPipeline 의 unref 가 hang. ReconnectWork
 
 ---
 
-## 🔧 새 git workflow 정책 (5/26 사용자 확립)
+## 🔧 git workflow 정책 (5/26 정착 + 5/27 보강)
 
+**5/26 5-step bump 절차**:
 1. **버전 bump 는 push 직후 별도 commit** — code 변경과 cmake bump 를 같은 commit 에 묶지 말 것 (호환성 문제 방지)
 2. **develop/master 머지 전**: 직전 마지막 commit 과 비교하여 변경 내용 요약 + 사용자에게 버전 명시적 확인
 3. **버전 불일치 시**: 사용자 지정 버전이 commit 의 cmake VERSION 과 다르면 머지 전에 정렬 (commit 수정 or 새 commit)
 4. **머지 직후 local bump**: cmake 를 (just-merged) + 1 patch 로 placeholder bump
 5. **README / code/README / NEXT_SESSION 등 버전 참조 문서**도 같이 갱신
-6. **Pre-push docs check (절대 규칙)** — merge 뿐만 아니라 **모든 commit push 시점**에 모든 문서 (README / code/README / NEXT_SESSION / OPERATIONS / .DOCS/) 전수 점검. 코드 변경과 정합 안 맞으면 즉시 다음 commit 으로 보완. push 전 점검이 원칙.
-7. CLAUDE.md §Work Rules + memory `feedback_git_workflow.md` 에 모두 명시. memory 는 AI-only 문서라 영어로 변환됨 (5/26).
+
+**5/26 Pre-push docs check (절대 규칙)** — merge 뿐만 아니라 **모든 commit push 시점**에 모든 문서 (README / code/README / NEXT_SESSION / OPERATIONS / .DOCS/) 전수 점검. 코드 변경과 정합 안 맞으면 즉시 다음 commit 으로 보완. push 전 점검이 원칙.
+
+**5/27 신규 — cmake bump 시 README 동기 절대 규칙**: cmake VERSION 을 올리거나 내리는 **모든** commit 은 README.md root Version + code/README.md 검증 상태 cmake 인용 + logs/NEXT_SESSION.md cmake 참조를 같은 commit 에서 함께 맞춤. cmake 만 단독 bump 금지.
+
+**5/27 신규 — master_logs 보관 절차**: master 머지 전 `master_logs/v<버전>/` 디렉토리에 audit + monitor 산출물 옮김 + README. 별도 chore branch + PR → develop merge (AI 가 develop 에 직접 commit 안 함). 이 PR 은 cmake bump 절대 금지. 그 다음 develop → master --no-ff merge (사용자 명시 허가 후).
+
+**5/27 신규 — develop 도 PR 으로만**: AI 가 develop 에 직접 commit 안 함. feature → develop 머지도 `gh pr create --base develop` + `gh pr merge --merge --delete-branch` 사용. 직접 `git merge into develop` 금지.
+
+CLAUDE.md §Work Rules + .claude/skills/git-workflow.md + memory `feedback_git_workflow.md` 에 모두 명시. memory 는 AI-only 문서라 영어 단일 (5/26 영어화).
 
 ---
 
 ## 🚀 다음 세션 진입 시 자동 처리
 
-1. `docker ps` + DFPS log + monitor task 확인 — `bthk32wqw` (v016_baseline) 가동 여부
-2. monitor JSONL 의 최신 heartbeat 로 baseline 안정성 확인 (DFPS ≥ 115, RSS ≤ 700MB, warn ≤ 30/min, err = 0, wd = 0)
-3. **24h+ 운영 모니터링 누적 시 master merge gate 충족 검토** — CLAUDE.md §Verification 의 patch/minor 요건 (3h+ 운영 안정 + audit 5종) 충족 시 사용자 결정 대기
+1. `docker ps` + DFPS log + monitor task 확인 — `bl4c785is` (v018_teardown_fix) 가동 여부 (5/26 21:43 시작, 5/27 09:06 11.3h heartbeat 수집)
+2. monitor JSONL 의 최신 heartbeat 로 baseline 안정성 확인 (DFPS ≥ 115, RSS ≤ 700MB, warn ≤ 30/min, err = 0, wd boot-only)
+3. **3h+ 운영 모니터링 누적 시 master merge gate 충족 검토** — CLAUDE.md §Master merge gate 의 patch/minor 요건 (3h+ 운영 안정 + audit 5종) 충족 시 master_logs/v0.1.18/ 구성 → develop merge → 사용자 결정 대기
 
 ---
 
@@ -163,7 +172,7 @@ ResetSourceOnly 가 호출한 TeardownPipeline 의 unref 가 hang. ReconnectWork
 - 영향: Full reset 에는 큰 dip 없음, critical 아님. 미래 cleanup 후보
 
 ### NPU batch_size — code 가 batch=1 hard-assumed (5/26 발견)
-[YoloV5_Torch_Onnx_RKNN_NPU.cpp:412](../code/Engine/NPU/YoloV5_Torch_Onnx_RKNN_NPU/YoloV5_Torch_Onnx_RKNN_NPU.cpp#L412) 의 잘못된 검증 + line 505 input.size 단일 frame 만 할당. 현재 batch=1 hard-locked. 6+ cam scale-up 시 NPU 천장 도달하면 batch>1 검토 가치. 그때 3가지 동시 fix 필요.
+[YoloV5_Torch_Onnx_RKNN_NPU.cpp:412](../code/Engine/NPU/YoloV5_Torch_Onnx_RKNN_NPU/YoloV5_Torch_Onnx_RKNN_NPU.cpp#L412) 의 잘못된 검증 + [line 512](../code/Engine/NPU/YoloV5_Torch_Onnx_RKNN_NPU/YoloV5_Torch_Onnx_RKNN_NPU.cpp#L512) `input.size = rknn_model_w * rknn_model_h * rknn_model_c` 단일 frame 만 할당. 현재 batch=1 hard-locked. 6+ cam scale-up 시 NPU 천장 도달하면 batch>1 검토 가치. 그때 3가지 동시 fix 필요.
 
 ### v2.0.0 Multi-engine (Search 등) 도입 가이드 — [.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](../.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md)
 - MAIA 참고. event-driven 패턴이라 NPU 부담 미미 (~2.4 inference/sec)
@@ -177,11 +186,7 @@ ResetSourceOnly 가 호출한 TeardownPipeline 의 unref 가 hang. ReconnectWork
 ### BasicLibs 정리 권장 (legacy 출처: [.DOCS/BASICLIBS_AUDIT.md](../.DOCS/BASICLIBS_AUDIT.md) §6 P3)
 **누락됐다가 복원 (5/27)**. v1.0.0 정리 단계에서 같이 진행 가능:
 
-1. **ClassChecker YAML → JSON 마이그레이션 + vendored yaml-cpp 제거**
-   - 현 `code/BasicLibs/core/parser/yaml-cpp/` (.a 포함) 사용처 = `code/BasicLibs/core/types/ClassChecker.h` 1개
-   - YAML 파일 1개 (engines/engine.classes.yaml or similar) JSON 변환 + 사용 코드 nlohmann::json 로 교체
-   - 효과: ~3,000 LOC 제거 (vendored yaml-cpp)
-   - 작업 ~1-2 시간
+1. ~~**ClassChecker YAML → JSON 마이그레이션 + vendored yaml-cpp 제거**~~ — ✅ **이미 완료 (P3, 2026-05-14)**. `code/BasicLibs/core/parser/yaml-cpp/` 디렉토리 제거 + ClassChecker 가 nlohmann::json 사용 ([ClassChecker.h:14-16](../code/BasicLibs/core/types/ClassChecker.h#L14)) + `engines/engine.classes.json` 으로 변환 완료. [code/BasicLibs/CMakeLists.txt:36](../code/BasicLibs/CMakeLists.txt#L36) 코멘트 참조. 본 항목은 historical only — 5/27 점검 시 false TODO 였음 발견.
 
 2. **SafeThread → ThreadPool 도입** (확장 시점에)
    - 현 SafeThread 29건 사용. cam 별 인스턴스 분리 (no pool)
@@ -209,7 +214,7 @@ ResetSourceOnly 가 호출한 TeardownPipeline 의 unref 가 hang. ReconnectWork
    - `RtspDetectorUnit.cpp:1624 / 1747` `RSP-thread (avg over 100 cycles...)` — 동일 빈도, 라인 길이 매우 김 (50+ field)
    - `RtspDetectorUnit.cpp:1931` `event_detected type=X cam=N count=M` — traffic burst 시 분당 100-200줄 (5/24 storm 분석 시 진짜 시그널 찾기 어려운 노이즈)
    - `RtspDetectorUnit.cpp:2034` `EVT-thread (avg over 100 event cycles...)`
-   - **효과**: Release build (`DEBUG_MODE` off) 에서 compile-out (`MgenLogger.h:47-50` cutoff = INFO) → 운영 log volume 대폭 감소 + 실 incident (frame-age watchdog / ResetSourceOnly / EOS) 신호 명확. cam_loss 분석 시 SignalNoise 비율 ↑.
+   - **효과**: Release build (`DEBUG_MODE` off) 에서 compile-out (`MgenLogger.h:48-53` `LOG_LEVEL_CUTOFF = LogLevel::INFO` — DEBUG_MODE 분기) → 운영 log volume 대폭 감소 + 실 incident (frame-age watchdog / ResetSourceOnly / EOS) 신호 명확. cam_loss 분석 시 SignalNoise 비율 ↑.
 
 3. **TSan SafeQueue 잔존 race cleanup** — 5/19 audit baseline 시점 자체 코드 race 0건 ✅. 단 v1.0.0 시점 SafeQueue 의 shared_ptr ref counting / max_size 변경 path / drop_count 경합 등 deep review 권장.
 
@@ -231,8 +236,9 @@ ResetSourceOnly 가 호출한 TeardownPipeline 의 unref 가 hang. ReconnectWork
 
 ### canonical monitor (v0.1.16+)
 - `logs/monitor.sh <label>` (JSONL, 70+ per-cam fields, 1분 단위) + threshold alerts 7 종 + warmup grace 4 cycle
-- 가동 중: `bthk32wqw` label=v016_baseline
-- 출력: `logs/monitor_v016_baseline.jsonl`
+- 마지막 세션 (v0.1.18 TeardownPipeline fix 검증): `bl4c785is` label=`v018_teardown_fix` — 5/26 21:43 ~ 5/27 09:06 (11.3h)
+- 출력: `logs/monitor_v018_teardown_fix.jsonl` (591 line JSONL)
+- 이전 세션 (v0.1.16 baseline): `bthk32wqw` label=`v016_baseline` (이미 종료, jsonl 휴지통 검토 대상)
 
 ### single-instance lock
 - `/DetectBase/logs/.detectbase.lock` 의 `flock(2)` advisory lock — Main.cpp 부팅 시 획득
