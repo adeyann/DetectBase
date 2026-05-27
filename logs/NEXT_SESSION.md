@@ -2,61 +2,42 @@
 
 **최종 갱신**: 2026-05-27 KST
 **현 develop HEAD**: cmake VERSION = `0.1.23`. last master tag = `v0.1.18` (2026-05-27).
-
-가장 최근 작업: [PR #28](https://github.com/adeyann/DetectBase/pull/28) 머지 완료 — debug virtual lines 를 ServerSetting toggle 로 전환 + 디버깅 instrumentation 을 DEBUG_MODE compile-out 으로 분리 (작업 A~E, cmake 0.1.19 → 0.1.23).
+**작업 중 branch**: `docs/develop-merge-policy-update` (develop 미머지, HEAD `9bf8c0d`) — git workflow 정책 정정 + DeviceCluster 인라인화 + SafeQueue race review + SafeQueue MO-1 (enqueue+terminate) + CLOSE-WAIT 항목 close 누적.
 
 ---
 
 ## 📋 남은 작업
 
-### 🟢 즉시 가능 (의사결정 X)
+### 🟢 즉시 가능
 
-#### 1. TSan SafeQueue 잔존 race deep review
-- 5/19 audit baseline 시점 자체 코드 race 0건 ✅
-- SafeQueue 의 shared_ptr ref counting / max_size 변경 path / drop_count 경합 deep review
-- 작업: review only — 식별 후 fix 별도 결정
-
-#### 2. DeviceCluster 인라인화
-- `code/Management/manager/` 안의 클래스, SettingManager 1곳만 사용
-- 흡수 가능. 작은 정리.
-
-#### 3. GStreamer GMainContext 공유 결함 cleanup
-- 각 `GstRtspReceiver` instance 가 `g_main_loop_new(nullptr, FALSE)` → default global GMainContext 공유
-- multi-cam 환경 잠재 coupling 원인
-- Full reset 에는 큰 dip 없음, critical 아님
+#### 1. GStreamer GMainContext 공유 결함 cleanup
+- `GstRtspReceiver` (1곳) + `GstRtspProxyServer` (1곳, 5/27 추가 발견) 모두 `g_main_loop_new(nullptr, FALSE)` → default global GMainContext 공유
+- multi-cam 환경 잠재 coupling 원인 (한 cam reset 이 다른 cam timing 영향 가능)
+- Full reset 시 큰 dip 없음, critical 아님. 미래 cleanup 후보.
+- 작업: per-instance dedicated `GMainContext` 생성 + source attach + thread-default push + receiver/server 양쪽 검증
+- 비용 ~5-6h, 위험 중 (GStreamer behavior 변경 + ASan/TSan 재검증)
 
 ---
 
 ### 🟡 운영 데이터 누적 대기
 
-#### 4. monitor.sh threshold tuning
+#### 2. monitor.sh threshold tuning
 - 현 기본값: `ALERT_DFPS_LOW_THRESHOLD=100`, `ALERT_DFPS_LOW_STREAK=2`, `ALERT_RSS_MB_THRESHOLD=1100`, `ALERT_WARN_DELTA_PER_CYCLE=500`, `ALERT_WARMUP_CYCLES=4`
 - 운영 1-2주 데이터 누적 후 false-positive 분포 확인 → 재검토
 
-#### 5. cam_loss fix path 실효성 검증
-- v0.1.18 TeardownPipeline unref-skip 패치 ([GstRtspReceiver.cpp:314-340](../code/Protocol/RTSP_GST/src/GstRtspReceiver.cpp#L314)) 가 사후조치 (defensive workaround). stream stop / GStreamer thread join 실패의 **진짜 원인 미식별**.
-- 11.3h 모니터 동안 fix path 자체가 발화 X — 안정성 회복은 환경 변화 (cam server state cleanup) 때문일 가능성.
-- 다음 자연 stuck 시 fix 실효성 검증 가능.
+#### 3. cam_loss fix path 실효성 검증
+- v0.1.18 TeardownPipeline unref-skip 패치 ([GstRtspReceiver.cpp:314-340](../code/Protocol/RTSP_GST/src/GstRtspReceiver.cpp#L314)) 가 사후조치 (defensive workaround)
+- 11.3h 모니터 동안 fix path 자체가 발화 X — 다음 자연 stuck 시 검증
 
 **Escalation 순서 (stuck 재발 시)**:
 1. Step 1 (현재): 자연 stuck 대기 + monitor + fix path 발화 검증
 2. Step 2: `GST_DEBUG=2,rtspsrc:5,udpsrc:5,rtpsession:5` env var 추가 후 재실행
 3. Step 3: tcpdump packet capture (RTP/RTCP/RTSP)
-4. Step 4 (최후 수단): `37dae37` parent commit (happytimesoft 시점) 빌드 + 동일 환경 A/B test
+4. Step 4 (최후): `37dae37` parent commit (happytimesoft 시점) 빌드 + 동일 환경 A/B test
 
 자세한 배경: [.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md](../.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md)
 
-#### 6. ~~CLOSE-WAIT defensive~~ — **fix 불가, 영구 close (5/27 정정)**
-- 5/26 wd 회귀 조사 시 cam server (192.168.2.114, happytime RTSP) 측 CLOSE-WAIT 관찰
-- 5/27 분석: 우리 코드에서 close 추가 가능한 socket **0건**:
-  - RTSP control TCP — GStreamer `rtspsrc` 내부 관리 (외부 lib)
-  - SocketIO — `SioHandler.cpp` 이미 `set_close_listener` + `sync_close()` 정상 처리
-  - REST/GRPC — libcurl / grpc::Channel 자동 lifecycle
-- 진짜 원인 = **cam server happytime daemon 측 state corrupt** (5/26 분석 결론) — 우리 코드 영역 외
-- 우리 측 간접 defensive (rtspsrc `tcp-timeout` 단축 등) 도 effect 불확실 (server 가 keep-alive 안 받는 root cause 면 client timeout 만 단축해도 close 안 됨)
-- 본 항목 **영구 close**. 재발 시 외부 (GStreamer 또는 cam server vendor) 영역으로 escalation.
-
-#### 7. 24일 storm (accept as baseline)
+#### 4. 24일 storm — accept as baseline
 - 정밀 mechanism: INF push mutex contention (40x) + inflight_q drop-oldest → correlation_id mismatch
 - 24h 중 3회 (~10분), self-healing, fix 비용 > 효익
 - 처리 방침: **accept**. 6+ cam scale-up 시 batch>1 도입 검토 (별도)
@@ -65,12 +46,12 @@
 
 ### 🟠 scale-up 의사결정 후
 
-#### 8. NPU batch_size 수정 (6+ cam scale-up 시)
+#### 5. NPU batch_size 수정 (6+ cam scale-up 시)
 - [YoloV5_Torch_Onnx_RKNN_NPU.cpp:412](../code/Engine/NPU/YoloV5_Torch_Onnx_RKNN_NPU/YoloV5_Torch_Onnx_RKNN_NPU.cpp#L412) 잘못된 batch_size 검증
 - [L512](../code/Engine/NPU/YoloV5_Torch_Onnx_RKNN_NPU/YoloV5_Torch_Onnx_RKNN_NPU.cpp#L512) `input.size = rknn_model_w * rknn_model_h * rknn_model_c` 단일 frame 만 할당
 - 6+ cam scale-up 시 NPU 천장 도달 시 batch>1 검토 + RKNN 모델 batch>1 재변환 필요 (3가지 동시 fix)
 
-#### 9. SafeThread → ThreadPool 전환
+#### 6. SafeThread → ThreadPool 전환
 - 현 SafeThread 29건 사용, cam 별 인스턴스 분리 (no pool)
 - 카메라 8~16대 확장 계획 있을 시 검토
 
@@ -90,11 +71,10 @@
 
 ### 🟣 v1.0.0 안정화 후
 
-#### 10. GStreamer 1.20.3 → 1.24+ upgrade
+#### 7. GStreamer 1.20.3 → 1.24+ upgrade
 - rtpmanager long-running leak (외부 lib, ~340 MB/year, accepted) 의 fix 가능성 검증
 - 비용: 1.5~2시간 + Ubuntu 22.04 → 24.04 base 변경 + librknnrt ABI 호환 위험 + protobuf/grpc source rebuild
 - 1.24 changelog 에 명확한 본 케이스 fix 단서 없음 → 효과 불확실
-- Bonus: cam_loss root cause [5] (GStreamer thread join 실패) 가 1.24 에서 fix 됐다면 우리 fix 의 leak 압력도 해소
 
 ---
 
@@ -113,13 +93,13 @@
 - 두 번째 instance 시도 시 `[FATAL] another DetectBase instance is running` exit 3
 
 ### DEBUG_MODE compile-out (v0.1.20+ PR #28)
-Debug 빌드 (`-DCMAKE_BUILD_TYPE=Debug` 또는 audit 5종 ASan/UBSan/TSan) 시 활성화되는 instrumentation. Release 빌드에선 전부 preprocessor 제거 → 0 runtime cost.
+Debug 빌드 (`-DCMAKE_BUILD_TYPE=Debug` 또는 audit 5종) 에서만 활성. Release 빌드에선 preprocessor 제거 → 0 runtime cost.
 
 | 영역 | 위치 |
 |---|---|
 | `DBG_PROF(...)` 매크로 + InfProf/RspProf/EvtProf 100-cycle dump | [RtspDetectorUnit.cpp](../code/Main/DETECTOR/src/RtspDetectorUnit.cpp) |
 | jemalloc mallctl 5회 + `/proc/self/maps` 파싱 | RspProf 안 |
-| event_detected MLOG_INFO | per event 발생 |
+| event_detected MLOG_INFO | per event |
 | [DFPS] 10초 line | [InferenceCounter.cpp:136](../code/Management/worker/src/InferenceCounter.cpp#L136) |
 | GstRtspReceiver debug/stuck trace metric 6개 | BUS_MSG / RESET_ATTEMPT / LAST_FRAME_AGE_SEC / DEPAY_BUFFER / DECODED / RTP_IN |
 | GstRtspReceiver jitterbuffer 3개 gauge | JB_PUSHED / JB_LOST / JB_RTX_COUNT |
@@ -142,5 +122,6 @@ Debug 빌드 (`-DCMAKE_BUILD_TYPE=Debug` 또는 audit 5종 ASan/UBSan/TSan) 시 
 | [OPERATIONS.md](../OPERATIONS.md) | 운영 트러블슈팅 |
 | [.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](../.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md) | v2.0.0 Search engine 도입 가이드 |
 | [.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md](../.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md) | cam_loss / GStreamer stuck 분석 (escalation playbook 포함) |
+| [.DOCS/SAFEQUEUE_RACE_REVIEW_20260527.md](../.DOCS/SAFEQUEUE_RACE_REVIEW_20260527.md) | SafeQueue race deep review (v1.0.0 진입 전 점검, 자체 race 0건 확정) |
 | [.backup/mpp_purged_20260526/MPP_PURGE_NOTES.md](../.backup/mpp_purged_20260526/MPP_PURGE_NOTES.md) | MPP + Option A 폐기 결정 + 복원 방법 |
 | [master_logs/v0.1.18/](../master_logs/v0.1.18/) | v0.1.18 archival (audit + monitor JSONL + README) |
