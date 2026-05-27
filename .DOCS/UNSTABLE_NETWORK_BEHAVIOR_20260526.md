@@ -1,8 +1,8 @@
 # cam_loss Root Cause Analysis — 2026-05-26 (RESOLVED)
 
-**상태**: ROOT CAUSE 확정 + FIX 검증 완료
+**상태**: ROOT CAUSE 확정 + FIX 정적 검증 완료 (단 fix path 미발화 — 동적 검증 보류)
 **현 binary**: v0.1.18 + TeardownPipeline unref-skip fix
-**monitor**: `bl4c785is` (label `v018_teardown_fix`) — 1h 운영 wd=1/cam_loss=0
+**monitor**: `bl4c785is` (label `v018_teardown_fix`) — 5/26 21:43 ~ 5/27 09:06 **11.3h** 운영 wd=1 (boot only) / cam_loss=0. 단 자연 stuck 발생 안 함 → unref-skip path 발화 0건 → fix 의 effectiveness empirical 확정 보류 (다음 stuck 시점에 검증).
 
 > **doc 진화 이력**:
 > - 19:00 — 원 제목 "Unstable Network Resilience Test"
