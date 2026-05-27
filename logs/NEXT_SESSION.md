@@ -46,9 +46,15 @@
 
 자세한 배경: [.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md](../.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md)
 
-#### 6. CLOSE-WAIT defensive (future, 우선순위 낮음)
-- cam server 가 끊었을 때 DetectBase 가 socket close 누락 → CLOSE-WAIT 패턴 관찰
-- fd leak 누적 위험 낮음 (소량) — defensive 코드 추가 후보
+#### 6. ~~CLOSE-WAIT defensive~~ — **fix 불가, 영구 close (5/27 정정)**
+- 5/26 wd 회귀 조사 시 cam server (192.168.2.114, happytime RTSP) 측 CLOSE-WAIT 관찰
+- 5/27 분석: 우리 코드에서 close 추가 가능한 socket **0건**:
+  - RTSP control TCP — GStreamer `rtspsrc` 내부 관리 (외부 lib)
+  - SocketIO — `SioHandler.cpp` 이미 `set_close_listener` + `sync_close()` 정상 처리
+  - REST/GRPC — libcurl / grpc::Channel 자동 lifecycle
+- 진짜 원인 = **cam server happytime daemon 측 state corrupt** (5/26 분석 결론) — 우리 코드 영역 외
+- 우리 측 간접 defensive (rtspsrc `tcp-timeout` 단축 등) 도 effect 불확실 (server 가 keep-alive 안 받는 root cause 면 client timeout 만 단축해도 close 안 됨)
+- 본 항목 **영구 close**. 재발 시 외부 (GStreamer 또는 cam server vendor) 영역으로 escalation.
 
 #### 7. 24일 storm (accept as baseline)
 - 정밀 mechanism: INF push mutex contention (40x) + inflight_q drop-oldest → correlation_id mismatch
