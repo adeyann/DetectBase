@@ -1,7 +1,7 @@
 # NEXT_SESSION — v0.1.19 작업 진입
 
 **최종 갱신**: 2026-05-27 KST
-**현 develop HEAD**: cmake VERSION = `0.1.19` (작업 진입, working dir bump). last master tag = `v0.1.18` (2026-05-27, PR #25).
+**현 develop HEAD**: cmake VERSION = `0.1.20` (작업 진입, working dir bump). last master tag = `v0.1.18` (2026-05-27, PR #25). 마지막 push commit cmake = `0.1.19` (작업 A — config toggle).
 **진입 branch**: `cleanup/debug-virtual-lines` (develop fork).
 
 ---
@@ -53,7 +53,7 @@
 - Release RSP-thread CPU **약 8-18 ms/sec 회수**
 - Release binary 크기 미세 감소
 
-**구현 방식**: 단순 `#ifdef DEBUG_MODE` wrap. 별도 매크로 신설 X (A2 simplicity first). 가독성 비용 받아들임.
+**구현 방식**: file-local 매크로 1개 (`DBG_PROF(...)` — `RtspDetectorUnit.cpp` 안에서만 사용) + 큰 블록 (struct 정의 / lambda / 100-cycle dump) 은 `#ifdef DEBUG_MODE` 직접 wrap. 측정 라인 50+ 곳 ifdef 만으로는 노이즈 과다 → 1-매크로 file-local abstraction 정당 (A2 의 "single-use code 회피" 와 충돌 X — file-internal 50+ 사용처). 다른 파일에는 매크로 노출 X.
 
 ---
 
@@ -156,7 +156,7 @@ v0.1.18 TeardownPipeline unref-skip 패치 ([GstRtspReceiver.cpp:314-340](../cod
 
 | 문서 | 내용 |
 |------|------|
-| [README.md](../README.md) | 프로젝트 전체 (Version 0.1.19) |
+| [README.md](../README.md) | 프로젝트 전체 (Version 0.1.20) |
 | [CLAUDE.md](../CLAUDE.md) | 코딩 표준 + master merge gate + git workflow 정책 (source of truth) |
 | [OPERATIONS.md](../OPERATIONS.md) | 운영 트러블슈팅 |
 | [.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](../.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md) | v2.0.0 Search engine 도입 가이드 |

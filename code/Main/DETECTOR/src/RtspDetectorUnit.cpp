@@ -42,6 +42,20 @@ extern "C" {
 //   cleanup 의 주석 처리된 한 줄을 함께 복구할 것.
 // #include <malloc.h>          // glibc malloc_trim: emergency cleanup 후 heap 강제 반환
 
+// ---------------------------------------------------------------------------
+// DBG_PROF — file-local instrumentation wrapping (v0.1.20).
+// 측정 코드 (stage timing / jemalloc mallctl / /proc/self/maps / 100-cycle
+// dump) 가 thread function 안에 50+ 곳 인터리브되어 있어 매크로 1개로 압축.
+// Release 빌드 (DEBUG_MODE off) 에선 빈 expansion → preprocessor 단계에서
+// 제거 → 0 runtime cost + 0 binary footprint. 큰 블록은 #ifdef DEBUG_MODE
+// 직접 wrap 으로 결합.
+// ---------------------------------------------------------------------------
+#ifdef DEBUG_MODE
+    #define DBG_PROF( ... ) __VA_ARGS__
+#else
+    #define DBG_PROF( ... )
+#endif
+
 namespace MGEN
 {
     using namespace std::chrono_literals;
@@ -929,7 +943,9 @@ namespace MGEN
         // reset members
         this->consecutive_mismatch_count_ = 0;
 
+#ifdef DEBUG_MODE
         // InferenceThread (cam side) stage profile — 모든 단계 us 단위 평균, 100 cycle 마다 1줄 로그.
+        // Release 빌드에선 본 블록 전체가 preprocessor 제거 → 0 runtime cost.
         struct InfProf {
             uint64_t dq_us = 0;             // avframe_q dequeue
             uint64_t pre_us = 0;            // preprocess (sws_scale 포함)
@@ -947,19 +963,20 @@ namespace MGEN
             return static_cast<uint64_t>(
                 std::chrono::duration_cast<std::chrono::microseconds>( b - a ).count() );
         };
+#endif
 
         // Main
         while( running.load() == true )
         {
-            const auto t_inf_top = std::chrono::steady_clock::now();
-            std::chrono::steady_clock::time_point t_after_dq, t_after_pre, t_after_req, t_after_push;
-            bool t_dq_set = false, t_pre_set = false, t_req_set = false, t_push_set = false;
+            DBG_PROF( const auto t_inf_top = std::chrono::steady_clock::now(); )
+            DBG_PROF( std::chrono::steady_clock::time_point t_after_dq, t_after_pre, t_after_req, t_after_push; )
+            DBG_PROF( bool t_dq_set = false, t_pre_set = false, t_req_set = false, t_push_set = false; )
             // Read AVFrame from GStreamer pipeline (avframe_q_ 의 producer 는 GstRtspClient)
             // dequeue_wait_for 는 종료/타임아웃 시 std::nullopt 반환 (throw 없음)
             std::optional<std::shared_ptr<AVFrame>> opt_frame = avframe_q_->dequeue_wait_for( dequeue_timeout );
-            t_after_dq = std::chrono::steady_clock::now();
-            t_dq_set = true;
-            const size_t cyc_avframe_size = avframe_q_ ? avframe_q_->size() : 0;  // dq 직후 잔여 (큐 누적 검증)
+            DBG_PROF( t_after_dq = std::chrono::steady_clock::now(); )
+            DBG_PROF( t_dq_set = true; )
+            DBG_PROF( const size_t cyc_avframe_size = avframe_q_ ? avframe_q_->size() : 0; )  // dq 직후 잔여 (큐 누적 검증)
 
             if( opt_frame.has_value() == false )
             {
@@ -1188,8 +1205,8 @@ namespace MGEN
 
             if( !preprocessing_success )
                 continue;
-            t_after_pre = std::chrono::steady_clock::now();
-            t_pre_set = true;
+            DBG_PROF( t_after_pre = std::chrono::steady_clock::now(); )
+            DBG_PROF( t_pre_set = true; )
 
             uint64_t current_correlation_id = this->frame_count_.fetch_add(1);
 
@@ -1218,8 +1235,8 @@ namespace MGEN
                 // 모두 요청이 드랍된 경우
                 continue;
             }
-            t_after_req = std::chrono::steady_clock::now();
-            t_req_set = true;
+            DBG_PROF( t_after_req = std::chrono::steady_clock::now(); )
+            DBG_PROF( t_req_set = true; )
 
             // B2 async pipeline — RespondAsync + tracking + metadata + event/emit 를 ResponseThread 에 위임.
             //   cam thread 의 cycle 에서 NPU resp(22ms) + post(12ms) = 34ms 빠짐. dfps +52% 기대.
@@ -1244,15 +1261,16 @@ namespace MGEN
                 item.engines.push_back( std::move( ei ) );
             }
 
-            size_t cyc_inflight_size = 0;
+            DBG_PROF( size_t cyc_inflight_size = 0; )
             if( inflight_q_ ) {
-                cyc_inflight_size = inflight_q_->size();  // push 직전 size (누적 leak 검증)
+                DBG_PROF( cyc_inflight_size = inflight_q_->size(); )  // push 직전 size (누적 leak 검증)
                 // SafeQueue::enqueue_move 는 max_size 도달 시 oldest drop. response thread 가 느리면 자연 backpressure.
                 inflight_q_->enqueue_move( std::move( item ) );
             }
-            t_after_push = std::chrono::steady_clock::now();
-            t_push_set = true;
+            DBG_PROF( t_after_push = std::chrono::steady_clock::now(); )
+            DBG_PROF( t_push_set = true; )
 
+#ifdef DEBUG_MODE
             // InferenceThread stage profile — 정상 완주 cycle 만 누적, 100 cycle 마다 1줄 로그.
             if( t_dq_set && t_pre_set && t_req_set && t_push_set ) {
                 inf_prof.dq_us             += inf_us( t_inf_top, t_after_dq );
@@ -1285,6 +1303,7 @@ namespace MGEN
                     inf_prof = InfProf{};
                 }
             }
+#endif
 
         } // while running true
 
@@ -1326,7 +1345,9 @@ namespace MGEN
         // 이벤트 발생 시 1080p frame 의 cv::Mat 변환 + cv::imwrite 위해 io_work_queue 에 넘김.
         FrameFormattingContext resp_origin_ctx;
 
+#ifdef DEBUG_MODE
         // ResponseThread stage profile — 모든 단계 us 단위 평균.
+        // Release 빌드에선 본 영역 (struct + lambda + jemalloc/proc 파싱) 전부 preprocessor 제거.
         struct RspProf {
             uint64_t ifq_us  = 0;   // inflight_q dequeue wait
             uint64_t resp_us = 0;   // RespondAsync + bbox merge (NPU 왕복)
@@ -1411,6 +1432,7 @@ namespace MGEN
             return static_cast<uint64_t>(
                 std::chrono::duration_cast<std::chrono::microseconds>( b - a ).count() );
         };
+#endif
 
         while( running.load() == true )
         {
@@ -1420,15 +1442,15 @@ namespace MGEN
                 continue;
             }
 
-            const auto t_rsp_top = std::chrono::steady_clock::now();
-            std::chrono::steady_clock::time_point t_after_ifq, t_after_resp, t_after_trk, t_after_meta, t_after_ev;
-            bool t_ifq_set = false, t_resp_set = false, t_trk_set = false, t_meta_set = false, t_ev_set = false;
-            size_t cyc_io_size = 0;
-            size_t cyc_trk_cnt = 0;
+            DBG_PROF( const auto t_rsp_top = std::chrono::steady_clock::now(); )
+            DBG_PROF( std::chrono::steady_clock::time_point t_after_ifq, t_after_resp, t_after_trk, t_after_meta, t_after_ev; )
+            DBG_PROF( bool t_ifq_set = false, t_resp_set = false, t_trk_set = false, t_meta_set = false, t_ev_set = false; )
+            DBG_PROF( size_t cyc_io_size = 0; )
+            DBG_PROF( size_t cyc_trk_cnt = 0; )
 
             auto opt_item = inflight_q_->dequeue_wait_for( 100ms );
-            t_after_ifq = std::chrono::steady_clock::now();
-            t_ifq_set = true;
+            DBG_PROF( t_after_ifq = std::chrono::steady_clock::now(); )
+            DBG_PROF( t_ifq_set = true; )
 
             if( !opt_item.has_value() ) {
                 if( inflight_q_->is_terminated() ) {
@@ -1448,9 +1470,9 @@ namespace MGEN
             //    v7 — resp_us 분해: wait (NPU 결과 대기) vs merge (bbox convert loop).
             // -----------------------------------------------------------------
             std::vector<InferObject> merged_results;
-            uint64_t cyc_resp_wait_us   = 0;
-            uint64_t cyc_resp_merge_us  = 0;
-            size_t   cyc_resp_obj_count = 0;
+            DBG_PROF( uint64_t cyc_resp_wait_us   = 0; )
+            DBG_PROF( uint64_t cyc_resp_merge_us  = 0; )
+            DBG_PROF( size_t   cyc_resp_obj_count = 0; )
             for( const auto& engine_inflight : item.engines )
             {
                 auto now              = std::chrono::steady_clock::now();
@@ -1463,10 +1485,10 @@ namespace MGEN
                     continue;
                 }
 
-                const auto t_wait_start = std::chrono::steady_clock::now();
+                DBG_PROF( const auto t_wait_start = std::chrono::steady_clock::now(); )
                 auto result_opt = load_balancer_->RespondAsync( engine_inflight.subscribe_id, remaining_budget );
-                const auto t_wait_end = std::chrono::steady_clock::now();
-                cyc_resp_wait_us += rsp_us( t_wait_start, t_wait_end );
+                DBG_PROF( const auto t_wait_end = std::chrono::steady_clock::now(); )
+                DBG_PROF( cyc_resp_wait_us += rsp_us( t_wait_start, t_wait_end ); )
 
                 if( result_opt.has_value() )
                 {
@@ -1485,7 +1507,7 @@ namespace MGEN
                     }
 
                     load_balancer_->AddInferCount( engine_inflight.subscribe_id );
-                    cyc_resp_obj_count += result_opt->infer_objects.size();
+                    DBG_PROF( cyc_resp_obj_count += result_opt->infer_objects.size(); )
 
                     for( const auto& obj : result_opt->infer_objects )
                     {
@@ -1506,12 +1528,13 @@ namespace MGEN
                     MLOG_WARN("CAM[%d] Engine %s timeout (Waited max %d ms)",
                         id_, engine_inflight.magic_name.c_str(), remaining_budget );
                 }
-                const auto t_merge_end = std::chrono::steady_clock::now();
-                cyc_resp_merge_us += rsp_us( t_wait_end, t_merge_end );
+                DBG_PROF( const auto t_merge_end = std::chrono::steady_clock::now(); )
+                DBG_PROF( cyc_resp_merge_us += rsp_us( t_wait_end, t_merge_end ); )
             }
-            t_after_resp = std::chrono::steady_clock::now();
-            t_resp_set = true;
+            DBG_PROF( t_after_resp = std::chrono::steady_clock::now(); )
+            DBG_PROF( t_resp_set = true; )
 
+#ifdef DEBUG_MODE
             // v7 accumulate
             rsp_prof.resp_wait_us_sum  += cyc_resp_wait_us;
             if( cyc_resp_wait_us > rsp_prof.resp_wait_us_max ) rsp_prof.resp_wait_us_max = cyc_resp_wait_us;
@@ -1519,6 +1542,7 @@ namespace MGEN
             if( cyc_resp_merge_us > rsp_prof.resp_merge_us_max ) rsp_prof.resp_merge_us_max = cyc_resp_merge_us;
             rsp_prof.resp_obj_count_sum += cyc_resp_obj_count;
             if( cyc_resp_obj_count > rsp_prof.resp_obj_count_max ) rsp_prof.resp_obj_count_max = cyc_resp_obj_count;
+#endif
 
             // -----------------------------------------------------------------
             // 2. Tracking
@@ -1555,18 +1579,19 @@ namespace MGEN
                 }
             }
 
-            t_after_trk = std::chrono::steady_clock::now();
-            t_trk_set = true;
+            DBG_PROF( t_after_trk = std::chrono::steady_clock::now(); )
+            DBG_PROF( t_trk_set = true; )
 
-            cyc_trk_cnt = entire_track_results.size();  // 이 cycle 의 tracking output 개수 (운영 추세)
+            DBG_PROF( cyc_trk_cnt = entire_track_results.size(); )  // 이 cycle 의 tracking output 개수 (운영 추세)
 
             SendDetectResultToMetaData( entire_track_results );
-            t_after_meta = std::chrono::steady_clock::now();
-            t_meta_set = true;
+            DBG_PROF( t_after_meta = std::chrono::steady_clock::now(); )
+            DBG_PROF( t_meta_set = true; )
 
             if( entire_track_results.empty() ) {
-                t_after_ev = std::chrono::steady_clock::now();
-                t_ev_set = true;
+                DBG_PROF( t_after_ev = std::chrono::steady_clock::now(); )
+                DBG_PROF( t_ev_set = true; )
+#ifdef DEBUG_MODE
                 if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
                     rsp_prof.ifq_us           += rsp_us( t_rsp_top, t_after_ifq );
                     rsp_prof.resp_us          += rsp_us( t_after_ifq, t_after_resp );
@@ -1676,6 +1701,7 @@ namespace MGEN
                         rsp_prof = RspProf{};
                     }
                 }
+#endif
                 continue;
             }
 
@@ -1683,20 +1709,21 @@ namespace MGEN
             // 3. B3 — track 결과를 event_q push (EvtThread 가 schedule check + sio/grpc + io_work_queue 처리)
             // -----------------------------------------------------------------
             if( event_q_ ) {
-                const size_t cyc_evq_size = event_q_->size();  // v7 — push 직전 event_q size
-                rsp_prof.event_q_size_sum += cyc_evq_size;
-                if( cyc_evq_size > rsp_prof.event_q_size_max ) rsp_prof.event_q_size_max = cyc_evq_size;
+                DBG_PROF( const size_t cyc_evq_size = event_q_->size(); )  // v7 — push 직전 event_q size
+                DBG_PROF( rsp_prof.event_q_size_sum += cyc_evq_size; )
+                DBG_PROF( if( cyc_evq_size > rsp_prof.event_q_size_max ) rsp_prof.event_q_size_max = cyc_evq_size; )
 
                 EventItem ev_item;
                 ev_item.frame         = frame;                              // shared_ptr ref +1 (Convert 위해 보존)
                 ev_item.track_results = std::move( entire_track_results );  // move (RspThread scope 끝나므로)
                 event_q_->enqueue_move( std::move( ev_item ) );             // SafeQueue 가 cap 도달 시 drop_oldest + drop_count_++
-                rsp_prof.ev_path_count += 1;
+                DBG_PROF( rsp_prof.ev_path_count += 1; )
             }
 
-            t_after_ev = std::chrono::steady_clock::now();
-            t_ev_set = true;
+            DBG_PROF( t_after_ev = std::chrono::steady_clock::now(); )
+            DBG_PROF( t_ev_set = true; )
 
+#ifdef DEBUG_MODE
             // ResponseThread stage profile flush — event path 도 동일 full format 으로 통합 (v4 leak hunt).
             if( t_ifq_set && t_resp_set && t_trk_set && t_meta_set && t_ev_set ) {
                 rsp_prof.ifq_us  += rsp_us( t_rsp_top, t_after_ifq );
@@ -1799,6 +1826,7 @@ namespace MGEN
                     rsp_prof = RspProf{};
                 }
             }
+#endif
         }
         MLOG_INFO("CAM[%d] ResponseThreadRunner finished", id_);
     }
@@ -1835,7 +1863,9 @@ namespace MGEN
         EventTime last_interval_log_print_time = std::chrono::system_clock::now();
         const auto long_timelapse_log_interval = 10min;
 
+#ifdef DEBUG_MODE
         // v7 — EvtThread stage timing instrument.
+        // Release 빌드에선 본 영역 전체 preprocessor 제거.
         struct EvtProf {
             uint64_t pop_us           = 0;   // event_q dequeue 시간 (대부분 wait, frame in 따라)
             uint64_t sched_us         = 0;   // scheduler->Check loop + BuildNotifyJsonImpl_Analysis (event_list 만들기)
@@ -1864,6 +1894,7 @@ namespace MGEN
             return static_cast<uint64_t>(
                 std::chrono::duration_cast<std::chrono::microseconds>( b - a ).count() );
         };
+#endif
 
         while( running.load() == true )
         {
@@ -1872,11 +1903,11 @@ namespace MGEN
                 continue;
             }
 
-            const auto t_evt_top = std::chrono::steady_clock::now();
-            const size_t cyc_event_q_size = event_q_->size();  // v7 — pop 직전 size sample
+            DBG_PROF( const auto t_evt_top = std::chrono::steady_clock::now(); )
+            DBG_PROF( const size_t cyc_event_q_size = event_q_->size(); )  // v7 — pop 직전 size sample
 
             auto opt_item = event_q_->dequeue_wait_for( 100ms );
-            const auto t_after_pop = std::chrono::steady_clock::now();
+            DBG_PROF( const auto t_after_pop = std::chrono::steady_clock::now(); )
 
             if( !opt_item.has_value() ) {
                 if( event_q_->is_terminated() ) break;
@@ -1897,7 +1928,7 @@ namespace MGEN
                         id_, track_results.size() );
                     last_interval_log_print_time = now_sys;
                 }
-                evt_prof.empty_cycle_count += 1;
+                DBG_PROF( evt_prof.empty_cycle_count += 1; )
                 continue;
             }
 
@@ -1911,7 +1942,7 @@ namespace MGEN
             }
             else {
                 MLOG_ERROR( "%s() => CAM[%d] make frame image save directory failed", __func__, id_ );
-                evt_prof.empty_cycle_count += 1;
+                DBG_PROF( evt_prof.empty_cycle_count += 1; )
                 continue;
             }
 
@@ -1919,7 +1950,7 @@ namespace MGEN
             auto      curr_time = std::time( nullptr );
             auto*     time_info = localtime_r( &curr_time, &tstruct );
 
-            uint64_t cyc_json_bytes = 0;
+            DBG_PROF( uint64_t cyc_json_bytes = 0; )
             for( const auto& each_schedule : scheduler_ )
             {
                 const std::vector<InferObject> on_event_results = each_schedule->Check( track_results );
@@ -1931,23 +1962,28 @@ namespace MGEN
                         "detectbase_events_total",
                         { { "type", ev_name }, { "cam", std::to_string( id_ ) } },
                         static_cast<double>( on_event_results.size() ) );
+#ifdef DEBUG_MODE
+                    // event_detected MLOG_INFO — Release 빌드에선 compile-out (Prometheus counter 만 운영 유지).
                     MLOG_INFO( "event_detected type=%s cam=%d count=%zu",
                         ev_name.c_str(), id_, on_event_results.size() );
+#endif
                 }
 
                 auto event_msg_json = this->BuildNotifyJsonImpl_Analysis( each_schedule, on_event_results, time_info, frame_path );
-                cyc_json_bytes += static_cast<uint64_t>( event_msg_json.dump().size() );
+                DBG_PROF( cyc_json_bytes += static_cast<uint64_t>( event_msg_json.dump().size() ); )
                 event_list.push_back( ScheduleEventDTO{ std::move( event_msg_json ), on_event_results } );
             }
-            const auto t_after_sched = std::chrono::steady_clock::now();
+            DBG_PROF( const auto t_after_sched = std::chrono::steady_clock::now(); )
 
             if( event_list.empty() ) {
+#ifdef DEBUG_MODE
                 // schedule trigger 안 됨 cycle — sched timing 만 누적
                 evt_prof.pop_us           += evt_us( t_evt_top,  t_after_pop  );
                 evt_prof.sched_us         += evt_us( t_after_pop, t_after_sched );
                 evt_prof.event_q_size_sum += cyc_event_q_size;
                 if( cyc_event_q_size > evt_prof.event_q_size_max ) evt_prof.event_q_size_max = cyc_event_q_size;
                 evt_prof.empty_cycle_count += 1;
+#endif
                 continue;
             }
 
@@ -1973,26 +2009,26 @@ namespace MGEN
                 }
                 io_work_queue_->enqueue_move( std::move( io_item ) );
             }
-            const auto t_after_conv = std::chrono::steady_clock::now();
+            DBG_PROF( const auto t_after_conv = std::chrono::steady_clock::now(); )
 
             // ─────────────────────────────────────────────────────────────
             // 3. sio emit (event_list 별)
             // ─────────────────────────────────────────────────────────────
-            uint64_t cyc_sio_emit = 0;
+            DBG_PROF( uint64_t cyc_sio_emit = 0; )
             if( sio_handler_ )
             {
                 for( auto& target_event : event_list )
                 {
                     sio_handler_->Emit( std::string { SocketIO::EventName::DETECTOR_MESSAGE }, target_event.event_message );
-                    cyc_sio_emit += 1;
+                    DBG_PROF( cyc_sio_emit += 1; )
                 }
             }
-            const auto t_after_sio = std::chrono::steady_clock::now();
+            DBG_PROF( const auto t_after_sio = std::chrono::steady_clock::now(); )
 
             // ─────────────────────────────────────────────────────────────
             // 4. grpc send
             // ─────────────────────────────────────────────────────────────
-            uint64_t cyc_grpc_send = 0;
+            DBG_PROF( uint64_t cyc_grpc_send = 0; )
             if( network_manager_ && network_manager_->IsGrpcClientEnabled() )
             {
                 for( auto& target_event : event_list )
@@ -2004,12 +2040,13 @@ namespace MGEN
                             "detectbase_grpc_send_total",
                             { { "rpc", "SendEventOnlyJson" } },
                             static_cast<double>( sent ) );
-                        cyc_grpc_send += static_cast<uint64_t>( sent );
+                        DBG_PROF( cyc_grpc_send += static_cast<uint64_t>( sent ); )
                     }
                 }
             }
-            const auto t_after_grpc = std::chrono::steady_clock::now();
+            DBG_PROF( const auto t_after_grpc = std::chrono::steady_clock::now(); )
 
+#ifdef DEBUG_MODE
             // ─────────────────────────────────────────────────────────────
             // v7 — EvtProf flush 누적 + 100 cycle 마다 log
             // ─────────────────────────────────────────────────────────────
@@ -2057,6 +2094,7 @@ namespace MGEN
                     static_cast<unsigned long long>( evt_prof.io_drop_total ) );
                 evt_prof = EvtProf{};
             }
+#endif
         }
         MLOG_INFO("CAM[%d] EventThreadRunner finished", id_);
     }
