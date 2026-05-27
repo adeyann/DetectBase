@@ -130,6 +130,9 @@ namespace MGEN
         GstAppSink*     appsink_      = nullptr;
         GstAppSink*     raw_appsink_  = nullptr;
         GMainLoop*      loop_         = nullptr;
+        // GMainContext (2026-05-27): per-instance dedicated context — multi-cam coupling 해소.
+        // 모든 source (bus watch, jitter timer) 가 이 context 에 attach. 기본 global context 회피.
+        GMainContext*   ctx_          = nullptr;
         std::thread     loop_thread_;
         guint           bus_watch_id_ = 0;
 
