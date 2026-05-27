@@ -72,13 +72,15 @@ Pipeline: RTSP input → YOLOv5 NPU inference → SORT tracking → boundary int
 - `sed` is on the deny list — use awk/cut/tr for reads; provide complete files for edits.
 - No `rm`/`unlink`/`rmdir`. Move with intent: trash → `.deleted/`, rollback/reusable snapshot → `.backup/`. Real `rm` by user only.
 - **Git workflow** — AI may use git/gh but **never commits directly to `master` or `develop`**. All work happens on dedicated branches (feature/fix/chore/...) forked from develop; both develop merge and master merge go via PR (`gh pr create` + `gh pr merge`). Master merge runs only on explicit user instruction. Force push / `reset --hard` / `git branch -D` (force) denied — use `git branch -d` (safe) for cleanup. Co-Authored-By trailer prohibited. **Minimize branch proliferation — create only the branches the task needs (instance of A3).** Full details: `.claude/skills/git-workflow.md` + `feedback-git-workflow` memory (single source of truth for branch naming / sub-branch depth / Master merge gate verification table).
-- **Version-bump 5-step 절차 (5/26 정착 — 이전 "bump in the same PR" 규칙 폐기)** — code/cmake bump 가 같은 commit 에 묶이면 code 와 git tag 의 호환 어긋남 위험.
-  1. **Topic-branch work**: 코드 편집. cmake VERSION 그대로 유지.
-  2. **Push topic branch**: code 변경 commit + push. cmake bump 없음.
-  3. **Pre-merge user confirmation**: topic branch HEAD ↔ target branch 직전 commit 비교, 변경 요약 보고 + **사용자에게 버전 명시적 확인** ("이 머지의 버전은 무엇인가?").
-  4. **Reconcile if disagree**: 사용자 지정 버전 ≠ commit cmake → 머지 전 정렬 (새 commit 으로 cmake bump, 또는 기존 commit 수정 후 push).
-  5. **Post-merge placeholder bump**: 머지 직후 cmake VERSION 을 (just-merged)+1 patch 로 별도 commit + push. 예: 0.1.16 머지 후 → 0.1.17 placeholder.
-- **cmake bump 시 README 동기 절대 규칙 (5/27)** — cmake VERSION 을 올리거나 내리는 **모든** commit (5-step 의 step 4 / step 5 포함) 은 README.md (root) Version + code/README.md 검증 상태 cmake 인용 + logs/NEXT_SESSION.md cmake 참조를 같은 commit 에서 동기. cmake 만 단독 bump 금지. 점검 grep: `grep -nE '0\.[0-9]+\.[0-9]+|VERSION|cmake' README.md code/README.md logs/NEXT_SESSION.md`.
+- **Version-bump 절차 (5/27 정정 — 이전 "Post-merge placeholder bump" 와 "Pre-merge 정렬 단독 commit" 모두 폐기)** — bump 는 work branch 위에서, push 후 local 만, 다음 work commit 에 자연 흡수. **단독 bump-only commit/push 절대 금지.**
+  1. **Topic-branch work**: 코드 편집. cmake VERSION 그대로 (branch fork 시점의 develop cmake 유지).
+  2. **Push code commit**: 코드 변경 commit + push. cmake 안 건드림.
+  3. **Local bump (선택적, push 후)**: 이번 push 가 새 버전을 대표할 만큼 의미가 있다면 cmake VERSION 을 local 에서 +1 patch (commit X, push X — local working dir 만).
+  4. **다음 work + push**: 다음 code commit 이 자동으로 bumped cmake 포함하여 commit + push.
+  5. **Pre-merge user confirmation + 정렬**: 머지 직전 topic branch HEAD ↔ target branch 비교, 변경 요약 + **사용자에게 버전 명시적 확인**. 사용자 지정 버전 ≠ 마지막 commit cmake 시 코드/문서 변경 commit 에 cmake 정정 묶어 처리. **단독 'chore(cmake): bump' commit/PR 절대 금지.**
+  - **NO post-merge placeholder bump**: 머지 직후 develop 의 cmake = master tag 와 일치 그대로 유지. 다음 work branch 가 자체적으로 bump (위 1~5 반복).
+  - **무한 루프 없음**: bump trigger 는 사용자의 work 의지뿐, push event 자체가 bump 를 트리거 X. bump 는 local 만이라 별도 push 안 됨.
+- **cmake bump 시 README 동기 절대 규칙 (5/27 corrected)** — cmake VERSION 이 변경되는 commit (= code/doc work commit 이 bumped cmake 를 carry 하는 commit) 은 README.md (root) Version + code/README.md 검증 상태 cmake 인용 + logs/NEXT_SESSION.md cmake 참조를 **같은 commit 에서** 동기. **단독 bump-only commit 자체가 금지** (위 Version-bump 절차 참조) 이므로 이 동기 규칙은 cmake 가 변경되는 code/doc commit 에 자동 적용. 점검 grep: `grep -nE '0\.[0-9]+\.[0-9]+|VERSION|cmake' README.md code/README.md logs/NEXT_SESSION.md`.
 - **Pre-push docs check (5/26 절대 규칙)** — 머지뿐 아니라 **commit 을 branch 에 push 할 때마다** 모든 문서를 전체적으로 점검하고 변경 사항과 정합되게 최신화. 점검 대상: README / code/README / NEXT_SESSION / OPERATIONS / .DOCS/ 의 버전 참조, 상태 설명, changelog. 정합 안 되어 push 후 발견되면 즉시 다음 commit 으로 보완 — push 전 점검이 원칙.
 - **Master merge gate (release-grade verification)** — develop → master merge 는 사용자 명시 허가 필수 + 다음 검증 통과:
   - **patch / minor bump**: 모든 audit (5종) 통과 + **3시간 이상 운영 모니터링** (DFPS / RSS / FD / Thread / wd 안정 추세, 후술 §Verification 기준)

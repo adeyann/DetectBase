@@ -1,8 +1,8 @@
-# NEXT_SESSION — post-v0.1.18 release / cmake 0.1.19 placeholder (v0.1.18 = cam_loss root cause fix: TeardownPipeline unref-skip) 진입점
+# NEXT_SESSION — post-v0.1.18 release (cmake = 0.1.18, master tag 와 일치) / v0.1.18 = cam_loss root cause fix: TeardownPipeline unref-skip 진입점
 
-**최종 갱신**: 2026-05-27 15:05 KST
-**현 develop HEAD**: **v0.1.18 master release 완료** (PR #25). cmake VERSION = `0.1.19` (post-merge placeholder for next dev cycle). last released master tag = `v0.1.18` (2026-05-27, 새 release). 이전 master tag = `v0.1.0` (5/19, 8일 전). v0.1.0 → v0.1.18 누적 사이 PR #21+#22+#23+#24+#25 모두 처리 (cmake 정렬 + 정합성 20 commit + master_logs archival + post-stale fix + master merge).
-**현 상태**: **v0.1.18 master tagged + pushed**. develop 은 0.1.19 placeholder. monitor `v018_teardown_fix` 11.3h 안정 (wd=1 boot-only, cam_loss=0, 단 fix path 미발화). audit 5종 5/27 09:14 ~ 14:33 완료 — 자체 코드 회귀 0건 ✅ (산출물 `master_logs/v0.1.18/audit_20260527_091456/` archival 완료).
+**최종 갱신**: 2026-05-27 15:30 KST
+**현 develop HEAD**: **v0.1.18 master release 완료** (PR #25). **cmake VERSION = `0.1.18`** (master tag v0.1.18 와 일치). 이전 master tag = `v0.1.0` (5/19, 8일 전). v0.1.0 → v0.1.18 누적 PR #21+#22+#23+#24+#25 처리. **post-merge placeholder bump 정책 폐기 (5/27 정정)** — bump 는 work branch 위 push 후 local bump → 다음 commit 에 흡수. 단독 bump-only commit/push 금지. 이전 PR #21 (cmake 정렬 단독 commit) + PR #26 (post-merge placeholder bump 단독 commit) = 잘못된 적용. PR #26 본 PR 에서 revert.
+**현 상태**: **v0.1.18 master tagged + pushed. develop cmake 0.1.18 (master tag 일치)**. monitor `v018_teardown_fix` 11.3h 안정 (wd=1 boot-only, cam_loss=0, 단 fix path 미발화). audit 5종 5/27 09:14 ~ 14:33 완료 — 자체 코드 회귀 0건 ✅ (산출물 `master_logs/v0.1.18/audit_20260527_091456/` archival 완료).
 
 ---
 
