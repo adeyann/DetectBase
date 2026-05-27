@@ -46,7 +46,7 @@ Odroid M2 NPU 기반 RTSP 비디오 분석 베이스 프로젝트. 객체 탐지
 
 ### 무엇이 baseline 인가?
 
-- production-ready 상태 (2026-05 검증 완료, 누적 패치 53건)
+- production-ready 상태 (2026-05 검증 완료, 누적 패치 57건 — §16 의 표 참조)
 - 3차 코드리뷰 통과 (자동화 도구 + 운영 시뮬레이션 + 차분 회귀)
 - 48h 운영 안정성 검증 (메모리 / FD / Thread leak 없음)
 
@@ -385,7 +385,7 @@ code/
 | Dockerfile 수정 | `build` → `compile` → `restart` (build 후 init 자동) |
 | proto 수정 | `init` → `compile` → `restart` |
 | C++ 코드만 수정 | `compile` → `restart` |
-| 검증 (큰 변경 후) | `audit` (운영 90초 정지) |
+| 검증 (큰 변경 후) | `audit` (운영 정지 동반. ASan 4h + TSan 1h 가 default — 합 약 5h) |
 
 ### 환경 요구
 
@@ -777,12 +777,14 @@ grep -n "DEBUG VIRTUAL LINES" code/Main/DETECTOR/src/RtspDetectorUnit.cpp
 # 단독 모드 — 변경 검증 시 필요 도구만 빠르게
 ./detectbase.sh audit --only cppcheck    # 정적 (~1분)
 ./detectbase.sh audit --only clang-tidy  # 정적 (~10분)
-./detectbase.sh audit --only asan        # 동적, ASan+UBSan 같은 빌드 (운영 정지)
+./detectbase.sh audit --only asan        # 동적, ASan+UBSan 같은 빌드 (운영 정지, default 4h run)
 ./detectbase.sh audit --only ubsan       # asan 의 alias
-./detectbase.sh audit --only tsan        # 동적, race detection (운영 정지, 5분)
+./detectbase.sh audit --only tsan        # 동적, race detection (운영 정지, default 1h run)
 ```
 
-환경변수 override: `ASAN_DURATION_MIN=5 ./detectbase.sh audit --only asan` (default 240분), `TSAN_DURATION_SEC=600 ./detectbase.sh audit --only tsan` (default 300초).
+환경변수 override:
+- `ASAN_DURATION_MIN` (default **240분 = 4h**, **최소 60분 강제** — 60 미만이면 60으로 자동 보정): `ASAN_DURATION_MIN=60 ./detectbase.sh audit --only asan`
+- `TSAN_DURATION_SEC` (default **3600초 = 1h**, **최소 3600초 강제** — 3600 미만이면 3600으로 자동 보정): `TSAN_DURATION_SEC=3600 ./detectbase.sh audit --only tsan`
 
 ### 도구 비교
 
@@ -807,7 +809,7 @@ grep -n "DEBUG VIRTUAL LINES" code/Main/DETECTOR/src/RtspDetectorUnit.cpp
 
 ### Known long-running leak: GStreamer rtpmanager (수용)
 
-ASan 1시간 long-run + interval `__lsan_do_recoverable_leak_check()` 검출 결과:
+ASan 4시간 long-run (default 240분) + interval `__lsan_do_recoverable_leak_check()` 검출 결과:
 
 - **위치**: `libgstrtpmanager.so` 내부 cleanup 코드 (외부 release lib)
 - **호출 경로**: `GstRtspReceiver::TeardownPipeline` → `gst_element_set_state(NULL)` → rtspsrc → rtpbin → rtpsession sources `g_list_free_full` → 각 source `g_object_unref` → rtpmanager 내부 finalize 시 g_malloc 메모리 회수 누락
