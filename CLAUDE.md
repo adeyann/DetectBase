@@ -87,7 +87,7 @@ Pipeline: RTSP input → YOLOv5 NPU inference → SORT tracking → boundary int
 - **master_logs 보관 절차 (5/27 정착)** — 마스터 머지의 검증 증빙은 develop tree 에 함께 보관해야 추적/감사 가능. 절차:
   1. **`master_logs/v<버전>/` 디렉토리 생성** (예: `master_logs/v0.1.18/`). 위치는 repo 루트.
   2. **산출물 이동**: 해당 머지 검증용 `logs/audit_<stamp>/` 전체 + 모니터 JSONL + 머지 근거 요약 README.md 를 master_logs/v<버전>/ 에 옮긴다. `logs/audit_*/` 는 .gitignore 에 묶여 있어 logs/ 에 있으면 track 안 되므로 **이동이 필수**.
-  3. **별도 commit 으로 develop 에 push** — 이 commit 은 **cmake VERSION bump 절대 금지**. master_logs commit 의 코드 상태가 곧 머지될 v0.1.X 의 상태여야 develop ↔ master ↔ tag 매핑이 맞음.
+  3. **별도 chore branch + PR → develop merge** — AI 는 develop 에 직접 commit 안 함. master_logs 이동은 dedicated branch 의 단일 commit 으로 만들고 PR 으로 develop 에 merge. 이 commit 은 **cmake VERSION bump 절대 금지** — master_logs commit 의 코드 상태가 곧 머지될 v0.1.X 의 상태여야 develop ↔ master ↔ tag 매핑이 맞음.
   4. **그 다음 develop → master --no-ff merge** 수행 (사용자 명시 허가 후). master 가 가져가는 tree 에 master_logs/v<버전>/ 가 포함됨.
 
 ### Coding Standard
