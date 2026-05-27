@@ -233,8 +233,9 @@ docker stop detectbase_service
 ### §5.4 NPU 추론 timeout 빈발
 
 ```
-{"lvl":"WARN","msg":"CAM[XXX] Engine DetectionEngine timeout"}
+{"lvl":"WARN","msg":"CAM[XXX] Engine YoloV5s_Airockchip_RKNN timeout (Waited max 5000 ms)"}
 ```
+(engine name 은 EngineSettings.json 의 TagName 그대로 출력됨)
 
 체크:
 1. `dmesg | grep rknpu` — 커널 로그에서 NPU 에러
