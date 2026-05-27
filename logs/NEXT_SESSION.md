@@ -1,7 +1,7 @@
 # NEXT_SESSION — v0.1.18 (cam_loss root cause fix: TeardownPipeline unref-skip) 진입점
 
 **최종 갱신**: 2026-05-26 22:50 KST
-**현 develop HEAD**: (이 commit 기준 — fix/teardown-pipeline-unref-hang 머지 대기)
+**현 develop HEAD**: `daddd27` (cmake VERSION `0.1.19` placeholder. last released = **v0.1.18** = TeardownPipeline fix)
 **현 상태**: **v0.1.18 + TeardownPipeline fix 가동** (monitor `bl4c785is`, `v018_teardown_fix`). 1h 운영 wd=1/cam_loss=0 ✅. cam_loss 의 진짜 root cause 식별 + fix 검증.
 
 ---
