@@ -230,9 +230,20 @@ Do NOT add any Claude/Claude Code footer or `Co-Authored-By` trailer to commits 
 
 ## Denied by Settings (Don't Try to Bypass)
 
-- `Bash(git push * --force*)` / `Bash(git push * -f *)`
-- `Bash(git reset --hard*)`
+- `Bash(git push * --force*)` / `Bash(git push * -f *)` — force push
+- `Bash(git reset --hard*)` — hard reset
+- `Bash(git branch -D *)` — force branch delete (use `-d` safe)
+- `Bash(git clean -f*)` — force clean
+- `Bash(git config *)` — git config write
+- `Bash(git filter-branch*)` / `Bash(git filter-repo*)` — history rewrite
+- `Bash(git rm *)` — git rm (use trash dir [[feedback-trash-dir]])
+- `Bash(git tag -d *)` — tag delete
+- `Bash(git push * --delete*)` / `Bash(git push origin --delete*)` — remote branch delete via push (use `gh pr merge --delete-branch` instead)
+- `Bash(git stash drop *)` / `Bash(git stash clear)` — stash purge
+- `Bash(git worktree remove *)` — worktree remove
+- `Bash(git submodule deinit *)` — submodule deinit
 - Direct master commits (enforced by policy, not by settings — be vigilant)
+- Also: `rm`, `sudo`, `sed`, `docker rm`, `docker kill`, system-destructive (`apt`, `mkfs`, `chown`, etc.) — covered by other memory entries.
 
 ## Pre-commit Checklist
 
