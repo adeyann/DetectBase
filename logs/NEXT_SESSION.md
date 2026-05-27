@@ -1,8 +1,8 @@
 # NEXT_SESSION — v0.1.18 (cam_loss root cause fix: TeardownPipeline unref-skip) 진입점
 
-**최종 갱신**: 2026-05-27 12:30 KST
-**현 develop HEAD**: PR #21 (cmake 0.1.18 정렬 + master_logs 보관 절차 + cmake bump README 동기 절대 규칙) merged. PR #22 (정합성 다중 round — master_logs step 3 PR 명시 + skill OLD bump rule 제거 + branch -d / -D 정합 + DFPS 13→29 multi-core 갱신 + RTSP_GST 모듈 description + shutdown 순서 code 정합 + yaml-cpp 잘못된 TODO + 메트릭 표 ~23→~38 + 누적 53→57 + 1h→11.3h 솔직 표기 + 외 다수) 10+ commit 누적, 사용자 허가 대기 중. cmake VERSION = `0.1.18`. last released master = `v0.1.0` (5/19). develop 누적 = v0.1.18 (TeardownPipeline fix 포함).
-**현 상태**: **v0.1.18 master merge 준비 중**. monitor `v018_teardown_fix` 11.3h 안정 (wd=1 boot-only, cam_loss=0, 단 fix path 미발화). **audit 5종 5/27 09:14 ~ 14:33 완료 — 자체 코드 회귀 0건 ✅** (cppcheck 59 동일, clang-tidy 0 동일, ASan/TSan 자체 코드 leak/race 모두 0건, 외부 lib 부분만 run time 비례 증가). 산출물 `logs/audit_20260527_091456/`.
+**최종 갱신**: 2026-05-27 14:55 KST
+**현 develop HEAD**: PR #21 (cmake 0.1.18 정렬 + master_logs 보관 절차 + cmake bump README 동기 절대 규칙) + PR #22 (정합성 다중 round 20 commit — DFPS 13→29 multi-core / RTSP_GST module / shutdown 순서 code 정합 / yaml-cpp 잘못된 TODO 정정 / 메트릭 표 ~23→~38 / OPERATIONS WARN-ERROR 메시지 happytimesoft→GStreamer / logrotate "100MiB×7"→"daily×14" / 외 다수 stale 정리) + PR #23 (master_logs/v0.1.18/ archival — audit_20260527_091456 + monitor jsonl.gz + README + baseline ref 3건 갱신) **모두 develop merged**. cmake VERSION = `0.1.18`. last released master = `v0.1.0` (5/19). develop 누적 = v0.1.18 (TeardownPipeline fix 포함).
+**현 상태**: **v0.1.18 master merge 준비 완료** — 사용자 명시 허가 대기. monitor `v018_teardown_fix` 11.3h 안정 (wd=1 boot-only, cam_loss=0, 단 fix path 미발화). **audit 5종 5/27 09:14 ~ 14:33 완료 — 자체 코드 회귀 0건 ✅** (cppcheck 59 동일, clang-tidy 0 동일, ASan/TSan 자체 코드 leak/race 모두 0건, 외부 lib 부분만 run time 비례 증가). 산출물 `master_logs/v0.1.18/audit_20260527_091456/` 로 archival 완료.
 
 ---
 
@@ -237,8 +237,9 @@ CLAUDE.md §Work Rules + .claude/skills/git-workflow.md + memory `feedback_git_w
 ### canonical monitor (v0.1.16+)
 - `logs/monitor.sh <label>` (JSONL, 70+ per-cam fields, 1분 단위) + threshold alerts 7 종 + warmup grace 4 cycle
 - 마지막 세션 (v0.1.18 TeardownPipeline fix 검증): `bl4c785is` label=`v018_teardown_fix` — 5/26 21:43 ~ 5/27 09:06 (11.3h)
-- 출력: `logs/monitor_v018_teardown_fix.jsonl` (591 line JSONL)
+- 출력: `master_logs/v0.1.18/monitor_v018_teardown_fix.jsonl.gz` (591 line JSONL, gzip 압축. archival 완료 — 이전 위치 `logs/` 에서 PR #23 으로 이동)
 - 이전 세션 (v0.1.16 baseline): `bthk32wqw` label=`v016_baseline` (이미 종료, jsonl 휴지통 검토 대상)
+- audit 종료 (5/27 14:33) 후 service 자동 재시작 — 추가 운영 모니터링 필요 시 새 `logs/monitor.sh <new_label>` session 시작
 
 ### single-instance lock
 - `/DetectBase/logs/.detectbase.lock` 의 `flock(2)` advisory lock — Main.cpp 부팅 시 획득
@@ -256,6 +257,6 @@ CLAUDE.md §Work Rules + .claude/skills/git-workflow.md + memory `feedback_git_w
 | [.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](../.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md) | v2.0.0 Search engine 도입 가이드 |
 | [.backup/mpp_purged_20260526/MPP_PURGE_NOTES.md](../.backup/mpp_purged_20260526/MPP_PURGE_NOTES.md) | MPP + Option A 폐기 결정 + 복원 방법 |
 | [master_logs/v0.1.18/audit_20260527_091456/](../master_logs/v0.1.18/audit_20260527_091456/) | **최신 audit baseline** (5/27 v0.1.18 archival, cmake 0.1.18, ASan 4h + TSan 1h default. 자체 코드 회귀 0건 검증) |
-| [master_logs/v0.1.18/monitor_v018_teardown_fix.jsonl](../master_logs/v0.1.18/monitor_v018_teardown_fix.jsonl) | v0.1.18 머지 검증 모니터 (11.3h, wd=1 boot-only / cam_loss=0) |
+| [master_logs/v0.1.18/monitor_v018_teardown_fix.jsonl.gz](../master_logs/v0.1.18/monitor_v018_teardown_fix.jsonl.gz) | v0.1.18 머지 검증 모니터 (11.3h, 591 line, wd=1 boot-only / cam_loss=0). gzip 압축 — `gzip -d` 후 jq/python 으로 parse |
 | [master_logs/v0.1.18/README.md](../master_logs/v0.1.18/README.md) | v0.1.18 머지 근거 요약 |
 | [logs/audit_20260524_115656/](audit_20260524_115656/) | 이전 audit baseline (5/24, cmake 0.1.10 시점) — historical |
