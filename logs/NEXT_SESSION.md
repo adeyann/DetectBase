@@ -1,7 +1,7 @@
 # NEXT_SESSION — v0.1.18 (cam_loss root cause fix: TeardownPipeline unref-skip) 진입점
 
 **최종 갱신**: 2026-05-27 12:30 KST
-**현 develop HEAD**: PR #21 (cmake 0.1.18 정렬 + master_logs 보관 절차 + cmake bump README 동기 절대 규칙) merged. PR #22 (정합성 보완 — master_logs step 3 PR 명시 + skill OLD bump rule 제거 + branch -d / -D 정합 + 8건 일괄) 진행 중. cmake VERSION = `0.1.18`. last released master = `v0.1.0` (5/19). develop 누적 = v0.1.18 (TeardownPipeline fix 포함).
+**현 develop HEAD**: PR #21 (cmake 0.1.18 정렬 + master_logs 보관 절차 + cmake bump README 동기 절대 규칙) merged. PR #22 (정합성 다중 round — master_logs step 3 PR 명시 + skill OLD bump rule 제거 + branch -d / -D 정합 + DFPS 13→29 multi-core 갱신 + RTSP_GST 모듈 description + shutdown 순서 code 정합 + yaml-cpp 잘못된 TODO + 메트릭 표 ~23→~38 + 누적 53→57 + 1h→11.3h 솔직 표기 + 외 다수) 10+ commit 누적, 사용자 허가 대기 중. cmake VERSION = `0.1.18`. last released master = `v0.1.0` (5/19). develop 누적 = v0.1.18 (TeardownPipeline fix 포함).
 **현 상태**: **v0.1.18 master merge 준비 중**. monitor `v018_teardown_fix` 11.3h 안정 (wd=1 boot-only, cam_loss=0, 단 fix path 미발화). audit 5종 5/27 09:14 ~ 14:35 진행 중 (clang-tidy/cppcheck PASS, ASan/TSan run 중).
 
 ---

@@ -174,7 +174,7 @@ Odroid M2 NPU 기반 RTSP 비디오 분석 베이스 프로젝트. 객체 탐지
 | ~~**YAML 파싱**~~ | ~~yaml-cpp~~ | — | ~~클래스 정의 (classes.yaml)~~ — **P3 (2026-05-14) 폐기**: vendored yaml-cpp 제거 + ClassChecker → nlohmann::json. 현 classes 파일 = `engine.classes.json` |
 | **빌드** | CMake 3.17+ + GCC 11 | apt | aarch64 native |
 | **컨테이너** | Docker + docker-compose | — | aarch64 격리 빌드/실행 |
-| **로그 회전** | logrotate | apt | 100MiB × 7개 자동 보관 |
+| **로그 회전** | logrotate | apt | **daily + rotate 14** (매일 회전, 14일치 보관, 압축, copytruncate). `scripts/logrotate.detectbase` 참고 |
 | **메모리 할당자** | jemalloc | apt (`libjemalloc2`) | LD_PRELOAD + `background_thread:true` + `metadata_thp:auto`. RSS 단편화 회피 + 페이지 자동 회수 (2026-05-14 도입) |
 
 ### 외부 라이브러리 정책
@@ -569,7 +569,7 @@ grep '"correlation_id":"evt-' logs/DetectBase.log
 #### 위치 / 보존
 
 - `logs/DetectBase.log` (현재)
-- `logs/DetectBase.log.1` ~ `logs/DetectBase.log.5.gz` (자동 회전, logrotate 100MiB × 7개)
+- `logs/DetectBase.log.1` ~ `logs/DetectBase.log.14.gz` (자동 회전, logrotate **daily + rotate 14** — 매일 새벽 회전, 14일치 보관, 압축. `scripts/logrotate.detectbase` 설정)
 - 백업: `logs/.backup_*.log` (시작 시점에 백업)
 
 ---
