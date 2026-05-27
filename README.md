@@ -1,6 +1,6 @@
 # DetectBase
 
-**Version**: `0.1.18` (cmake `code/CMakeLists.txt`, develop 현 HEAD = master tag `v0.1.18` 와 일치). **last released master tag = `v0.1.18` (2026-05-27)**. v0.1.0 (5/19) → v0.1.18 (5/27) 누적 cam stuck fix + `.claude/settings.json` 권한 allow/deny 모델 + audit ASan/TSan 최소 1h 강제 (현 default ASan 4h / TSan 1h). **TeardownPipeline unref-skip on stuck (0.1.18)** — cam 661 의 42분 cam_loss 분석 결과 `gst_object_unref(pipeline_)` 가 GStreamer 내부 thread join 에서 unbounded block 하던 게 root cause. `gst_element_get_state` timeout 시 unref 건너뛰고 의도된 leak (process restart 시 OS cleanup) + WARN log. **5/26~5/27 11.3h 후속 모니터 wd=1 (boot only) / cam_loss=0** (pre-fix 50분 wd=6/cam_loss 영구). 단 fix path 미발화 (자연 stuck 안 일어남) → fix 실제 발휘 검증은 다음 stuck 시점에 가능. **git workflow 정책 갱신 + pre-push docs check 절대 규칙 + memory 영어화 (0.1.17)** — code/cmake bump 분리 (push 후 별도 commit), 머지 시 사용자 버전 확인, post-merge placeholder bump, 모든 commit push 시 docs 전수 점검. AI-only memory 디렉토리 영어 단일 언어화. **argv guard + flock single-instance lock (0.1.16)** — Main.cpp 의 `int main()` 가 argv 무수신 → `--version` 같은 일반 호출이 풀 서비스 spawn 하던 사고 (PID 4924, DFPS 50% 하락) 차단. argv 명시 case 외 FATAL exit 2 + `/DetectBase/logs/.detectbase.lock` 의 `flock(2)` advisory lock 으로 두 번째 instance 부팅 차단. monitor.sh 에 threshold alert 7 종 (storm/err/dfps_low/memory/wd/ftc/cam_loss) + warmup grace 4 cycle 추가. **REST response JSON parse silent catch 가시화 (0.1.15)** — `rest_impl.cpp` 의 catch 에 `MLOG_WARN` 추가. **MPP + Option A 완전 폐기 (0.1.14)** — mppvideodec 미사용 상태에서 Option A 의 14ms partial reset 이 multi-cam cluster sync 강화 → DFPS dip 증폭 확인. 5/24 Full reset baseline (mean DFPS 115.6, ≥110: 98.8%) 복귀. snapshot: tag `mpp-architecture-snapshot-v0.1.13` + `.backup/mpp_purged_20260526/`. **per-cam stage FPS counter (0.1.12) revert (0.1.13)** — global mutex hot path 으로 wd 빈도 증가 회귀, A-B-A control test 검증.)
+**Version**: `0.1.23` (cmake `code/CMakeLists.txt`, develop 작업 진입 — master tag 보다 +5 patch). **last released master tag = `v0.1.18` (2026-05-27)**. v0.1.0 (5/19) → v0.1.18 (5/27) 누적 cam stuck fix + `.claude/settings.json` 권한 allow/deny 모델 + audit ASan/TSan 최소 1h 강제 (현 default ASan 4h / TSan 1h). **TeardownPipeline unref-skip on stuck (0.1.18)** — cam 661 의 42분 cam_loss 분석 결과 `gst_object_unref(pipeline_)` 가 GStreamer 내부 thread join 에서 unbounded block 하던 게 root cause. `gst_element_get_state` timeout 시 unref 건너뛰고 의도된 leak (process restart 시 OS cleanup) + WARN log. **5/26~5/27 11.3h 후속 모니터 wd=1 (boot only) / cam_loss=0** (pre-fix 50분 wd=6/cam_loss 영구). 단 fix path 미발화 (자연 stuck 안 일어남) → fix 실제 발휘 검증은 다음 stuck 시점에 가능. **git workflow 정책 갱신 + pre-push docs check 절대 규칙 + memory 영어화 (0.1.17)** — code/cmake bump 분리 (push 후 별도 commit), 머지 시 사용자 버전 확인, post-merge placeholder bump, 모든 commit push 시 docs 전수 점검. AI-only memory 디렉토리 영어 단일 언어화. **argv guard + flock single-instance lock (0.1.16)** — Main.cpp 의 `int main()` 가 argv 무수신 → `--version` 같은 일반 호출이 풀 서비스 spawn 하던 사고 (PID 4924, DFPS 50% 하락) 차단. argv 명시 case 외 FATAL exit 2 + `/DetectBase/logs/.detectbase.lock` 의 `flock(2)` advisory lock 으로 두 번째 instance 부팅 차단. monitor.sh 에 threshold alert 7 종 (storm/err/dfps_low/memory/wd/ftc/cam_loss) + warmup grace 4 cycle 추가. **REST response JSON parse silent catch 가시화 (0.1.15)** — `rest_impl.cpp` 의 catch 에 `MLOG_WARN` 추가. **MPP + Option A 완전 폐기 (0.1.14)** — mppvideodec 미사용 상태에서 Option A 의 14ms partial reset 이 multi-cam cluster sync 강화 → DFPS dip 증폭 확인. 5/24 Full reset baseline (mean DFPS 115.6, ≥110: 98.8%) 복귀. snapshot: tag `mpp-architecture-snapshot-v0.1.13` + `.backup/mpp_purged_20260526/`. **per-cam stage FPS counter (0.1.12) revert (0.1.13)** — global mutex hot path 으로 wd 빈도 증가 회귀, A-B-A control test 검증.)
 
 Odroid M2 NPU 기반 RTSP 비디오 분석 베이스 프로젝트. 객체 탐지 + 트래킹 + 침입 감지 + 이벤트 송신을 통합한 production-ready 시스템.
 
@@ -742,31 +742,43 @@ DetectBase 가 이벤트마다 frame 을 `/frame/YYYY/MM/DD/*.jpg` 로 저장. 4
 
 ---
 
-## §14. Debug Virtual Lines (시연용 임시 코드)
+## §14. Debug Virtual Lines (config toggle)
 
 ### 무엇?
 
-운영 환경에서 시연 / 검증을 위해 **모든 카메라에 가상의 line/area schedule 을 강제 주입**. 실제 MVAS 설정 없이도 이벤트가 발생.
+시연 / 검증 / 이벤트 빈발 시뮬레이션을 위해 **모든 카메라에 가상의 line/area schedule 을 강제 주입**하는 디버깅 feature. MVAS 사용자 schedule 위에 추가되어, 실제 설정 없이도 이벤트가 발생함.
 
-### 위치
+**v0.1.19 부터 `ServerSetting.debug_virtual_lines_enabled` (default `false`) toggle 로 on/off** — 이전 `_REMOVABLE` 접미사 방식 (코드 직접 제거) 폐기.
 
-- 코드: [RtspDetectorUnit.cpp](code/Main/DETECTOR/src/RtspDetectorUnit.cpp) — `AddDebugVirtualLines_REMOVABLE` 함수 + 호출 2곳
-- 라인: 6개 (가로 3 + 세로 3, 양방향)
-- schedule_id: `99999` (LineIntrusion), `99998` (VehicleIntrusion)
-- 24시간 / 모든 요일 / 알림 최소 인터벌 1초
+### 활성화 방법
 
-### 제거 (운영 배포 시)
+MVAS API 응답의 `Server.Setting` JSON 에 다음 필드 추가:
 
-```bash
-grep -n "DEBUG VIRTUAL LINES" code/Main/DETECTOR/src/RtspDetectorUnit.cpp
+```json
+{
+  "Setting": {
+    "DebugVirtualLinesEnabled": true,
+    ...
+  }
+}
 ```
 
-4곳 식별 후:
-1. Helper 함수 정의 block 전체 제거
-2. Init() 안의 lock 범위 조정 (강제 적용 → 조건부)
-3. ScheduleSettingData callback 안의 호출 1줄 제거
+- **default** (필드 누락 시): `false` — production-safe. 가상 라인 비활성.
+- **`true`**: boot 시점 + ScheduleSettingData callback 시점에 모든 카메라에 schedule 99999/99998 주입. boot log 에 `CAM[N] debug_virtual_lines_enabled=true — schedule 99999 ... 강제 주입` 1줄 emit.
+- **v0.1.19 한정**: boot-time toggle 만 지원. runtime 으로 `true → false` 변경 시 이미 주입된 99999/99998 schedule 정리 안 됨 (process restart 필요).
 
-자세한 제거 절차는 코멘트 안에 표시됨.
+### 주입 내용
+
+- 6개 라인 (가로 3 + 세로 3, 양방향), 정규화 좌표 `0.25 / 0.50 / 0.75`
+- schedule_id `99999`: LineIntrusion (사람)
+- schedule_id `99998`: VehicleIntrusion (차량)
+- 24시간 / 모든 요일 / 알림 최소 인터벌 **1초** (빈발 유도)
+
+### 코드 위치
+
+- struct field: [code/Management/manager/include/SettingData.h](code/Management/manager/include/SettingData.h) — `ServerSettingData::debug_virtual_lines_enabled`
+- JSON 파서: [code/Management/manager/src/SettingData.cpp](code/Management/manager/src/SettingData.cpp) — `Impl_ServerSettingData_UpdateFromJsonObject`
+- 호출: [code/Main/DETECTOR/src/RtspDetectorUnit.cpp](code/Main/DETECTOR/src/RtspDetectorUnit.cpp) — `AddDebugVirtualLines()` + Init() 안 boot 호출 + ScheduleSettingData callback 안 호출
 
 ---
 

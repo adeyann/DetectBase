@@ -56,6 +56,9 @@ namespace MGEN
         setting->full_image_save_root_path    = setting_js.value( "FullImageSaveRootPath",     MGEN::DefineDefault::FULL_FRAME_IMAGE_SAVE_ROOT_PATH );
         setting->crop_image_save_root_path    = setting_js.value( "CropImageSaveRootPath",     MGEN::DefineDefault::CROP_FRAME_IMAGE_SAVE_ROOT_PATH );
 
+        // 디버깅용 가상 boundary toggle — 키 누락 시 false (production-safe default).
+        setting->debug_virtual_lines_enabled  = setting_js.value( "DebugVirtualLinesEnabled",  false );
+
         // for legacy: 옛 키 "DetectFps" -> "InferencePerCamsFpsLimit"
         if( setting_js.contains( "InferencePerCamsFpsLimit" ) == false && setting_js.contains( "DetectFps" ) == true ) {
             setting->inference_per_cams_fps_limit = setting_js.value( "DetectFps", MGEN::DefineDefault::DFPS_LIMIT_PER_UNIT );

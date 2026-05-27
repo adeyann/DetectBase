@@ -133,9 +133,13 @@ namespace MGEN
                     }
                 }
             }
+#ifdef DEBUG_MODE
+            // [DFPS] 10초 주기 INFO line — Release 빌드에선 compile-out.
+            // 동일 정보는 Prometheus `detectbase_dfps_total` gauge 와 `detectbase_camera_count{state}` 가 운영 유지.
             MLOG_INFO( "[DFPS] %4.1f FPS/cam ( TotalDFPS: %6.1f | RegistCam: %04zu | RequestCam: %04zu ) - NotRequest [ %s]",
                 avg_fps_per_cam, total_fps_raw,
                 total_regist_cam_count, active_cnt, undetected_list_str.c_str() );
+#endif
 
             // P54: 메트릭 update (Prometheus exporter).
             {

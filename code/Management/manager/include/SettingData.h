@@ -61,6 +61,10 @@ namespace MGEN
         // 서비스 내 이미지 저장 경로 (컨테이너 내부). MVAS 응답에서 채워지지 않으면 DefineDefault 의 기본값 사용.
         std::string    full_image_save_root_path    = DefineDefault::FULL_FRAME_IMAGE_SAVE_ROOT_PATH;
         std::string    crop_image_save_root_path    = DefineDefault::CROP_FRAME_IMAGE_SAVE_ROOT_PATH;
+
+        // 디버깅용 가상 boundary 강제 주입 (LineIntrusion 99999 + VehicleIntrusion 99998).
+        // production-safe default false. MVAS 응답에 키 누락 시 false 유지. README §14 참조.
+        bool           debug_virtual_lines_enabled  = false;
     };
 
     class CameraSettingData : public ISettingData
