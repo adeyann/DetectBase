@@ -65,9 +65,9 @@ ResetSourceOnly 가 호출한 TeardownPipeline 의 unref 가 hang. ReconnectWork
 
 **Trigger 가설**: 오늘 15:59-16:41 PID 4924 incident (duplicate DetectBase) 동안 각 cam 서버가 2x client load 처리 → happytime rtsp 의 connection table / session state 코럽트. PID 4924 사망 후에도 자가 회복 안 됨.
 
-**대응 — 내일 (5/27) 진행**:
-1. **cam 서버 4대 (192.168.2.111-114) 의 happytime rtsp daemon 재시작** — 가장 직접 검증. 재시작 후 wd 발생 멈추면 hypothesis 확정.
-2. v0.1.18 baseline 24h 안정성 재측정 (cam 서버 정상화 상태에서).
+**대응 — 5/27 진행 상태**:
+1. **cam 서버 4대 (192.168.2.111-114) 의 happytime rtsp daemon 재시작** — 가장 직접 검증 후보. 실행 여부 확인 필요 (이번 세션 외부 actor 가 수행했을 수 있음). 5/26 22:00 ~ 5/27 09:06 11.3h 운영 결과 wd=1 (boot only) / cam_loss=0 으로 안정 — server 측 정상화 (재시작 또는 자연 복구) 추정 가능.
+2. v0.1.18 baseline 24h 안정성 재측정 — **현재 11.3h 누적, 24h 미달**. cam_loss=0 추세 유지 중. 5/27 14:00 이후 추가 모니터링으로 24h 도달 가능.
 
 **부수 발견**:
 - DetectBase 가 server-side close 받았을 때 socket close 누락 → CLOSE-WAIT 패턴 관찰. fd leak 누적 위험은 낮지만 (소량), defensive 코드 추가 후보 (future).
