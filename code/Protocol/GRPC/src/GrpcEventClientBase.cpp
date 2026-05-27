@@ -233,8 +233,10 @@ namespace MGEN
             }
             else if( auto* call = dynamic_cast<JsonResponseCall*>(base) ){
                 if( call->status.ok() ){
+#ifdef DEBUG_MODE
                     MLOG_INFO( "[GRPC OK][Response] trace_id=%s duration=%ldms",
                         call->trace_id.c_str(), ms );
+#endif
 
                     if( call->callback ){
                         call->callback( call->response.json_data() );
@@ -249,8 +251,10 @@ namespace MGEN
             else if( auto* call = dynamic_cast<CounterSnapshotCall*>(base) ){
                 // [Phase 4 샘플] CounterSnapshot 응답.
                 if( call->status.ok() ){
+#ifdef DEBUG_MODE
                     MLOG_INFO( "[GRPC OK][CounterSnapshot] trace_id=%s duration=%ldms",
                         call->trace_id.c_str(), ms );
+#endif
                     if( call->callback ){
                         call->callback( call->response );
                     }

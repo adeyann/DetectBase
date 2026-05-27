@@ -59,13 +59,16 @@ namespace MGEN
                 reg.RegisterCounter( METRIC_FRAMES_TOTAL,    "GStreamer RTSP frames received and decoded" );
                 reg.RegisterCounter( METRIC_RECONNECT_TOTAL, "GStreamer RTSP reconnect attempts" );
                 reg.RegisterCounter( METRIC_ERRORS_TOTAL,    "GStreamer RTSP bus error events" );
+#ifdef DEBUG_MODE
+                // debug trace / stuck-stage trace metric — Release 빌드에선 등록 X (IncrementCounter/SetGauge 호출은 unregistered 시 silent return).
                 reg.RegisterCounter( METRIC_BUS_MSG_TOTAL,   "GStreamer RTSP bus message count by cam_id and type (debug trace)" );
                 reg.RegisterCounter( METRIC_RESET_ATTEMPT,   "GstRtspReceiver::ResetSourceOnly attempt count by cam_id and result (debug trace)" );
                 reg.RegisterGauge  ( METRIC_LAST_FRAME_AGE_SEC, "Seconds since last frame received per cam_id (debug trace)" );
-                reg.RegisterCounter( METRIC_RTCP_TIMEOUT_TOTAL, "GstRTSPSrcTimeout cause=RTCP occurrences per cam_id (measurement — behavior unchanged)" );
                 reg.RegisterCounter( METRIC_DEPAY_BUFFER_TOTAL, "RTP/pre-decode buffers passing rtph264depay src pad per cam_id (stuck-stage trace)" );
                 reg.RegisterCounter( METRIC_DECODED_TOTAL,      "Decoded frames reaching appsink per cam_id (stuck-stage trace)" );
                 reg.RegisterCounter( METRIC_RTP_IN_TOTAL,       "Buffers entering rtph264depay sink pad per cam_id (rtspsrc output — stuck-stage trace)" );
+#endif
+                reg.RegisterCounter( METRIC_RTCP_TIMEOUT_TOTAL, "GstRTSPSrcTimeout cause=RTCP occurrences per cam_id (measurement — behavior unchanged)" );
                 reg.RegisterGauge  ( METRIC_JB_PUSHED,          "rtpjitterbuffer num-pushed per cam_id" );
                 reg.RegisterGauge  ( METRIC_JB_LOST,            "rtpjitterbuffer num-lost per cam_id" );
                 reg.RegisterGauge  ( METRIC_JB_RTX_COUNT,       "rtpjitterbuffer rtx-count per cam_id" );
@@ -280,19 +283,27 @@ namespace MGEN
 
     GstPadProbeReturn GstRtspReceiver::OnDepayBufferProbe( GstPad* /*pad*/, GstPadProbeInfo* /*info*/, void* user_data )
     {
+#ifdef DEBUG_MODE
         auto* self = static_cast<GstRtspReceiver*>( user_data );
         MetricsRegistry::Instance().IncrementCounter(
             METRIC_DEPAY_BUFFER_TOTAL,
             { { "cam_id", std::to_string( self->cfg_.cam_id ) } }, 1.0 );
+#else
+        (void) user_data;
+#endif
         return GST_PAD_PROBE_OK;
     }
 
     GstPadProbeReturn GstRtspReceiver::OnRtpInProbe( GstPad* /*pad*/, GstPadProbeInfo* /*info*/, void* user_data )
     {
+#ifdef DEBUG_MODE
         auto* self = static_cast<GstRtspReceiver*>( user_data );
         MetricsRegistry::Instance().IncrementCounter(
             METRIC_RTP_IN_TOTAL,
             { { "cam_id", std::to_string( self->cfg_.cam_id ) } }, 1.0 );
+#else
+        (void) user_data;
+#endif
         return GST_PAD_PROBE_OK;
     }
 
@@ -399,33 +410,43 @@ namespace MGEN
 
         if( !pipeline_ ) {
             MLOG_WARN( "ResetSourceOnly[%d] — pipeline_ is nullptr (skipped)", cfg_.cam_id );
+#ifdef DEBUG_MODE
             reg.IncrementCounter( METRIC_RESET_ATTEMPT, { { "cam_id", cam_id_str }, { "result", "no_pipeline" } }, 1.0 );
+#endif
             return false;
         }
 
         reset_source_count_.fetch_add( 1, std::memory_order_relaxed );
         MLOG_INFO( "ResetSourceOnly[%d] 진입 — pipeline destroy/rebuild (single), reset_cnt=%lu",
             cfg_.cam_id, (unsigned long) reset_source_count_.load() );
+#ifdef DEBUG_MODE
         reg.IncrementCounter( METRIC_RESET_ATTEMPT, { { "cam_id", cam_id_str }, { "result", "enter" } }, 1.0 );
+#endif
 
         TeardownPipeline();
 
         if( !BuildPipeline() ) {
             MLOG_ERROR( "ResetSourceOnly[%d] — BuildPipeline 실패", cfg_.cam_id );
+#ifdef DEBUG_MODE
             reg.IncrementCounter( METRIC_RESET_ATTEMPT, { { "cam_id", cam_id_str }, { "result", "build_fail" } }, 1.0 );
+#endif
             return false;
         }
         GstStateChangeReturn r = gst_element_set_state( pipeline_, GST_STATE_PLAYING );
         if( r == GST_STATE_CHANGE_FAILURE ) {
             MLOG_ERROR( "ResetSourceOnly[%d] — PLAYING 실패", cfg_.cam_id );
+#ifdef DEBUG_MODE
             reg.IncrementCounter( METRIC_RESET_ATTEMPT, { { "cam_id", cam_id_str }, { "result", "playing_fail" } }, 1.0 );
+#endif
             TeardownPipeline();
             return false;
         }
         const auto t_end = std::chrono::steady_clock::now();
         const int64_t dur_us = std::chrono::duration_cast<std::chrono::microseconds>( t_end - t_start ).count();
         MLOG_INFO( "ResetSourceOnly[%d] OK — duration=%ldus", cfg_.cam_id, (long) dur_us );
+#ifdef DEBUG_MODE
         reg.IncrementCounter( METRIC_RESET_ATTEMPT, { { "cam_id", cam_id_str }, { "result", "ok" } }, 1.0 );
+#endif
         return true;
     }
 
@@ -444,9 +465,11 @@ namespace MGEN
 
         self->frame_count_.fetch_add( 1 );
         MetricsRegistry::Instance().IncrementCounter( METRIC_FRAMES_TOTAL, NO_LABELS, 1.0 );
+#ifdef DEBUG_MODE
         // 측정 (2026-05-21): per-cam decoded frame count (stuck-stage trace)
         MetricsRegistry::Instance().IncrementCounter(
             METRIC_DECODED_TOTAL, { { "cam_id", std::to_string( self->cfg_.cam_id ) } }, 1.0 );
+#endif
 
         // 진단 (debug/gst-rtsp-stale-trace 2026-05-20) — last_frame timestamp 기록
         const int64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -563,9 +586,11 @@ namespace MGEN
         auto& reg = MetricsRegistry::Instance();
         const std::string cam_id_str = std::to_string( self->cfg_.cam_id );
 
+#ifdef DEBUG_MODE
         // 진단 (debug/gst-rtsp-stale-trace 2026-05-20) — 모든 bus message type 카운트
         reg.IncrementCounter( METRIC_BUS_MSG_TOTAL,
             { { "cam_id", cam_id_str }, { "type", mtype_name ? mtype_name : "?" } }, 1.0 );
+#endif
 
         switch( mtype )
         {

@@ -989,6 +989,7 @@ namespace MGEN
                     MLOG_INFO("Cam[%d] decoded frame not recieved... maybe RTSP stream not activate", id_ );
                     last_interval_log_print_time = current_check_time;
                 }
+#ifdef DEBUG_MODE
                 // 진단 (debug/gst-rtsp-stale-trace 2026-05-20) — 매 timeout 시 last_frame_age gauge update.
                 //   stuck 시 InferenceThread 의 100-cycle 영역 도달 안 함 → 이 위치에서만 gauge update.
                 //   monotonic increase 면 cam stream stuck 의 외부 signal.
@@ -1004,6 +1005,7 @@ namespace MGEN
                             age_sec );
                     }
                 }
+#endif
                 continue;
             }
             else

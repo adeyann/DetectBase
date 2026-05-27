@@ -317,16 +317,24 @@ namespace MGEN
             // SendEventOnlyJson 수신 → 로그 출력 + 메트릭 ↑ (샘플 동작; 실제 프로덕트는 큐로 forward).
             grpc_server_->SetSendEventOnlyJsonPostProcesser(
                 []( const EventDataOnlyJson& req, Empty& /*rsp*/ ){
+#ifdef DEBUG_MODE
                     MLOG_INFO( "[GRPC RECV] SendEventOnlyJson uuid=%s json_len=%zu",
                         req.uuid().c_str(), req.json_data().size() );
+#else
+                    (void) req;
+#endif
                     MGEN::MetricsRegistry::Instance().IncrementCounter(
                         "detectbase_grpc_recv_total", { { "rpc", "SendEventOnlyJson" } } );
                 });
 
             grpc_server_->SetSendEventWithImagesPostProcesser(
                 []( const EventDataWithRawImages& req, Empty& /*rsp*/ ){
+#ifdef DEBUG_MODE
                     MLOG_INFO( "[GRPC RECV] SendEventWithImages uuid=%s images=%d",
                         req.uuid().c_str(), req.images_size() );
+#else
+                    (void) req;
+#endif
                     MGEN::MetricsRegistry::Instance().IncrementCounter(
                         "detectbase_grpc_recv_total", { { "rpc", "SendEventWithImages" } } );
                 });
