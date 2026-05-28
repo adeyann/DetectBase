@@ -1,8 +1,18 @@
 # NEXT_SESSION
 
-**최종 갱신**: 2026-05-27 KST
+**최종 갱신**: 2026-05-28 KST
 **현 develop HEAD**: cmake VERSION = `0.1.23`. last master tag = `v0.1.18` (2026-05-27).
-**작업 중 branch**: `docs/develop-merge-policy-update` (develop 미머지, HEAD `9bf8c0d`) — git workflow 정책 정정 + DeviceCluster 인라인화 + SafeQueue race review + SafeQueue MO-1 (enqueue+terminate) + CLOSE-WAIT 항목 close 누적.
+**작업 중 branch**: `docs/develop-merge-policy-update` (develop 미머지, HEAD `4172ac8`) — 9 commit 누적: git workflow 정책 정정 + DeviceCluster 인라인화 + SafeQueue race review + SafeQueue MO-1 (enqueue+terminate) + CLOSE-WAIT close + NEXT_SESSION 정리 (2회) + GMainContext cleanup + **GMainContext UAF fix**.
+
+## 🚨 진행 중 작업 (compact-safe 진입점)
+
+**[5/28] GMainContext UAF fix (4172ac8) 검증 진행 중**:
+- **이전 audit** (`logs/audit_20260527_201443/`) 에서 **TSan SEGV** 발견 — `OnJitterStatsTimer` (GstRtspReceiver.cpp:287) 의 `g_object_get(jitterbuffer_, ...)` UAF on freed object. baseline (master_logs/v0.1.18/audit_20260527_091456) 와 비교 시 진짜 회귀 = SEGV 1건만 (자체 코드 race 동일, line shift 만).
+- **Root cause**: 0f9ae2c (GMainContext per-instance ctx_) 변경 후 `g_source_remove(id)` 가 default global context 에서만 source 찾음 → `ctx_` 안 source 못 찾음 → timer 가 pipeline destroy 후에도 active → freed `jitterbuffer_` access → SEGV. `bus_watch_id_` 도 동일 결함.
+- **Fix (4172ac8)**: `guint id` → `GSource* source` 멤버 변환 + `g_source_destroy(source) + g_source_unref(source)` (context 무관, source 자체 작용). GMainContext per-instance 격리 의도 그대로 유지.
+- **검증 필요**: audit 5종 재실행 — TSan SEGV 0 + 자체 코드 race baseline 회복 확인. 진행 중 (background).
+
+**branch chain**: 9 commit, 모두 push. develop 머지 보류 — 사용자 명시 후. PR 생성 X 정책 (3ff9e40 docs/small-commit branch + 사용자 시그널).
 
 ---
 
