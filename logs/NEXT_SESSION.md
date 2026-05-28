@@ -1,42 +1,52 @@
 # NEXT_SESSION
 
 **최종 갱신**: 2026-05-28 KST
-**현 develop HEAD**: cmake VERSION = `0.1.23`. last master tag = `v0.1.18` (2026-05-27).
-**작업 중 branch**: `docs/develop-merge-policy-update` (develop 미머지, HEAD `4172ac8`) — 9 commit 누적: git workflow 정책 정정 + DeviceCluster 인라인화 + SafeQueue race review + SafeQueue MO-1 (enqueue+terminate) + CLOSE-WAIT close + NEXT_SESSION 정리 (2회) + GMainContext cleanup + **GMainContext UAF fix**.
+**현 develop HEAD**: cmake VERSION = `0.1.23` (이번 머지 후 `0.1.26`). last master tag = `v0.1.18` (2026-05-27).
+**작업 중 branch**: `chore/v0.1.26-cycle` (develop 미머지, HEAD `b009fb0`) — 18 commit 누적. 사용자 명시 허가 받은 후 develop 머지 예정.
 
 ## 🚨 진행 중 작업 (compact-safe 진입점)
 
-**[5/28] GMainContext UAF fix (4172ac8) 검증 진행 중**:
-- **이전 audit** (`logs/audit_20260527_201443/`) 에서 **TSan SEGV** 발견 — `OnJitterStatsTimer` (GstRtspReceiver.cpp:287) 의 `g_object_get(jitterbuffer_, ...)` UAF on freed object. baseline (master_logs/v0.1.18/audit_20260527_091456) 와 비교 시 진짜 회귀 = SEGV 1건만 (자체 코드 race 동일, line shift 만).
+**[5/28] v0.1.26 cycle — UAF fix 검증 완료, develop 머지 직전**:
+
+이 사이클의 핵심 사건:
+- **5/27 audit 에서 TSan SEGV 발견** — `OnJitterStatsTimer` (GstRtspReceiver.cpp:287) 의 `g_object_get(jitterbuffer_, ...)` UAF on freed object. baseline (master_logs/v0.1.18/audit_20260527_091456) 와 비교 시 진짜 회귀 = SEGV 1건만 (자체 코드 race 동일, line shift 만).
 - **Root cause**: 0f9ae2c (GMainContext per-instance ctx_) 변경 후 `g_source_remove(id)` 가 default global context 에서만 source 찾음 → `ctx_` 안 source 못 찾음 → timer 가 pipeline destroy 후에도 active → freed `jitterbuffer_` access → SEGV. `bus_watch_id_` 도 동일 결함.
 - **Fix (4172ac8)**: `guint id` → `GSource* source` 멤버 변환 + `g_source_destroy(source) + g_source_unref(source)` (context 무관, source 자체 작용). GMainContext per-instance 격리 의도 그대로 유지.
-- **검증 필요**: audit 5종 재실행 — TSan SEGV 0 + 자체 코드 race baseline 회복 확인. 진행 중 (background).
+- **검증 결과 (5/28 light audit)**:
+  - **ASan/UBSan 1h**: leak 1.22 MB / 10,639 alloc — baseline (4h strict) 1.24 MB / 11,515 alloc 대비 거의 동일 (startup+cycle dominated, 시간 비례 X). 자체 코드 leak 0건 유지. 회귀 0.
+  - **TSan 1h**: WARNING 158 (baseline 172, -8%), **SEGV 0** ✅ — UAF fix 결정적 검증.
+- **branch rename**: `docs/develop-merge-policy-update` → `chore/v0.1.26-cycle` (5/28). 작업 mix 가 docs 가 아닌 fix+refactor+perf+chore 였기 때문 + 정책 자동 발동 misleading 방지.
 
-**branch chain**: 9 commit, 모두 push. develop 머지 보류 — 사용자 명시 후. PR 생성 X 정책 (3ff9e40 docs/small-commit branch + 사용자 시그널).
+**머지 직전 점검**:
+- cmake 0.1.26 + README/code/README/NEXT_SESSION 동기 commit 포함 (cmake bump README sync 절대 규칙)
+- 18 commit 모두 push 완료
+- 사용자 명시 허가 필요 (5/27 PR #29 사고 후 default → explicit-approval 전환)
 
 ---
 
 ## 📋 남은 작업
 
-### 🟢 검증 대기
-
-#### 1. audit 5종 재검증 (GStreamer GMainContext cleanup 후)
-- 0f9ae2c (Receiver/ProxyServer 각자 dedicated GMainContext) 변경 후 cppcheck / clang-tidy / ASan / UBSan / TSan 자체 코드 회귀 검증 필요
-- Release 빌드만 통과 확인됨 — Debug 빌드 (audit 시 자동) + 동적 분석 (ASan/TSan) 재실행 필요
-- 실행: `./detectbase.sh audit` (전체 5종, **light default** ~1h 30min). master merge gate 검증은 `--strict` (~5h, ASan 4h+TSan 1h)
-
-- 통과 조건: 자체 코드 결함 baseline (master_logs/v0.1.18/audit_20260527_091456/) 대비 회귀 0건
-
----
+### 🟢 검증 완료 (이번 사이클)
+- [x] audit 5종 회귀 검증 (light): cppcheck 60 / clang-tidy 1W / ASan-UBSan baseline 동일 / **TSan SEGV 0** + WARN 158
+- [x] UAF fix (4172ac8) 결정적 동작 확인 (TSan SEGV 0)
+- [x] GMainContext per-instance dedicated context 적용 (multi-cam coupling 해소)
+- [x] SafeQueue MO-1 (notify_one + notify_all out-of-lock) 적용
+- [x] CameraCluster_DETECTOR → SettingManager 인라인화 (1-use 폐기)
+- [x] CLOSE-WAIT defensive close 정책 정착
+- [x] detectbase.sh audit light/strict 강도 모드 도입
+- [x] git workflow rule 강화 (branch cleanup hint + remote state verification)
+- [x] skill/memory 역할 분담 정리 (procedural SSOT = skill, personal context = memory)
+- [x] branch rename + 파생 branch 잔재 6개 정리
 
 ### 🟡 운영 데이터 누적 대기
 
-#### 2. monitor.sh threshold tuning
+#### 1. monitor.sh threshold tuning
 - 현 기본값: `ALERT_DFPS_LOW_THRESHOLD=100`, `ALERT_DFPS_LOW_STREAK=2`, `ALERT_RSS_MB_THRESHOLD=1100`, `ALERT_WARN_DELTA_PER_CYCLE=500`, `ALERT_WARMUP_CYCLES=4`
 - 운영 1-2주 데이터 누적 후 false-positive 분포 확인 → 재검토
+- 5/28 현재 monitor `v0.1.26_uaf_fix_postaudit` label 가동 중
 
-#### 3. cam_loss fix path 실효성 검증
-- v0.1.18 TeardownPipeline unref-skip 패치 ([GstRtspReceiver.cpp:314-340](../code/Protocol/RTSP_GST/src/GstRtspReceiver.cpp#L314)) 가 사후조치 (defensive workaround)
+#### 2. cam_loss fix path 실효성 검증
+- v0.1.18 TeardownPipeline unref-skip 패치 ([GstRtspReceiver.cpp](../code/Protocol/RTSP_GST/src/GstRtspReceiver.cpp)) 가 사후조치 (defensive workaround)
 - 11.3h 모니터 동안 fix path 자체가 발화 X — 다음 자연 stuck 시 검증
 
 **Escalation 순서 (stuck 재발 시)**:
@@ -47,7 +57,7 @@
 
 자세한 배경: [.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md](../.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md)
 
-#### 4. 24일 storm — accept as baseline
+#### 3. 24일 storm — accept as baseline
 - 정밀 mechanism: INF push mutex contention (40x) + inflight_q drop-oldest → correlation_id mismatch
 - 24h 중 3회 (~10분), self-healing, fix 비용 > 효익
 - 처리 방침: **accept**. 6+ cam scale-up 시 batch>1 도입 검토 (별도)
@@ -56,12 +66,12 @@
 
 ### 🟠 scale-up 의사결정 후
 
-#### 5. NPU batch_size 수정 (6+ cam scale-up 시)
+#### 4. NPU batch_size 수정 (6+ cam scale-up 시)
 - [YoloV5_Torch_Onnx_RKNN_NPU.cpp:412](../code/Engine/NPU/YoloV5_Torch_Onnx_RKNN_NPU/YoloV5_Torch_Onnx_RKNN_NPU.cpp#L412) 잘못된 batch_size 검증
 - [L512](../code/Engine/NPU/YoloV5_Torch_Onnx_RKNN_NPU/YoloV5_Torch_Onnx_RKNN_NPU.cpp#L512) `input.size = rknn_model_w * rknn_model_h * rknn_model_c` 단일 frame 만 할당
 - 6+ cam scale-up 시 NPU 천장 도달 시 batch>1 검토 + RKNN 모델 batch>1 재변환 필요 (3가지 동시 fix)
 
-#### 6. SafeThread → ThreadPool 전환
+#### 5. SafeThread → ThreadPool 전환
 - 현 SafeThread 29건 사용, cam 별 인스턴스 분리 (no pool)
 - 카메라 8~16대 확장 계획 있을 시 검토
 
@@ -81,7 +91,7 @@
 
 ### 🟣 v1.0.0 안정화 후
 
-#### 7. GStreamer 1.20.3 → 1.24+ upgrade
+#### 6. GStreamer 1.20.3 → 1.24+ upgrade
 - rtpmanager long-running leak (외부 lib, ~340 MB/year, accepted) 의 fix 가능성 검증
 - 비용: 1.5~2시간 + Ubuntu 22.04 → 24.04 base 변경 + librknnrt ABI 호환 위험 + protobuf/grpc source rebuild
 - 1.24 changelog 에 명확한 본 케이스 fix 단서 없음 → 효과 불확실
@@ -97,6 +107,12 @@
 ### canonical monitor
 - `logs/monitor.sh <label>` — JSONL, 70+ per-cam fields, 1분 단위 + threshold alerts 7종 (`★storm` / `★err` / `★dfps_low` / `★memory` / `★watchdog` / `★ftc` / `★cam_loss`) + warmup grace 4 cycle
 - env override: `ALERT_WARN_DELTA_PER_CYCLE` / `ALERT_DFPS_LOW_THRESHOLD` / `ALERT_DFPS_LOW_STREAK` / `ALERT_RSS_MB_THRESHOLD` / `ALERT_WARMUP_CYCLES`
+
+### audit 강도 모드 (0.1.26 신규)
+- `./detectbase.sh audit` (no flag) = **light** default: ASan 60m + TSan 60m (~1h 30min) — develop/내부/branch 검증
+- `./detectbase.sh audit --strict` = ASan 240m + TSan 60m (~5h) — **master merge gate 의 audit 5종 = strict 강도 필수**
+- `ASAN_DURATION_MIN` / `TSAN_DURATION_SEC` env var override 가능, 강도 모드 default 보다 우선
+- `master_logs/v<version>/` baseline 산출물 = strict 강도 결과
 
 ### single-instance lock
 - `/DetectBase/logs/.detectbase.lock` — `flock(2)` advisory lock, Main.cpp 부팅 시 획득
@@ -127,7 +143,7 @@ Debug 빌드 (`-DCMAKE_BUILD_TYPE=Debug` 또는 audit 5종) 에서만 활성. Re
 
 | 문서 | 내용 |
 |------|------|
-| [README.md](../README.md) | 프로젝트 전체 (Version 0.1.23) |
+| [README.md](../README.md) | 프로젝트 전체 (Version 0.1.26) |
 | [CLAUDE.md](../CLAUDE.md) | 코딩 표준 + git workflow 정책 (source of truth) |
 | [OPERATIONS.md](../OPERATIONS.md) | 운영 트러블슈팅 |
 | [.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](../.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md) | v2.0.0 Search engine 도입 가이드 |
