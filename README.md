@@ -1,6 +1,6 @@
 # DetectBase
 
-**Version**: `0.1.23` (cmake `code/CMakeLists.txt`, develop 작업 진입 — master tag 보다 +5 patch). **last released master tag = `v0.1.18` (2026-05-27)**. v0.1.0 (5/19) → v0.1.18 (5/27) 누적 cam stuck fix + `.claude/settings.json` 권한 allow/deny 모델 + audit ASan/TSan 최소 1h 강제 (현 default ASan 4h / TSan 1h). **TeardownPipeline unref-skip on stuck (0.1.18)** — cam 661 의 42분 cam_loss 분석 결과 `gst_object_unref(pipeline_)` 가 GStreamer 내부 thread join 에서 unbounded block 하던 게 root cause. `gst_element_get_state` timeout 시 unref 건너뛰고 의도된 leak (process restart 시 OS cleanup) + WARN log. **5/26~5/27 11.3h 후속 모니터 wd=1 (boot only) / cam_loss=0** (pre-fix 50분 wd=6/cam_loss 영구). 단 fix path 미발화 (자연 stuck 안 일어남) → fix 실제 발휘 검증은 다음 stuck 시점에 가능. **git workflow 정책 갱신 + pre-push docs check 절대 규칙 + memory 영어화 (0.1.17)** — code/cmake bump 분리 (push 후 별도 commit), 머지 시 사용자 버전 확인, post-merge placeholder bump, 모든 commit push 시 docs 전수 점검. AI-only memory 디렉토리 영어 단일 언어화. **argv guard + flock single-instance lock (0.1.16)** — Main.cpp 의 `int main()` 가 argv 무수신 → `--version` 같은 일반 호출이 풀 서비스 spawn 하던 사고 (PID 4924, DFPS 50% 하락) 차단. argv 명시 case 외 FATAL exit 2 + `/DetectBase/logs/.detectbase.lock` 의 `flock(2)` advisory lock 으로 두 번째 instance 부팅 차단. monitor.sh 에 threshold alert 7 종 (storm/err/dfps_low/memory/wd/ftc/cam_loss) + warmup grace 4 cycle 추가. **REST response JSON parse silent catch 가시화 (0.1.15)** — `rest_impl.cpp` 의 catch 에 `MLOG_WARN` 추가. **MPP + Option A 완전 폐기 (0.1.14)** — mppvideodec 미사용 상태에서 Option A 의 14ms partial reset 이 multi-cam cluster sync 강화 → DFPS dip 증폭 확인. 5/24 Full reset baseline (mean DFPS 115.6, ≥110: 98.8%) 복귀. snapshot: tag `mpp-architecture-snapshot-v0.1.13` + `.backup/mpp_purged_20260526/`. **per-cam stage FPS counter (0.1.12) revert (0.1.13)** — global mutex hot path 으로 wd 빈도 증가 회귀, A-B-A control test 검증.)
+**Version**: `0.1.23` (cmake `code/CMakeLists.txt`, develop 작업 진입 — master tag 보다 +5 patch). **last released master tag = `v0.1.18` (2026-05-27)**. v0.1.0 (5/19) → v0.1.18 (5/27) 누적 cam stuck fix + `.claude/settings.json` 권한 allow/deny 모델 + audit ASan/TSan 최소 1h 강제 + 강도 모드 (light default ASan 1h+TSan 1h / strict ASan 4h+TSan 1h = master merge gate, 2026-05-28 도입). **TeardownPipeline unref-skip on stuck (0.1.18)** — cam 661 의 42분 cam_loss 분석 결과 `gst_object_unref(pipeline_)` 가 GStreamer 내부 thread join 에서 unbounded block 하던 게 root cause. `gst_element_get_state` timeout 시 unref 건너뛰고 의도된 leak (process restart 시 OS cleanup) + WARN log. **5/26~5/27 11.3h 후속 모니터 wd=1 (boot only) / cam_loss=0** (pre-fix 50분 wd=6/cam_loss 영구). 단 fix path 미발화 (자연 stuck 안 일어남) → fix 실제 발휘 검증은 다음 stuck 시점에 가능. **git workflow 정책 갱신 + pre-push docs check 절대 규칙 + memory 영어화 (0.1.17)** — code/cmake bump 분리 (push 후 별도 commit), 머지 시 사용자 버전 확인, post-merge placeholder bump, 모든 commit push 시 docs 전수 점검. AI-only memory 디렉토리 영어 단일 언어화. **argv guard + flock single-instance lock (0.1.16)** — Main.cpp 의 `int main()` 가 argv 무수신 → `--version` 같은 일반 호출이 풀 서비스 spawn 하던 사고 (PID 4924, DFPS 50% 하락) 차단. argv 명시 case 외 FATAL exit 2 + `/DetectBase/logs/.detectbase.lock` 의 `flock(2)` advisory lock 으로 두 번째 instance 부팅 차단. monitor.sh 에 threshold alert 7 종 (storm/err/dfps_low/memory/wd/ftc/cam_loss) + warmup grace 4 cycle 추가. **REST response JSON parse silent catch 가시화 (0.1.15)** — `rest_impl.cpp` 의 catch 에 `MLOG_WARN` 추가. **MPP + Option A 완전 폐기 (0.1.14)** — mppvideodec 미사용 상태에서 Option A 의 14ms partial reset 이 multi-cam cluster sync 강화 → DFPS dip 증폭 확인. 5/24 Full reset baseline (mean DFPS 115.6, ≥110: 98.8%) 복귀. snapshot: tag `mpp-architecture-snapshot-v0.1.13` + `.backup/mpp_purged_20260526/`. **per-cam stage FPS counter (0.1.12) revert (0.1.13)** — global mutex hot path 으로 wd 빈도 증가 회귀, A-B-A control test 검증.)
 
 Odroid M2 NPU 기반 RTSP 비디오 분석 베이스 프로젝트. 객체 탐지 + 트래킹 + 침입 감지 + 이벤트 송신을 통합한 production-ready 시스템.
 
@@ -370,7 +370,8 @@ code/
 ./detectbase.sh stop       # graceful shutdown (~10초)
 ./detectbase.sh restart    # stop → start
 ./detectbase.sh logs       # 로그 follow only
-./detectbase.sh audit      # 전체 (cppcheck + clang-tidy + ASan/UBSan + TSan)
+./detectbase.sh audit      # 전체 (light default: ASan 60m + TSan 60m, ~1h 30min)
+./detectbase.sh audit --strict           # master merge gate (ASan 240m + TSan 60m, ~5h)
 ./detectbase.sh audit --no-tsan          # TSan 제외 (정적 + ASan/UBSan)
 ./detectbase.sh audit --only <tool>      # 단독 실행 (cppcheck|clang-tidy|asan|ubsan|tsan)
 ./detectbase.sh prune      # 안 쓰는 도커 리소스 정리
@@ -386,7 +387,8 @@ code/
 | Dockerfile 수정 | `build` → `compile` → `restart` (build 후 init 자동) |
 | proto 수정 | `init` → `compile` → `restart` |
 | C++ 코드만 수정 | `compile` → `restart` |
-| 검증 (큰 변경 후) | `audit` (운영 정지 동반. ASan 4h + TSan 1h 가 default — 합 약 5h) |
+| 검증 (큰 변경 후) | `audit` (light default: ASan 1h + TSan 1h, 합 ~1h 30min, develop/내부 검증용) |
+| master merge gate | `audit --strict` (ASan 4h + TSan 1h, 합 ~5h, 운영 정지 동반) |
 
 ### 환경 요구
 
@@ -784,25 +786,33 @@ MVAS API 응답의 `Server.Setting` JSON 에 다음 필드 추가:
 
 ## §15. 정적 분석 / Sanitizer (audit)
 
-### 5종 도구 — 전체 / 묶음 / 단독 실행 모두 지원 (2026-05-19 갱신)
+### 5종 도구 — 전체 / 묶음 / 단독 실행 모두 지원 (2026-05-28 갱신 — light/strict mode 도입)
 
 ```bash
+# 강도 모드 (2026-05-28 도입)
+./detectbase.sh audit                    # light default — ASan 60m + TSan 60m (~1h 30min, develop/내부 검증)
+./detectbase.sh audit --light            # 명시적 light (default 와 동일)
+./detectbase.sh audit --strict           # ASan 240m + TSan 60m (~5h, master merge gate)
+
 # 묶음 모드
-./detectbase.sh audit                    # 전체 (cppcheck + clang-tidy + ASan/UBSan + TSan)
 ./detectbase.sh audit --no-tsan          # TSan 제외 (정적 + ASan/UBSan)
 ./detectbase.sh audit --with-tsan        # = 전체 (backward compat)
 
 # 단독 모드 — 변경 검증 시 필요 도구만 빠르게
 ./detectbase.sh audit --only cppcheck    # 정적 (~1분)
 ./detectbase.sh audit --only clang-tidy  # 정적 (~10분)
-./detectbase.sh audit --only asan        # 동적, ASan+UBSan 같은 빌드 (운영 정지, default 4h run)
+./detectbase.sh audit --only asan        # 동적, ASan+UBSan 같은 빌드 (운영 정지, light 1h / strict 4h)
 ./detectbase.sh audit --only ubsan       # asan 의 alias
 ./detectbase.sh audit --only tsan        # 동적, race detection (운영 정지, default 1h run)
 ```
 
-환경변수 override:
-- `ASAN_DURATION_MIN` (default **240분 = 4h**, **최소 60분 강제** — 60 미만이면 60으로 자동 보정): `ASAN_DURATION_MIN=60 ./detectbase.sh audit --only asan`
+환경변수 override (강도 모드보다 우선):
+- `ASAN_DURATION_MIN` (light default **60분**, strict default **240분**, **최소 60분 강제**): `ASAN_DURATION_MIN=120 ./detectbase.sh audit --only asan`
 - `TSAN_DURATION_SEC` (default **3600초 = 1h**, **최소 3600초 강제** — 3600 미만이면 3600으로 자동 보정): `TSAN_DURATION_SEC=3600 ./detectbase.sh audit --only tsan`
+
+**강도 모드 선택 기준 (CLAUDE.md master merge gate 와 동기):**
+- **light** (default) — develop 머지 / 내부 검증 / branch 자체 검증. 자체 코드 결함 회귀 탐지 목적. ~1h 30min.
+- **strict** — master merge gate. patch/minor bump 시 audit 5종 통과 요건의 audit 가 이 강도. ~5h. master_logs/v<버전>/ baseline 도 strict 결과.
 
 ### 도구 비교
 
@@ -814,7 +824,7 @@ MVAS API 응답의 `Server.Setting` JSON 에 다음 필드 추가:
 | **UBSan** | 런타임 sanitizer | UB (overflow, null deref) | -fsanitize=undefined (ASan 과 같이) |
 | **ThreadSanitizer (TSan)** | 런타임 sanitizer | data race, lock-order-inversion, double lock | -fsanitize=thread (별도 빌드) |
 
-### 결과 기준 (production-ready baseline) — **2026-05-27 v0.1.18 갱신** (master_logs/v0.1.18/audit_20260527_091456/, ASan 4h + TSan 1h default run)
+### 결과 기준 (production-ready baseline) — **2026-05-27 v0.1.18 갱신** (master_logs/v0.1.18/audit_20260527_091456/, strict mode = ASan 4h + TSan 1h)
 
 | 도구 | 자체 코드 결함 (master_logs/v0.1.18/audit_20260527_091456) |
 |---|---|

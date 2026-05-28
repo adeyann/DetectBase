@@ -137,10 +137,15 @@ This gate is DetectBase's definition of "verified" (A4). Unit tests are not the 
 
 | bump 종류 | audit | 모니터링 | 사용자 허가 |
 |---|---|---|---|
-| **patch** (0.0.X) | 5종 모두 통과 | **3h+** 운영 안정 추세 | 명시 허가 필수 |
-| **minor** (0.X.0) | 5종 모두 통과 | **3h+** 운영 안정 추세 | 명시 허가 필수 |
-| **major** (X.0.0) | 5종 모두 통과 | **각 10h+** 에이징 (leak/FD/thread 장시간 추세) + **10h+** 스트레스 (max cam / max load 안정성, DFPS dip 분포, wd 빈도) | 명시 허가 필수 |
+| **patch** (0.0.X) | 5종 모두 통과 (**`--strict`** 강도) | **3h+** 운영 안정 추세 | 명시 허가 필수 |
+| **minor** (0.X.0) | 5종 모두 통과 (**`--strict`** 강도) | **3h+** 운영 안정 추세 | 명시 허가 필수 |
+| **major** (X.0.0) | 5종 모두 통과 (**`--strict`** 강도) | **각 10h+** 에이징 (leak/FD/thread 장시간 추세) + **10h+** 스트레스 (max cam / max load 안정성, DFPS dip 분포, wd 빈도) | 명시 허가 필수 |
 
+- **audit 강도 모드 (2026-05-28 도입)**:
+  - `./detectbase.sh audit` (no flag) = **light** default: ASan 60m + TSan 60m (~1h 30min). develop/내부/branch 검증용.
+  - `./detectbase.sh audit --strict` = ASan 240m + TSan 60m (~5h). **master merge gate 의 audit 5종 = strict 강도 필수** (위 표).
+  - `ASAN_DURATION_MIN` / `TSAN_DURATION_SEC` env var override 가능, 강도 모드 default 보다 우선.
+  - `master_logs/v<버전>/` baseline 산출물 = strict 강도 결과.
 - 운영 모니터링 = `logs/monitor.sh <label>` JSONL + DFPS / RSS / FD / threads / wd / reset / eos / disk / docker_cpu/mem 추세 점검
 - "사용자 명시 허가" 의 의미: 사용자가 직접 "master merge 진행해라" 또는 동등한 의사 표현. AI 가 검증 완료 후 "이제 머지하자" 라고 단정 X. 사용자 결정 기다림.
 - 검증 부족 시 master 가까이 가지 않음 — develop 에 그대로 두고 모니터링 시간 채우기.

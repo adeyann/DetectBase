@@ -108,7 +108,7 @@ GRPC 활성화 / 운영 정책은 [상위 README §"GRPC 통신"](../README.md) 
 - const 정확성 필수
 - 공개 API 에 Doxygen 주석
 
-## 검증 상태 (2026-05-27 — `master_logs/v0.1.18/audit_20260527_091456/` baseline, last master tag = v0.1.18. develop cmake = 0.1.23 작업 진입. ASan 4h + TSan 1h default run)
+## 검증 상태 (2026-05-27 — `master_logs/v0.1.18/audit_20260527_091456/` baseline, last master tag = v0.1.18. develop cmake = 0.1.23 작업 진입. baseline 은 strict mode = ASan 4h + TSan 1h run. 2026-05-28 audit 강도 모드 도입 — develop/내부 검증은 light default ASan 1h + TSan 1h.)
 
 | 항목 | 결과 |
 |---|---|

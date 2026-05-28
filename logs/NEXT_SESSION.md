@@ -23,7 +23,8 @@
 #### 1. audit 5종 재검증 (GStreamer GMainContext cleanup 후)
 - 0f9ae2c (Receiver/ProxyServer 각자 dedicated GMainContext) 변경 후 cppcheck / clang-tidy / ASan / UBSan / TSan 자체 코드 회귀 검증 필요
 - Release 빌드만 통과 확인됨 — Debug 빌드 (audit 시 자동) + 동적 분석 (ASan/TSan) 재실행 필요
-- 실행: `./detectbase.sh audit` (전체 5종, ~4-5시간)
+- 실행: `./detectbase.sh audit` (전체 5종, **light default** ~1h 30min). master merge gate 검증은 `--strict` (~5h, ASan 4h+TSan 1h)
+
 - 통과 조건: 자체 코드 결함 baseline (master_logs/v0.1.18/audit_20260527_091456/) 대비 회귀 0건
 
 ---
