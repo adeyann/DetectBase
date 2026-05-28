@@ -1,12 +1,28 @@
 # NEXT_SESSION
 
-**최종 갱신**: 2026-05-28 15:30 KST
-**현 develop HEAD**: cmake VERSION = `0.1.26` (`66a9784` merge commit, v0.1.18 master tag 후 +8 patch). last master tag = `v0.1.18` (2026-05-27).
-**작업 중 branch**: `docs/v0.1.26-operations-update` (OPERATIONS.md + NEXT_SESSION 갱신 docs-only branch). 0.1.26 cycle 본 작업은 PR #30 으로 develop 머지 완료.
+**최종 갱신**: 2026-05-28 16:00 KST
+**현 develop HEAD**: cmake VERSION = `0.1.26` (`df5ff9c`, v0.1.18 master tag 후 +8 patch). last master tag = `v0.1.18` (2026-05-27).
+**작업 중 branch**: `fix/npu-batch-size` (NPU batch 확장성 fix, cmake 0.1.26 → 0.1.27). 5/28 새 branch naming rule 적용 (version-free 명).
 
-## 🚨 현 상태 — v0.1.26 머지 완료, 새 binary 운영 + 모니터 관찰 중
+## 🚨 현 상태 — v0.1.26 develop 머지 + 새 binary 운영 + NPU 확장성 fix 진행
 
-**[5/28] v0.1.26 cycle 종료 + runtime 검증 단계**:
+**[5/28] v0.1.27 — NPU batch_size 확장성 fix (input 측만)**:
+
+`YoloV5_Torch_Onnx_RKNN_NPU.cpp` 의 batch>1 진입 시 깨지는 input 측 막힘 패턴 3건 정정:
+- (a) batch dim check 의미 정정 — `input_attrs[0].dims[0]` (모델의 batch dim) 와 `batch_size_` 비교. 이전 `io_num.n_input` 비교는 의미 부정확 (n_input = input tensor 개수, batch 와 무관).
+- (b) input buffer size — `w * h * c * batch_size_` (batch 전체).
+- (c) Preprocess memcpy — `curr_batch_input_idx * frame_size` offset 적용 + 매 frame memset 제거 (이전 frame 보존).
+
+batch=1 운영 영향 = 0 (memcpy offset 0, size 동일, check 통과 동일). 운영 default `engines/engine.profile.json` 의 `InferenceBatchSize: 1` 그대로.
+
+**batch>1 진입 시 추가 검증 필요** (본 fix 미실시):
+- .rknn 모델 batch=N 재변환 (rknn-toolkit2, 외부 PC 작업)
+- post-processing (output 측 batch 처리) 검증
+- NPU throughput 실측 / latency 영향 / 메모리 사용량
+- multi-input 모델 호환성 (현 fix 는 input tensor 0 만 batch 처리)
+- 자세히는 [OPERATIONS.md §10](../OPERATIONS.md)
+
+**[5/28] v0.1.26 cycle 종료 + runtime 검증 단계** (이전 컨텍스트):
 
 핵심 사건 요약:
 - **5/27 audit 에서 TSan SEGV 발견** — `OnJitterStatsTimer` (GstRtspReceiver.cpp) 의 freed `jitterbuffer_` UAF. Root cause: `g_source_remove(guint)` 가 default global context 만 검색 → per-instance `ctx_` 안 source 못 찾아 timer 가 pipeline destroy 후에도 active.

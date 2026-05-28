@@ -409,11 +409,9 @@ namespace MGEN
 			MLOG_ERROR("rknn_query RKNN_QUERY_IN_OUT_NUM error ret=%d", ret);
 			return false;
 		}
-        if( batch_size_ != rknn_app_ctx_.io_num.n_input ){
-			MLOG_ERROR("Target RKNN Engine batch_size[%d] != rknn_app_ctx_.io_num.n_input[%d]",
-                batch_size_, rknn_app_ctx_.io_num.n_input );
-			return false;
-        }
+        // 이전 check (batch_size_ vs io_num.n_input) 는 의미 부정확이라 제거됨.
+        // io_num.n_input 은 RKNN 모델의 input tensor 개수 (대부분 1) 이고 batch 와 무관.
+        // 의미 있는 batch dim check 는 AllocateBuffers() 안 input_attrs query 직후로 이동됨.
 
         output_index_num_ = rknn_app_ctx_.io_num.n_output;
 
@@ -496,12 +494,23 @@ namespace MGEN
 		}
 		MLOG_INFO("[SET] Model input height=%d, width=%d, channel=%d", rknn_model_h, rknn_model_w, rknn_model_c);
 
+		// engine.profile.json 의 InferenceBatchSize 와 .rknn 모델의 batch dim 일치 검증.
+		// NCHW / NHWC 양 fmt 모두 dims[0] = N (batch). 불일치 시 즉시 fail (safety).
+		// (이전 io_num.n_input 비교 check 는 의미 부정확이라 제거됨.)
+		const unsigned int model_batch_dim = input_attrs[0].dims[0];
+		if( batch_size_ != model_batch_dim ){
+			MLOG_ERROR("Profile InferenceBatchSize[%u] != RKNN model batch dim[%u]. engine.profile.json 과 .rknn 모델 불일치.",
+				batch_size_, model_batch_dim );
+			return false;
+		}
+
 		if( rknn_outputs_ != nullptr ){
             delete[] rknn_outputs_;
 			rknn_outputs_ = nullptr;
         }
 
-        // set input memory
+        // set input memory — batch_size_ 만큼 input buffer alloc (single frame size * batch).
+        // batch=1 시 기존 동작 동일 (size = w*h*c * 1 = w*h*c). batch>1 시 N frame 누적 가능.
         for( size_t i = 0; i < rknn_app_ctx_.io_num.n_input; ++i )
         {
             rknn_input input;
@@ -509,7 +518,7 @@ namespace MGEN
             // set const value
             input.index        = i;
             input.type         = RKNN_TENSOR_UINT8;
-            input.size         = rknn_model_w * rknn_model_h * rknn_model_c;
+            input.size         = rknn_model_w * rknn_model_h * rknn_model_c * batch_size_;
             input.fmt          = rknn_app_ctx_.input_attrs[i].fmt;
             input.pass_through = 0;
 
@@ -590,10 +599,15 @@ namespace MGEN
             return false;
         }
 
-        // 다음 입력을 둘 인덱스 (모듈러로 batch buffer 영역 안 보장)
+        // batch buffer 안 frame 인덱스 (0 ~ batch_size_-1).
+        // multi-input 모델 (n_input>1) 은 본 코드 미지원 — input tensor 0 만 batch 처리.
         const size_t curr_batch_input_idx = current_batch_inputs_.size() % batch_size_;
-        if( curr_batch_input_idx >= rknn_inputs_.size() ){
-            MLOG_ERROR("Input memory buffer overflow! Idx=%zu, Size=%zu", curr_batch_input_idx, rknn_inputs_.size() );
+        if( curr_batch_input_idx >= batch_size_ ){
+            MLOG_ERROR("Batch input index overflow! Idx=%zu, BatchSize=%u", curr_batch_input_idx, batch_size_ );
+            return false;
+        }
+        if( rknn_inputs_.empty() ){
+            MLOG_ERROR("rknn_inputs_ not initialized.");
             return false;
         }
 
@@ -601,9 +615,16 @@ namespace MGEN
 
         bgrToRgbInPlace( input.image_data->data(), static_cast<int>(rknn_model_w), static_cast<int>(rknn_model_h) );
 
-        const rknn_input& target_rknn_input = rknn_inputs_[curr_batch_input_idx];
-        memset( target_rknn_input.buf, 0, target_rknn_input.size );
-        memcpy( target_rknn_input.buf, input.image_data->data(), target_rknn_input.size );
+        // batch buffer (rknn_inputs_[0].buf) 안 curr_batch_input_idx 번째 frame 위치에 복사.
+        // batch=1: idx=0, offset=0 → 기존 동작 동일.
+        // batch>1: 매 frame 별 offset 누적, 이전 frame data 보존 (memset 제거).
+        // !!! batch>1 검증 필요 (확장성만 확보됨, 실측 미실시) — 본 fix 는 input 측만 정합화.
+        // post-processing (output stride / batch 별 분리) 는 별도 검증 필요. 자세한 내용은 OPERATIONS.md §10.
+        const size_t frame_size = rknn_model_w * rknn_model_h * rknn_model_c;
+        const rknn_input& target_rknn_input = rknn_inputs_[0];
+        memcpy( static_cast<char*>(target_rknn_input.buf) + curr_batch_input_idx * frame_size,
+                input.image_data->data(),
+                frame_size );
 
         current_batch_inputs_.push_back( input );
         return current_batch_inputs_.size() >= batch_size_;
