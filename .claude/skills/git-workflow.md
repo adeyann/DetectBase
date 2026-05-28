@@ -46,6 +46,8 @@ This is the **procedural single-source-of-truth** for git operations in DetectBa
 
 Use kebab-case after the prefix. Keep names short but descriptive.
 
+**No version in branch names (2026-05-28 rule)** — never include cmake VERSION or cycle version in the branch name. Branch = work scope; version lives in `code/CMakeLists.txt`, git tags, and commit messages. Violations: `chore/v0.1.26-cycle`, `feature/0.2.0-multi-engine`. Use scope-only naming: `chore/cycle-cleanup`, `feature/multi-engine`, `fix/npu-batch-size`. Reason: once a cycle is merged/abandoned, a versioned branch name becomes stale info.
+
 **Sub-branch depth**: 2 recommended, 3~4 allowed if needed. Naming: `<parent-prefix>/<parent-name>-<sub-id>` (e.g., `feature/dfps-async-1`).
 
 ## Branch Flow (Git Flow variant)

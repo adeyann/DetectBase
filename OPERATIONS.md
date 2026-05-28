@@ -364,7 +364,29 @@ master 머지 시 검증 증빙은 `master_logs/v<버전>/` 에 보관 (git trac
 
 ---
 
-## §8. Prometheus alert rules 권장
+## §8. Alert escalation (참고 옵션, 미적용)
+
+현재 `monitor.sh` 의 alert mark (`★storm` / `★err` / `★dfps_low` / `★memory` / `★watchdog` / `★ftc` / `★cam_loss`) 는 **JSONL + stdout 만**. 외부 알림 채널 송신 X. 운영자가 직접 monitor 를 보거나 JSONL 을 tail 해야 인지함.
+
+본 프로젝트 현 운영 환경 (single-server / single-user / 보안 미중요 사이트) 에선 미적용. 운영팀 분산 / 24h 즉시 알림 필요 시 다음 두 가지 옵션 가능:
+
+**옵션 A — monitor.sh 안에 외부 알림 채널 직접 통합** (간단):
+- Slack webhook: `curl -X POST -d '{"text":"..."}' <webhook_url>`
+- Email: `sendmail` / `mailx`
+- Telegram bot: `curl https://api.telegram.org/bot<token>/sendMessage`
+- 일반 webhook: `curl -X POST <ops-endpoint>`
+- alert mark detection 시 위 명령 호출 한 줄 추가
+
+**옵션 B — Prometheus alertmanager 활용** (확장성, §8 권장 yaml 참조):
+- 별도 Prometheus + alertmanager 설치 필요
+- `detectbase_*` 메트릭 기반 rule 작성 (예: 아래 §8 권장 yaml)
+- 외부 알림 채널 라우팅은 alertmanager 설정
+
+본 환경 비적용. 필요해지면 추가 작업.
+
+---
+
+## §8.1 Prometheus alert rules 권장
 
 ```yaml
 # alerts.yml (Prometheus alertmanager 용 예시)
