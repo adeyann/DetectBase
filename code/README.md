@@ -121,14 +121,28 @@ GRPC 활성화 / 운영 정책은 [상위 README §"GRPC 통신"](../README.md) 
 | graceful shutdown | 10초, PROGRAM QUIT SUCCESS |
 | 운영 leak (RSS/FD/Thread) | 0건 (10h sanity baseline: RSS plateau ±20MB, FD/Threads stable) |
 
-### v0.1.13 ~ v0.1.18 변경 (5/26)
+### v0.1.13 ~ v0.1.18 변경 (5/26 ~ 5/27, last released master tag)
 - v0.1.13: per-cam stage FPS counter (0.1.12) revert — global mutex hot path 회귀
 - v0.1.14: MPP + Option A 완전 폐기 — Full reset 복귀 (5/24 baseline)
 - v0.1.15: REST `get_json_from_resp_body` silent catch → MLOG_WARN 추가 (운영 가시화)
 - v0.1.16: `Main.cpp` argv guard + `flock(2)` single-instance lock — PID 4924 사고 재발 방지 (Main.cpp 가 argv 무수신이라 `--version` 같은 호출이 풀 서비스 spawn → NPU 양분 → DFPS 50% 하락). 부수: monitor.sh 에 threshold alert 7 종 (storm/err/dfps_low/memory/wd/ftc/cam_loss) + boot ramp warmup grace 4 cycle.
+- v0.1.17: git workflow 정책 갱신 + pre-push docs check 절대 규칙 + memory 영어화 — code/cmake bump 분리 (push 후 별도 commit), 머지 시 사용자 버전 확인, post-merge placeholder bump, 모든 commit push 시 docs 전수 점검. AI-only memory 디렉토리 영어 단일 언어화.
 - v0.1.18: `GstRtspReceiver::TeardownPipeline` 의 `gst_object_unref(pipeline_)` 가 GStreamer 내부 thread join 에서 unbounded block 하던 결함 fix. cam 661 의 42분 cam_loss 의 root cause 였음 (backup log 10:09:33 ResetSourceOnly[661] 진입 후 영원히 return 안 함). `gst_element_get_state` timeout 시 unref 건너뛰고 의도된 leak. **5/26 22:00 ~ 5/27 09:06 누적 11.3h 후속 모니터 wd=1 (boot only) / cam_loss=0** (pre-fix 50min wd=6/cam_loss 영구). 단 fix path 미발화 — 다음 자연 stuck 시 실효성 동적 검증 가능.
 
 이 변경들 모두 5/27 audit 으로 검증 — 자체 코드 회귀 0건 (cppcheck 59 동일, clang-tidy 0, ASan/TSan 자체 코드 leak/race 0). 산출물: `master_logs/v0.1.18/audit_20260527_091456/`.
+
+### v0.1.19 ~ v0.1.27 변경 (5/27 ~ 5/28, develop 진행)
+- v0.1.19: docs/small-commit branch 정책 정정 — PR 생성 X / 머지 시도 X (PR #29 사고 후). DEBUG VIRTUAL LINES toggle (`ServerSetting.debug_virtual_lines_enabled`) — 이전 `_REMOVABLE` 접미사 방식 폐기.
+- v0.1.20: CameraCluster_DETECTOR (MVAS API JSON camera ID set parser) 를 SettingManager 에 흡수 — 1-use 클래스 폐기, DeviceCluster 인라인화.
+- v0.1.21: SafeQueue race deep review (`.DOCS/SAFEQUEUE_RACE_REVIEW_20260527.md`) — 자체 코드 race 0건 재확정, TSan 잔여 WARNING 의 false positive 분류.
+- v0.1.22: SafeQueue MO-1 (notify_one out-of-lock) — `enqueue_copy/move` 의 `notify_one()` 을 `lock_guard` 밖으로 이동.
+- v0.1.23: SafeQueue MO-1 확장 — `terminate()` 의 `notify_all()` 도 `lock_guard` 밖으로 이동.
+- v0.1.24: CLOSE-WAIT defensive close — TeardownPipeline 의 socket cleanup 정책 정착.
+- v0.1.25: GstRtspReceiver / ProxyServer 가 각자 dedicated `GMainContext` 보유 — bus watch / jitter timer 가 instance 자체 `ctx_` 에 attach, multi-cam coupling 해소.
+- v0.1.26: **GMainContext UAF fix** — `g_source_remove(guint)` 가 default global context 만 검색하던 결함 → `g_source_destroy(GSource*) + g_source_unref()` 패턴으로 변경. `guint id` → `GSource* source` 멤버 변환. **5/28 light audit (ASan 1h + TSan 1h) 검증 통과**: ASan leak 분포 baseline 동등 (1.22 MB / 10,639 alloc), **TSan SEGV 0** ✅ (직전 audit 의 `OnJitterStatsTimer` UAF 결정적 fix 확인) + WARNING 158 (baseline 172, 자체 race 0 유지). 부수: detectbase.sh audit `--light` / `--strict` 강도 모드 도입 (light 1h 30min / strict 5h master merge gate).
+- v0.1.27: **NPU batch_size 확장성 fix** — `YoloV5_Torch_Onnx_RKNN_NPU.cpp` 의 batch>1 진입 시 깨지는 input 측 막힘 패턴 3건 정정 — (a) batch dim check 의미 정정 (`input_attrs[0].dims[0]` 비교, 이전 `io_num.n_input` 비교는 의미 부정확), (b) input buffer size `* batch_size_`, (c) Preprocess memcpy `curr_batch_input_idx * frame_size` offset + 매 frame memset 제거 (이전 frame 보존). batch=1 운영 영향 0. batch>1 진입 시 추가 검증 필요 (.rknn 재변환 / post-processing / NPU throughput 실측 — [OPERATIONS §10](../OPERATIONS.md)). 부수: branch naming rule (version 금지), monitor alert escalation 참고 옵션 노트.
+
+v1.0.0 진입 직전 — 자체 코드 회귀 0건 + UAF / GMainContext / SafeQueue race 결정적 fix 완료 + 확장성 (batch>1 input 측) 확보. 남은 항목 = 모니터링 / audit / 머지 절차 (실질 작업 0).
 
 자세한 내용:
 - [.DOCS/REVIEW3/SUMMARY.md](../.DOCS/REVIEW3/SUMMARY.md) (3차 review baseline, 레거시)

@@ -1,8 +1,8 @@
 # NEXT_SESSION
 
-**최종 갱신**: 2026-05-28 16:00 KST
-**현 develop HEAD**: cmake VERSION = `0.1.26` (`df5ff9c`, v0.1.18 master tag 후 +8 patch). last master tag = `v0.1.18` (2026-05-27).
-**작업 중 branch**: `fix/npu-batch-size` (NPU batch 확장성 fix, cmake 0.1.26 → 0.1.27). 5/28 새 branch naming rule 적용 (version-free 명).
+**최종 갱신**: 2026-05-28 16:15 KST
+**현 develop HEAD**: cmake VERSION = `0.1.26` (`df5ff9c`, v0.1.18 master tag 후 +8 patch). last master tag = `v0.1.18` (2026-05-27). **0.1.27 develop 머지 직전** — `fix/npu-batch-size` (HEAD `7591105`) 가 사용자 명시 허가 받아 곧 머지 예정.
+**작업 중 branch**: `fix/npu-batch-size` (NPU batch 확장성 fix, cmake 0.1.27). 5/28 새 branch naming rule 적용 (version-free 명).
 
 ## 🚨 현 상태 — v0.1.26 develop 머지 + 새 binary 운영 + NPU 확장성 fix 진행
 
@@ -156,7 +156,7 @@ Debug 빌드 (`-DCMAKE_BUILD_TYPE=Debug` 또는 audit 5종) 에서만 활성. Re
 
 | 문서 | 내용 |
 |------|------|
-| [README.md](../README.md) | 프로젝트 전체 (Version 0.1.26) |
+| [README.md](../README.md) | 프로젝트 전체 (Version 0.1.27) |
 | [CLAUDE.md](../CLAUDE.md) | 코딩 표준 + git workflow 정책 (source of truth) |
 | [OPERATIONS.md](../OPERATIONS.md) | 운영 트러블슈팅 |
 | [.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](../.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md) | v2.0.0 Search engine 도입 가이드 |
