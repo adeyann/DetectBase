@@ -147,6 +147,29 @@ Master merge verification artifacts must be archived in develop tree before mast
 - monitoring run: **patch/minor = 3h+** stable trend (DFPS / RSS / FD / Threads / wd) / **major = 10h+ aging + 10h+ stress** (max cam / max load, DFPS dip distribution, wd frequency)
 - Explicit user approval — AI never concludes "verification done, let's merge"; waits for the user.
 
+## Branch Cleanup After Merge (2026-05-28 추가)
+
+### PR-based merge (recommended) — auto-cleanup
+GitHub repo setting "Automatically delete head branches" is enabled. `gh pr merge --merge --delete-branch` triggers it automatically — no manual cleanup needed for the remote source branch.
+
+### Local merge (no PR) — manual cleanup required, AI cannot execute
+After `git merge` of a source branch into its parent (e.g., sub-branch → parent work branch):
+1. AI **must** print a cleanup-hint line immediately after the merge commit:
+   > 정리 가능: `git push origin --delete <source-branch>` (사용자 실행 필요, AI 는 deny)
+2. User executes the delete command.
+3. AI follows with `git fetch --prune` (read-only allowed) to clean local stale tracking refs.
+
+**Why this rule exists** — 2026-05-28 incident: 4 derivative branches (`refactor/devicecluster-inline`, `chore/safequeue-race-review`, `refactor/safequeue-notify-out-of-lock`, `refactor/safequeue-terminate-notify-out`) accumulated on origin because each was local-merged into its parent and pushed without PR → GitHub auto-delete never fired → AI had no permission to clean up → silent residue.
+
+**Pattern preference** — when a derivative branch is needed at all, prefer PR-based merge (even into a non-default base like another work branch) so auto-delete fires. Skip the derivative branch entirely when work fits directly on the parent (CLAUDE.md A3 minimize-branch-proliferation).
+
+### Remote state verification (avoid stale tracking refs)
+Before classifying remote branch state:
+- **Preferred**: `git ls-remote origin | grep refs/heads/` (live query, no local cache)
+- **Or**: `git fetch --prune` first, then `git branch -r`
+- **AVOID**: `git branch -a` standalone — shows stale `remotes/origin/<name>` for branches that were auto-deleted on remote.
+  - Incident 2026-05-28: AI saw `remotes/origin/cleanup/debug-virtual-lines` + `remotes/origin/docs/next-session-cleanup` and reported them as "live remote branches needing cleanup." Actual: both were GitHub-auto-deleted weeks earlier when PR #28/#29 merged. Only local stale tracking refs remained. `git fetch --prune` silently removed them.
+
 ## Master Merge Execution (user-instructed)
 
 When the user explicitly says to merge a PR, use this default:
@@ -219,7 +242,7 @@ Do NOT add any Claude/Claude Code footer or `Co-Authored-By` trailer to commits 
 |---|---|
 | Master merge timing | **Always wait for explicit user instruction.** PR creation is fine, merge is not. |
 | Force push / history rewrite | Never. Stop and ask if it seems needed. |
-| Deleting a remote branch | Ask first (`gh api -X DELETE` or `git push origin --delete`). |
+| Deleting a remote branch | AI cannot — `git push * --delete*` is denied. For PR sources: use `gh pr merge --delete-branch` (auto-cleanup). For local-merge sources: print the cleanup-hint, user executes manually. |
 | Resolving merge conflicts that change behavior | Show the conflict + your proposed resolution, then ask. |
 | Unfamiliar branch state (e.g., uncommitted user changes on master) | Investigate, don't overwrite. |
 
@@ -227,6 +250,7 @@ Do NOT add any Claude/Claude Code footer or `Co-Authored-By` trailer to commits 
 
 - Branch create / checkout / list / delete (local, using `git branch -d` safe-delete only)
 - `git status` / `log` / `diff` / `show` (read-only)
+- `git fetch --prune` / `git ls-remote origin` — read-only remote-state inspection (recommended over `git branch -a` for live-state checks)
 - `git add` / `commit` / `push` on **your own (non-develop, non-master) branch**
 - `git merge` / `rebase` between **non-develop, non-master branches** only (e.g., feature/a ← feature/a-1). **Never** `git merge` directly into `develop` or `master` — always via PR.
 - `gh pr create` for **feature/fix branches only** (creating a PR does not merge). **docs / small-commit branches: PR create 도 X — 사용자 명시 후에만.**
