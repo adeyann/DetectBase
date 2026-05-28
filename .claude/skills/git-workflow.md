@@ -1,9 +1,11 @@
 ---
 name: git-workflow
-description: Must read before any git/gh operation. Defines AI's allowed git usage in this project — branch-only work, PR-for-master, commit message style, and forbidden destructive operations. Triggered on all git/gh tasks including commit, push, branch, merge, rebase, PR creation.
+description: Must read before any git/gh operation. Procedural reference (SSOT) — branch flow, naming, commit/push, merge style, bump procedure, cleanup. Triggered on all git/gh tasks including commit, push, branch, merge, rebase, PR creation.
 ---
 
 # Git Workflow for AI
+
+This is the **procedural single-source-of-truth** for git operations in DetectBase. Project rules (canonical) live in CLAUDE.md Part B §Work Rules / §Master merge gate / §master_logs 보관 절차. Personal user signals and incident history live in the `feedback-git-workflow` memory. Permission allow/deny is in `.claude/settings.json`.
 
 ## First Principle — Never touch master directly; develop is the integration gate
 **AI must never commit, push, or merge directly on `master`. AI also does not commit directly to `develop` — develop merges happen via PR from a dedicated branch.**
@@ -159,16 +161,17 @@ After `git merge` of a source branch into its parent (e.g., sub-branch → paren
 2. User executes the delete command.
 3. AI follows with `git fetch --prune` (read-only allowed) to clean local stale tracking refs.
 
-**Why this rule exists** — 2026-05-28 incident: 4 derivative branches (`refactor/devicecluster-inline`, `chore/safequeue-race-review`, `refactor/safequeue-notify-out-of-lock`, `refactor/safequeue-terminate-notify-out`) accumulated on origin because each was local-merged into its parent and pushed without PR → GitHub auto-delete never fired → AI had no permission to clean up → silent residue.
-
 **Pattern preference** — when a derivative branch is needed at all, prefer PR-based merge (even into a non-default base like another work branch) so auto-delete fires. Skip the derivative branch entirely when work fits directly on the parent (CLAUDE.md A3 minimize-branch-proliferation).
+
+Incident history (chain accumulation 2026-05-28, etc.) → see `feedback-git-workflow` memory.
 
 ### Remote state verification (avoid stale tracking refs)
 Before classifying remote branch state:
 - **Preferred**: `git ls-remote origin | grep refs/heads/` (live query, no local cache)
 - **Or**: `git fetch --prune` first, then `git branch -r`
 - **AVOID**: `git branch -a` standalone — shows stale `remotes/origin/<name>` for branches that were auto-deleted on remote.
-  - Incident 2026-05-28: AI saw `remotes/origin/cleanup/debug-virtual-lines` + `remotes/origin/docs/next-session-cleanup` and reported them as "live remote branches needing cleanup." Actual: both were GitHub-auto-deleted weeks earlier when PR #28/#29 merged. Only local stale tracking refs remained. `git fetch --prune` silently removed them.
+
+Incident history (stale tracking ref misclassification 2026-05-28, etc.) → see `feedback-git-workflow` memory.
 
 ## Master Merge Execution (user-instructed)
 
