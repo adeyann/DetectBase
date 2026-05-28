@@ -1,26 +1,23 @@
 # NEXT_SESSION
 
-**최종 갱신**: 2026-05-28 KST
-**현 develop HEAD**: cmake VERSION = `0.1.23` (이번 머지 후 `0.1.26`). last master tag = `v0.1.18` (2026-05-27).
-**작업 중 branch**: `chore/v0.1.26-cycle` (develop 미머지, HEAD `b009fb0`) — 18 commit 누적. 사용자 명시 허가 받은 후 develop 머지 예정.
+**최종 갱신**: 2026-05-28 15:30 KST
+**현 develop HEAD**: cmake VERSION = `0.1.26` (`66a9784` merge commit, v0.1.18 master tag 후 +8 patch). last master tag = `v0.1.18` (2026-05-27).
+**작업 중 branch**: `docs/v0.1.26-operations-update` (OPERATIONS.md + NEXT_SESSION 갱신 docs-only branch). 0.1.26 cycle 본 작업은 PR #30 으로 develop 머지 완료.
 
-## 🚨 진행 중 작업 (compact-safe 진입점)
+## 🚨 현 상태 — v0.1.26 머지 완료, 새 binary 운영 + 모니터 관찰 중
 
-**[5/28] v0.1.26 cycle — UAF fix 검증 완료, develop 머지 직전**:
+**[5/28] v0.1.26 cycle 종료 + runtime 검증 단계**:
 
-이 사이클의 핵심 사건:
-- **5/27 audit 에서 TSan SEGV 발견** — `OnJitterStatsTimer` (GstRtspReceiver.cpp:287) 의 `g_object_get(jitterbuffer_, ...)` UAF on freed object. baseline (master_logs/v0.1.18/audit_20260527_091456) 와 비교 시 진짜 회귀 = SEGV 1건만 (자체 코드 race 동일, line shift 만).
-- **Root cause**: 0f9ae2c (GMainContext per-instance ctx_) 변경 후 `g_source_remove(id)` 가 default global context 에서만 source 찾음 → `ctx_` 안 source 못 찾음 → timer 가 pipeline destroy 후에도 active → freed `jitterbuffer_` access → SEGV. `bus_watch_id_` 도 동일 결함.
-- **Fix (4172ac8)**: `guint id` → `GSource* source` 멤버 변환 + `g_source_destroy(source) + g_source_unref(source)` (context 무관, source 자체 작용). GMainContext per-instance 격리 의도 그대로 유지.
-- **검증 결과 (5/28 light audit)**:
-  - **ASan/UBSan 1h**: leak 1.22 MB / 10,639 alloc — baseline (4h strict) 1.24 MB / 11,515 alloc 대비 거의 동일 (startup+cycle dominated, 시간 비례 X). 자체 코드 leak 0건 유지. 회귀 0.
-  - **TSan 1h**: WARNING 158 (baseline 172, -8%), **SEGV 0** ✅ — UAF fix 결정적 검증.
-- **branch rename**: `docs/develop-merge-policy-update` → `chore/v0.1.26-cycle` (5/28). 작업 mix 가 docs 가 아닌 fix+refactor+perf+chore 였기 때문 + 정책 자동 발동 misleading 방지.
-
-**머지 직전 점검**:
-- cmake 0.1.26 + README/code/README/NEXT_SESSION 동기 commit 포함 (cmake bump README sync 절대 규칙)
-- 18 commit 모두 push 완료
-- 사용자 명시 허가 필요 (5/27 PR #29 사고 후 default → explicit-approval 전환)
+핵심 사건 요약:
+- **5/27 audit 에서 TSan SEGV 발견** — `OnJitterStatsTimer` (GstRtspReceiver.cpp) 의 freed `jitterbuffer_` UAF. Root cause: `g_source_remove(guint)` 가 default global context 만 검색 → per-instance `ctx_` 안 source 못 찾아 timer 가 pipeline destroy 후에도 active.
+- **Fix (4172ac8)**: `guint id` → `GSource* source` 멤버 변환 + `g_source_destroy(GSource*) + g_source_unref()`. context 무관, source 자체 작용. GMainContext per-instance 격리 의도 그대로 유지.
+- **5/28 light audit 검증 통과**:
+  - ASan/UBSan 1h: leak 1.22 MB / 10,639 alloc (baseline 4h strict 1.24 MB / 11,515 alloc 동등 — startup+cycle dominated). 자체 leak 0.
+  - TSan 1h: WARNING 158 (baseline 172, -8%), **SEGV 0 ✅** UAF fix 결정적 검증.
+- **branch rename**: `docs/develop-merge-policy-update` → `chore/v0.1.26-cycle` (작업 mix 가 fix+refactor+perf+chore 라 docs/ prefix 부적합 + 정책 자동 발동 misleading 방지).
+- **PR #30 → develop merge (66a9784, --merge --delete-branch, 5/28 14:54 KST)** — 사용자 명시 허가 후 진행. 19 commit 흡수, no-ff merge commit.
+- **rebuild + restart (5/28 15:00~15:01)** — `./detectbase.sh compile` (2m 38s) → 새 binary 빌드 (UAF fix commit 4172ac8 포함 확정) → `./detectbase.sh restart` (detectbase_service Started 15:01:26).
+- **runtime monitor 가동** — `logs/monitor.sh v0.1.26_uaf_fix_runtime` (PID 1656787, 15:04 KST 시작). 최소 3시간 관찰 (~18:04 KST). 새 binary 의 운영 안정성 확인.
 
 ---
 
@@ -43,7 +40,7 @@
 #### 1. monitor.sh threshold tuning
 - 현 기본값: `ALERT_DFPS_LOW_THRESHOLD=100`, `ALERT_DFPS_LOW_STREAK=2`, `ALERT_RSS_MB_THRESHOLD=1100`, `ALERT_WARN_DELTA_PER_CYCLE=500`, `ALERT_WARMUP_CYCLES=4`
 - 운영 1-2주 데이터 누적 후 false-positive 분포 확인 → 재검토
-- 5/28 현재 monitor `v0.1.26_uaf_fix_postaudit` label 가동 중
+- 5/28 현재 monitor `v0.1.26_uaf_fix_runtime` label 가동 중 (PID 1656787, 15:04~). 이전 `_postaudit` 은 rebuild 전 binary 추적이라 stop, runtime label 이 새 binary (UAF fix 적용) 기준 추적
 
 #### 2. cam_loss fix path 실효성 검증
 - v0.1.18 TeardownPipeline unref-skip 패치 ([GstRtspReceiver.cpp](../code/Protocol/RTSP_GST/src/GstRtspReceiver.cpp)) 가 사후조치 (defensive workaround)
