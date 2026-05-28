@@ -191,8 +191,10 @@ while true; do
 
     LOG_TAIL=$(tail -5000 "$LOG_PATH" 2>/dev/null)
 
-    # § SAMPLE — log: 최신 DFPS / resident / jem
-    DFPS=$(echo "$LOG_TAIL" | grep -oE 'TotalDFPS:[[:space:]]+[0-9.]+' | tail -1 | grep -oE '[0-9.]+$')
+    # § SAMPLE — DFPS (metric 기반, 5/28 fix) / resident / jem (log 기반)
+    # 이전: log 의 'TotalDFPS:' grep — DEBUG_MODE compile-out (v0.1.20+) 후 emit 안 되어 DFPS=0 결함.
+    # 변경: metric endpoint 직접 curl. metric `detectbase_dfps_total` 은 Release/Debug 모두 always-on.
+    DFPS=$(curl -s --max-time 2 "$METRICS_URL" 2>/dev/null | awk '/^detectbase_dfps_total / {printf "%.1f", $NF; exit}')
     RES_KB=$(echo "$LOG_TAIL" | grep -oE 'resident=[0-9]+KB' | tail -1 | grep -oE '[0-9]+')
     RES_MB=$(( ${RES_KB:-0} / 1024 ))
     JEM_KB=$(echo "$LOG_TAIL" | grep -oE 'jem_alloc=[0-9]+KB' | tail -1 | grep -oE '[0-9]+')

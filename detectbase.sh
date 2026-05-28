@@ -46,14 +46,25 @@ cmd_build() {
 }
 
 cmd_compile() {
-    log_info "컨테이너 내 C++ 컴파일 시작 (BuildScript.sh)..."
+    # 빌드 타입 (2026-05-28 정책 변경):
+    #   - default = Debug (AI 가 사용. 진단 capability 우선 — DEBUG_MODE 활성, 모든 log/metric emit)
+    #   - Release = 사용자 명시 시만 (`--release` flag 또는 `CMAKE_BUILD_TYPE=Release` env var)
+    #   - AI 는 Release 빌드 금지. 사용자만 Release 빌드 가능.
+    local build_type="${CMAKE_BUILD_TYPE:-Debug}"
+    if [[ "$1" == "--debug" ]]; then
+        build_type="Debug"
+    elif [[ "$1" == "--release" ]]; then
+        build_type="Release"
+    fi
+    log_info "컨테이너 내 C++ 컴파일 시작 (BuildScript.sh, ${build_type})..."
     docker run --rm \
         -v "${SCRIPT_PATH}":/DetectBase \
         --device /dev/dri/renderD129:/dev/dri/renderD129 \
         -v /usr/lib/librknnrt.so:/usr/lib/librknnrt.so:ro \
+        -e CMAKE_BUILD_TYPE="${build_type}" \
         "${IMAGE_NAME}" \
         bash /DetectBase/code/.tool/BuildScript.sh
-    log_done "C++ 컴파일 완료."
+    log_done "C++ 컴파일 완료 (${build_type})."
 }
 
 cmd_init() {
@@ -510,7 +521,10 @@ DetectBase 서비스 통합 관리 스크립트
 명령:
   build     Docker 이미지 빌드 (docker-compose build) + init 자동 실행
   init      proto 재생성 + 의존성 점검 (build 후 자동, 또는 proto 수정 시 수동)
-  compile   컨테이너 내 C++ 소스 컴파일 (BuildScript.sh)
+  compile   컨테이너 내 C++ 소스 컴파일 (BuildScript.sh). default = Debug (2026-05-28).
+            --debug                  Debug 빌드 (default, AI 가 사용. DEBUG_MODE 활성)
+            --release                Release 빌드 (사용자 전용. AI 사용 금지)
+            env override: CMAKE_BUILD_TYPE=Release
   start     서비스 시작 (로그 백업 + docker-compose up -d + tail)
   stop      서비스 정상 종료 (graceful shutdown + docker-compose down)
   restart   정지 후 재시작
@@ -556,7 +570,7 @@ EOF
 case "$1" in
     build)    cmd_build ;;
     init)     cmd_init ;;
-    compile)  cmd_compile ;;
+    compile)  cmd_compile "$2" ;;
     start)    cmd_start ;;
     stop)     cmd_stop ;;
     restart)  cmd_restart ;;

@@ -99,7 +99,7 @@ fi
 log_header "Step 3: Configure CMake"
 
 CMAKE_OPTIONS=(
-    "-DCMAKE_BUILD_TYPE=Release"
+    "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE:-Release}"
     "-DCMAKE_INSTALL_PREFIX=${INSTALL_PATH}"
     "-S" "${SOURCE_CODE_COPY_PATH}"
     "-B" "${BUILD_OUTPUT_PATH}"

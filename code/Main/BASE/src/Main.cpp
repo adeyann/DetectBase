@@ -148,18 +148,16 @@ int main( int argc, char* argv[] )
 
 void InitLogger( void )
 {
+	// 빌드 type 무관 File logger 사용 — monitor.sh 의 file 기반 grep (reset/wd/eos/err/warn 등)
+	// 추적 capability 가 운영 + 진단 모두에 필수. 이전 Debug → Console logger 분기는 file 로그 0 bytes
+	// 결함 (2026-05-28 진단 중 발견 — InferenceCounter [DFPS] / DBG_PROF / event_detected 모두 file 에 미보존).
 	LoggerConfig conf {};
-	if( std::string{ PROGRAM_BUILD_TYPE } == std::string { "Release" } ) {
-		MGEN::initLogger(
-			conf.setLogType( MGEN::LogType::File )
-				.setLogSaveFile( std::string { APPLICATION_LOG_PATH } )
-				.setReOpenIntervals( 60/*S*/ * 60/*M*/ * 24/*H*/ * 28/*Day*/ )
-		);
-		std::cout << "LOG SAVE PATH : " << APPLICATION_LOG_PATH << std::endl;
-	}
-	else {
-		MGEN::initLogger( conf.setLogType( MGEN::LogType::Console ).setPrefixUseColor( MGEN::LogPrefix::OnColor ) );
-	}
+	MGEN::initLogger(
+		conf.setLogType( MGEN::LogType::File )
+			.setLogSaveFile( std::string { APPLICATION_LOG_PATH } )
+			.setReOpenIntervals( 60/*S*/ * 60/*M*/ * 24/*H*/ * 28/*Day*/ )
+	);
+	std::cout << "LOG SAVE PATH : " << APPLICATION_LOG_PATH << " (build=" << PROGRAM_BUILD_TYPE << ")" << std::endl;
 }
 
 // SIGINT 핸들러를 등록하는 헬퍼 (sigaction 사용으로 동작 일관성 보장)
