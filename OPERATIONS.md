@@ -440,7 +440,59 @@ groups:
 
 ---
 
-## §9. 운영 체크리스트
+## §10. NPU batch_size 변경 (확장성, 미검증)
+
+### 현 상태 (v0.1.27, 2026-05-28)
+
+- 운영 default: `batch_size = 1` (`engines/engine.profile.json` 의 `InferenceBatchSize: 1` + 현 `.rknn` 모델 batch=1)
+- 4 cam 환경에선 NPU 천장 (~140 fps) 에 미달하는 카메라 천장 (4 cam × 29.13 = 116.5 fps) 이라 batch=1 충분.
+- **6+ cam scale-up 시점에 NPU 천장 도달 가능성** — 그때 batch>1 으로 throughput 향상 검토.
+
+### v0.1.27 fix — 확장성 확보 (input 측만)
+
+이전 `code/Engine/NPU/YoloV5_Torch_Onnx_RKNN_NPU/YoloV5_Torch_Onnx_RKNN_NPU.cpp` 의 batch 처리 막힘 패턴 3건 정정:
+- check 비교 의미 정정 — `batch_size_` vs RKNN 모델의 batch dim (`input_attrs[0].dims[0]`). 이전엔 `io_num.n_input` 과 잘못 비교.
+- input buffer size — `w * h * c * batch_size_` (batch 전체 buffer).
+- Preprocess memcpy — batch buffer 안 `curr_batch_input_idx * frame_size` offset 적용. 매 frame memset 제거 (이전 frame 보존).
+
+**batch=1 운영 영향 = 0**. batch>1 진입 시 input 측 막힘 해소.
+
+### batch>1 진입 절차 (운영자 작업)
+
+1. **(사용자 PC) `.rknn` 모델 재변환** — rknn-toolkit2 로 ONNX → RKNN 변환 시 batch=N 지정:
+   ```python
+   # rknn-toolkit2 변환 예
+   rknn.load_onnx(model='yolov5s.onnx', input_size_list=[[N, 3, 640, 640]])
+   ```
+   결과: `yolov5s_airockchip_batch<N>.rknn`
+2. **engines/ 에 새 .rknn 배치**: `engines/yolov5s_airockchip_batch<N>.rknn`
+3. **`engines/engine.profile.json`** 의 `InferenceBatchSize` → N
+4. **`settings/EngineSettings.json`** 의 `EngineFilePath` → 새 `.rknn` 경로
+5. **restart**: `./detectbase.sh restart`
+6. **init log 확인**: `Profile InferenceBatchSize[N] != RKNN model batch dim[M]` ERROR 안 나오면 정합 OK.
+
+### batch>1 시 검증 필요 항목 (v0.1.27 미실시)
+
+본 v0.1.27 fix 는 **input 측만 정합화** — 다음 검증은 batch>1 진입 시점에 추가 작업 필요:
+
+| 항목 | 검증 방법 |
+|---|---|
+| **post-processing (output 측 batch 처리)** | output tensor 가 batch 별로 어떻게 분리되어 나오는지 (stride / dim layout). YOLOv5 post-process 코드의 batch loop 작동 확인. |
+| **NPU throughput 실측** | batch=1 vs batch=N 의 inference time 비교. batch>1 가 throughput 향상 되는지 검증 (RK3588 NPU 의 batch 효율은 모델 의존). |
+| **latency 영향** | batch 누적 대기 → 첫 frame 의 inference latency 증가. cam supply rate (~29 fps) 와 batch size 의 trade-off. |
+| **메모리 사용량** | batch buffer 확장으로 RSS 증가. 운영 가능 범위 안인지. |
+| **multi-input 모델 호환성** | 현 fix 는 input tensor 0 (단일 input) 만 batch 처리. n_input>1 모델 (예: detection + classification combined) 은 별도 작업 필요. |
+| **NPU error 패턴** | batch>1 시 RKNN runtime 의 새 error case (예: batch dim mismatch in output) 발화 가능성. |
+
+### 권장 순서
+1. v0.1.27 fix 코드 path 가 batch=1 운영에 영향 0 (감안한 baseline 확인). audit 5종 통과 + 운영 안정 추세.
+2. batch=2 로 작은 step 부터 검증 시작 (batch=4/8 직접 진입 X).
+3. 위 6가지 검증 항목 모두 통과 후 운영 적용.
+4. `master_logs/v<버전>/` baseline 갱신.
+
+---
+
+## §11. 운영 체크리스트
 
 ### 일간
 - [ ] DFPS 정상 (카메라 수 × ~29 이상, 4cam → ≥115 권장)
