@@ -71,7 +71,13 @@ Pipeline: RTSP input → YOLOv5 NPU inference → SORT tracking → boundary int
 - **Never silently restart the service to make a symptom disappear.** Service restart is an explicit diagnostic action only; state the intent ("재시작해 X 를 확인/적용한다") in the response. Using restart to obscure a problem is forbidden.
 - `sed` is on the deny list — use awk/cut/tr for reads; provide complete files for edits.
 - No `rm`/`unlink`/`rmdir`. Move with intent: trash → `.deleted/`, rollback/reusable snapshot → `.backup/`. Real `rm` by user only.
-- **Git workflow** — AI may use git/gh but **never commits directly to `master` or `develop`**. All work happens on dedicated branches (feature/fix/chore/...) forked from develop; both develop merge and master merge go via PR (`gh pr create` + `gh pr merge`). Master merge runs only on explicit user instruction. Force push / `reset --hard` / `git branch -D` (force) denied — use `git branch -d` (safe) for cleanup. Co-Authored-By trailer prohibited. **Minimize branch proliferation — create only the branches the task needs (instance of A3).** Full details: `.claude/skills/git-workflow.md` + `feedback-git-workflow` memory (single source of truth for branch naming / sub-branch depth / Master merge gate verification table).
+- **Git workflow** — AI may use git/gh but **never commits directly to `master` or `develop`**. All work happens on dedicated branches (feature/fix/chore/...) forked from develop; both develop merge and master merge go via PR (`gh pr create` + `gh pr merge`).
+  - **(우선 규칙, 5/27 신규) 문서작업 / 간단한 commit 브랜치는 `gh pr create` 도 X, `gh pr merge` 도 X.** Scope: docs-only (README / NEXT_SESSION / .md / comments), typo fix, version reference sync, minor cleanup, 한두 줄 변경 등. **AI 는 branch 작업 + commit + push 까지만**. PR 생성 / 머지 시도 자체 금지. 사용자에게 작업 결과 보고 후 의견 받기 — 사용자가 "PR 만들어라" / "머지해라" 명시 후에만 그 단계 진행. 배경: PR #29 사고 (사용자 "쓸데없이 디밸롭에 머지" 거부 + "pr생성도 하지마라. 머지 시도 자체를 하지마라").
+  - **(default)** 그 외 feature/fix/refactor/perf 브랜치의 develop 머지는 self-verify (build + sanity) 후 자율 (`gh pr create` + `gh pr merge`). 단 사용자 시점별 "쓸데없이 머지하지 마라" 같은 시그널 시 default 도 즉시 명시 허가 필수로 전환.
+  - **Master merge 는 항상 명시 허가 필수.** (변경 X)
+  - Force push / `reset --hard` / `git branch -D` (force) denied — use `git branch -d` (safe) for cleanup. Co-Authored-By trailer prohibited. **Minimize branch proliferation — create only the branches the task needs (instance of A3).** Full details: `.claude/skills/git-workflow.md` + `feedback-git-workflow` memory.
+  - **Remote state verification (2026-05-28 신규)** — remote branch 상태 추론 시 `git ls-remote origin` 또는 `git fetch --prune` 우선 사용. `git branch -a` 단독은 local stale tracking ref 포함해 부정확. 사고 사례: 5/28 `origin/cleanup/debug-virtual-lines` / `origin/docs/next-session-cleanup` 를 live remote 로 오판 — 실제로는 PR #28/#29 머지 시 GitHub auto-delete 됐고 local 만 stale ref 남았음.
+  - **Post-merge source-branch cleanup (2026-05-28 신규)** — PR 머지: GitHub repo 의 "Automatically delete head branches" 옵션 활성화되어 `gh pr merge --merge --delete-branch` 가 source 자동 정리. Local `git merge` (PR 없이) 는 source 자동 정리 X (GitHub 입장에선 그냥 살아있는 branch). AI 는 `Bash(git push * --delete*)` deny → 정리 못 함. 패턴: local merge + push 직후 AI 가 한 줄 hint 출력 (`정리 가능: git push origin --delete <source>` — 사용자 직접 실행), 사용자 실행 후 AI 가 `git fetch --prune` 으로 local stale ref 정리. **가능하면 local merge 대신 PR 머지 사용 → auto-delete 발동**.
 - **Version-bump 절차 (5/27 정정 — 이전 "Post-merge placeholder bump" 와 "Pre-merge 정렬 단독 commit" 모두 폐기)** — bump 는 work branch 위에서, push 후 local 만, 다음 work commit 에 자연 흡수. **단독 bump-only commit/push 절대 금지.**
   1. **Topic-branch work**: 코드 편집. cmake VERSION 그대로 (branch fork 시점의 develop cmake 유지).
   2. **Push code commit**: 코드 변경 commit + push. cmake 안 건드림.
@@ -133,10 +139,15 @@ This gate is DetectBase's definition of "verified" (A4). Unit tests are not the 
 
 | bump 종류 | audit | 모니터링 | 사용자 허가 |
 |---|---|---|---|
-| **patch** (0.0.X) | 5종 모두 통과 | **3h+** 운영 안정 추세 | 명시 허가 필수 |
-| **minor** (0.X.0) | 5종 모두 통과 | **3h+** 운영 안정 추세 | 명시 허가 필수 |
-| **major** (X.0.0) | 5종 모두 통과 | **각 10h+** 에이징 (leak/FD/thread 장시간 추세) + **10h+** 스트레스 (max cam / max load 안정성, DFPS dip 분포, wd 빈도) | 명시 허가 필수 |
+| **patch** (0.0.X) | 5종 모두 통과 (**`--strict`** 강도) | **3h+** 운영 안정 추세 | 명시 허가 필수 |
+| **minor** (0.X.0) | 5종 모두 통과 (**`--strict`** 강도) | **3h+** 운영 안정 추세 | 명시 허가 필수 |
+| **major** (X.0.0) | 5종 모두 통과 (**`--strict`** 강도) | **각 10h+** 에이징 (leak/FD/thread 장시간 추세) + **10h+** 스트레스 (max cam / max load 안정성, DFPS dip 분포, wd 빈도) | 명시 허가 필수 |
 
+- **audit 강도 모드 (2026-05-28 도입)**:
+  - `./detectbase.sh audit` (no flag) = **light** default: ASan 60m + TSan 60m (~1h 30min). develop/내부/branch 검증용.
+  - `./detectbase.sh audit --strict` = ASan 240m + TSan 60m (~5h). **master merge gate 의 audit 5종 = strict 강도 필수** (위 표).
+  - `ASAN_DURATION_MIN` / `TSAN_DURATION_SEC` env var override 가능, 강도 모드 default 보다 우선.
+  - `master_logs/v<버전>/` baseline 산출물 = strict 강도 결과.
 - 운영 모니터링 = `logs/monitor.sh <label>` JSONL + DFPS / RSS / FD / threads / wd / reset / eos / disk / docker_cpu/mem 추세 점검
 - "사용자 명시 허가" 의 의미: 사용자가 직접 "master merge 진행해라" 또는 동등한 의사 표현. AI 가 검증 완료 후 "이제 머지하자" 라고 단정 X. 사용자 결정 기다림.
 - 검증 부족 시 master 가까이 가지 않음 — develop 에 그대로 두고 모니터링 시간 채우기.

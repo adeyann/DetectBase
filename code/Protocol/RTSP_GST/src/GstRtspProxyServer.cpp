@@ -12,6 +12,8 @@ namespace MGEN
     GstRtspProxyServer::GstRtspProxyServer( const Config& cfg ) noexcept
         : cfg_( cfg )
     {
+        // per-server dedicated GMainContext — Receiver 들과 격리 (2026-05-27).
+        ctx_ = g_main_context_new();
         MLOG_INFO( "GstRtspProxyServer 생성 — port=%s require_auth=%d",
             cfg_.bind_port.c_str(), (int) cfg_.require_auth );
     }
@@ -19,6 +21,10 @@ namespace MGEN
     GstRtspProxyServer::~GstRtspProxyServer()
     {
         Stop();
+        if( ctx_ ) {
+            g_main_context_unref( ctx_ );
+            ctx_ = nullptr;
+        }
     }
 
     bool GstRtspProxyServer::Start() noexcept
@@ -68,8 +74,9 @@ namespace MGEN
 
     void GstRtspProxyServer::MainLoopThreadFunc()
     {
-        loop_ = g_main_loop_new( nullptr, FALSE );
-        server_source_id_ = gst_rtsp_server_attach( server_, nullptr );
+        // dedicated ctx_ 위에서 loop 동작 + server attach 도 동일 context 에 (2026-05-27).
+        loop_ = g_main_loop_new( ctx_, FALSE );
+        server_source_id_ = gst_rtsp_server_attach( server_, ctx_ );
 
         // attach 완료 신호 — Start() 가 wait 중
         {

@@ -5,6 +5,8 @@ description: Must read before writing or modifying any code. Covers code style, 
 
 # Project Coding Guidelines
 
+Project-level rules (canonical) are in CLAUDE.md Part B §Coding Standard / §Naming Convention / §Prohibited / §Design Principles. This skill mirrors them and adds **procedural checklists** (pre-work, approval, pre-submit) that are unique to this file.
+
 ## First Principle — KISS (Keep It Simple, Stupid)
 Avoid unnecessary or excessive code. This is the absolute standard for all code work.
 

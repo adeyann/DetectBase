@@ -114,6 +114,8 @@ namespace MGEN
         GstRTSPToken*       admin_token_  = nullptr;
         GstRTSPToken*       user_token_   = nullptr;
         GMainLoop*          loop_         = nullptr;
+        // GMainContext (2026-05-27): per-server dedicated context — Receiver 들과 격리.
+        GMainContext*       ctx_          = nullptr;
         std::thread         loop_thread_;
         guint               server_source_id_ = 0;
 

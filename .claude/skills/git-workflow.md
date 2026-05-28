@@ -1,14 +1,17 @@
 ---
 name: git-workflow
-description: Must read before any git/gh operation. Defines AI's allowed git usage in this project — branch-only work, PR-for-master, commit message style, and forbidden destructive operations. Triggered on all git/gh tasks including commit, push, branch, merge, rebase, PR creation.
+description: Must read before any git/gh operation. Procedural reference (SSOT) — branch flow, naming, commit/push, merge style, bump procedure, cleanup. Triggered on all git/gh tasks including commit, push, branch, merge, rebase, PR creation.
 ---
 
 # Git Workflow for AI
 
+This is the **procedural single-source-of-truth** for git operations in DetectBase. Project rules (canonical) live in CLAUDE.md Part B §Work Rules / §Master merge gate / §master_logs 보관 절차. Personal user signals and incident history live in the `feedback-git-workflow` memory. Permission allow/deny is in `.claude/settings.json`.
+
 ## First Principle — Never touch master directly; develop is the integration gate
 **AI must never commit, push, or merge directly on `master`. AI also does not commit directly to `develop` — develop merges happen via PR from a dedicated branch.**
 - **`develop`** is the permanent integration branch (Git Flow variant). Feature/fix/docs branches fork from `develop` and merge back to `develop` via PR.
-- **develop merge is free** (no user approval needed for feature → develop) — self-verify first (build + sanity). cmake VERSION bump is **NOT** applied during the develop merge of a feature; it is handled separately under the bump procedure below.
+- **(우선 규칙, 5/27 신규) docs / small-commit 브랜치는 `gh pr create` 도 X, `gh pr merge` 도 X.** Scope: docs-only (README / NEXT_SESSION / .md / 코멘트), typo fix, version reference sync, minor cleanup, 한두 줄 변경 등. **AI 는 branch + commit + push 까지만**. PR 생성 / 머지 시도 자체 금지. 작업 결과 보고 후 사용자 의견 받기 — 사용자가 "PR 만들어라" / "머지해라" 명시 후에만 진행. 배경: PR #29 사고.
+- **(default) feature/fix branch develop merge is free** — self-verify (build + sanity) 후 `gh pr create` + `gh pr merge` 자율. 단 사용자 시점별 "쓸데없이 머지하지 마라" 시그널 시 즉시 명시 허가 필수로 전환.
 - **master** changes only via PR from `develop`, executed only when the user explicitly instructs.
 
 ## Hard Rules
@@ -16,7 +19,8 @@ description: Must read before any git/gh operation. Defines AI's allowed git usa
 | Rule | Detail |
 |---|---|
 | **Branch-only work** | Always `git checkout -b <branch>` (fork from `develop`) before any modification. AI never commits directly to `develop` or `master`. Create only the branches the task needs — avoid branch proliferation (CLAUDE.md A3). |
-| **develop merge via PR is free** | `gh pr create --base develop --head <branch>` then `gh pr merge --merge --delete-branch` — without asking, after self-verification. no-ff merge commit (project default). |
+| **(우선) docs / small-commit: branch + commit + push only** | `gh pr create` X, `gh pr merge` X. 작업 결과를 사용자에게 보고 → 사용자가 명시 OK 한 후에만 다음 단계 진행. Scope: docs-only, typo, version sync, minor cleanup, ~10줄 이하 변경. |
+| **(default) feature/fix develop merge via PR is free** | `gh pr create --base develop --head <branch>` then `gh pr merge --merge --delete-branch` — without asking, after self-verification. no-ff merge commit (project default). 사용자 시점별 시그널 시 즉시 명시 허가 필수로 전환. |
 | **PR for master merge — user-instructed only** | `gh pr create --base master --head develop` proposes a release. `gh pr merge` (to master) only when user explicitly says so. Never `git checkout master && git merge` directly. |
 | **User-explicit approval for master merge** | `gh pr merge` (to master) only runs when the user says so ("머지해라", "merge it" 등). Do not infer or anticipate approval. |
 | **No force push** | `git push --force` / `git push -f` are denied by settings. Never bypass. |
@@ -145,6 +149,30 @@ Master merge verification artifacts must be archived in develop tree before mast
 - monitoring run: **patch/minor = 3h+** stable trend (DFPS / RSS / FD / Threads / wd) / **major = 10h+ aging + 10h+ stress** (max cam / max load, DFPS dip distribution, wd frequency)
 - Explicit user approval — AI never concludes "verification done, let's merge"; waits for the user.
 
+## Branch Cleanup After Merge (2026-05-28 추가)
+
+### PR-based merge (recommended) — auto-cleanup
+GitHub repo setting "Automatically delete head branches" is enabled. `gh pr merge --merge --delete-branch` triggers it automatically — no manual cleanup needed for the remote source branch.
+
+### Local merge (no PR) — manual cleanup required, AI cannot execute
+After `git merge` of a source branch into its parent (e.g., sub-branch → parent work branch):
+1. AI **must** print a cleanup-hint line immediately after the merge commit:
+   > 정리 가능: `git push origin --delete <source-branch>` (사용자 실행 필요, AI 는 deny)
+2. User executes the delete command.
+3. AI follows with `git fetch --prune` (read-only allowed) to clean local stale tracking refs.
+
+**Pattern preference** — when a derivative branch is needed at all, prefer PR-based merge (even into a non-default base like another work branch) so auto-delete fires. Skip the derivative branch entirely when work fits directly on the parent (CLAUDE.md A3 minimize-branch-proliferation).
+
+Incident history (chain accumulation 2026-05-28, etc.) → see `feedback-git-workflow` memory.
+
+### Remote state verification (avoid stale tracking refs)
+Before classifying remote branch state:
+- **Preferred**: `git ls-remote origin | grep refs/heads/` (live query, no local cache)
+- **Or**: `git fetch --prune` first, then `git branch -r`
+- **AVOID**: `git branch -a` standalone — shows stale `remotes/origin/<name>` for branches that were auto-deleted on remote.
+
+Incident history (stale tracking ref misclassification 2026-05-28, etc.) → see `feedback-git-workflow` memory.
+
 ## Master Merge Execution (user-instructed)
 
 When the user explicitly says to merge a PR, use this default:
@@ -217,7 +245,7 @@ Do NOT add any Claude/Claude Code footer or `Co-Authored-By` trailer to commits 
 |---|---|
 | Master merge timing | **Always wait for explicit user instruction.** PR creation is fine, merge is not. |
 | Force push / history rewrite | Never. Stop and ask if it seems needed. |
-| Deleting a remote branch | Ask first (`gh api -X DELETE` or `git push origin --delete`). |
+| Deleting a remote branch | AI cannot — `git push * --delete*` is denied. For PR sources: use `gh pr merge --delete-branch` (auto-cleanup). For local-merge sources: print the cleanup-hint, user executes manually. |
 | Resolving merge conflicts that change behavior | Show the conflict + your proposed resolution, then ask. |
 | Unfamiliar branch state (e.g., uncommitted user changes on master) | Investigate, don't overwrite. |
 
@@ -225,10 +253,11 @@ Do NOT add any Claude/Claude Code footer or `Co-Authored-By` trailer to commits 
 
 - Branch create / checkout / list / delete (local, using `git branch -d` safe-delete only)
 - `git status` / `log` / `diff` / `show` (read-only)
+- `git fetch --prune` / `git ls-remote origin` — read-only remote-state inspection (recommended over `git branch -a` for live-state checks)
 - `git add` / `commit` / `push` on **your own (non-develop, non-master) branch**
 - `git merge` / `rebase` between **non-develop, non-master branches** only (e.g., feature/a ← feature/a-1). **Never** `git merge` directly into `develop` or `master` — always via PR.
-- `gh pr create` (creating a PR does not merge)
-- `gh pr merge --merge --delete-branch` for **develop merges** (after self-verification). For master merges only on explicit user instruction.
+- `gh pr create` for **feature/fix branches only** (creating a PR does not merge). **docs / small-commit branches: PR create 도 X — 사용자 명시 후에만.**
+- `gh pr merge --merge --delete-branch` for **feature/fix develop merges** (after self-verification). **docs / small-commit develop merges, and all master merges, only on explicit user instruction.**
 - `gh pr view` / `list` / `comment`
 - `git mv` / `git rm` on tracked files **on your own branch**
 

@@ -53,26 +53,32 @@ namespace MGEN
         }
 
         // 데이터를 복사하여 저장 → 원본이 변경되더라도 안전
+        // MO-1 (2026-05-27): notify_one() 을 lock 밖으로 이동 (표준 권장 패턴).
+        //   wakeup 받은 dequeue 가 lock 재획득 시 contention 미세 감소.
         void enqueue_copy( const T& t ) noexcept
         {
-            std::lock_guard<std::mutex> lck { m };
-            if( max_size_ > 0 && q.size() >= max_size_ ) {
-                q.pop_front(); // drop oldest — 메모리 무한 증가 차단
-                drop_count_.fetch_add( 1, std::memory_order_relaxed );
+            {
+                std::lock_guard<std::mutex> lck { m };
+                if( max_size_ > 0 && q.size() >= max_size_ ) {
+                    q.pop_front(); // drop oldest — 메모리 무한 증가 차단
+                    drop_count_.fetch_add( 1, std::memory_order_relaxed );
+                }
+                q.push_back( t ); // copy
             }
-            q.push_back( t ); // copy
             c.notify_one();
         }
 
         // 데이터를 이동하여 저장 → 소유권을 가져감
         void enqueue_move( T&& t ) noexcept
         {
-            std::lock_guard<std::mutex> lck { m };
-            if( max_size_ > 0 && q.size() >= max_size_ ) {
-                q.pop_front(); // drop oldest
-                drop_count_.fetch_add( 1, std::memory_order_relaxed );
+            {
+                std::lock_guard<std::mutex> lck { m };
+                if( max_size_ > 0 && q.size() >= max_size_ ) {
+                    q.pop_front(); // drop oldest
+                    drop_count_.fetch_add( 1, std::memory_order_relaxed );
+                }
+                q.push_back( std::move(t) ); // move
             }
-            q.push_back( std::move(t) ); // move
             c.notify_one();
         }
 
@@ -116,10 +122,14 @@ namespace MGEN
             return this->size() == 0;
         }
 
+        // MO-1 (2026-05-27): notify_all() 을 lock 밖으로 이동 (enqueue 패턴과 일관성).
+        //   b_terminate write 의 happens-before edge 는 lock release 시 발생, notify_all 은 그 edge 의 receiver. semantic 동일.
         void terminate() noexcept
         {
-            std::lock_guard<std::mutex> lck { m };
-            b_terminate = true;
+            {
+                std::lock_guard<std::mutex> lck { m };
+                b_terminate = true;
+            }
             c.notify_all();
         }
 

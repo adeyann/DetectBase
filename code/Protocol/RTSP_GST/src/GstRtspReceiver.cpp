@@ -84,6 +84,8 @@ namespace MGEN
         : cfg_( cfg )
         , cb_ ( std::move( cb ) )
     {
+        // per-instance dedicated GMainContext — multi-cam coupling 해소 (2026-05-27).
+        ctx_ = g_main_context_new();
         RegisterMetricsOnce();
         MLOG_INFO( "GstRtspReceiver[%d] 생성 — url=%s latency=%dms (single-pipeline)",
             cfg_.cam_id, cfg_.url.c_str(), cfg_.latency_ms );
@@ -92,6 +94,10 @@ namespace MGEN
     GstRtspReceiver::~GstRtspReceiver()
     {
         Stop();
+        if( ctx_ ) {
+            g_main_context_unref( ctx_ );
+            ctx_ = nullptr;
+        }
         MLOG_INFO( "GstRtspReceiver 종료 — frames=%lu reconnect=%lu errors=%lu",
             (unsigned long) frame_count_.load(),
             (unsigned long) reconnect_count_.load(),
@@ -211,7 +217,14 @@ namespace MGEN
         }
 
         GstBus* bus = gst_pipeline_get_bus( GST_PIPELINE( pipeline_ ) );
-        bus_watch_id_ = gst_bus_add_watch( bus, &GstRtspReceiver::OnBusMessage, this );
+        // bus watch 를 ctx_ 에 명시 attach (default global context 회피).
+        // 2026-05-28 UAF fix: GSource* 보관 (id 가 아닌). g_source_remove(id) 는 default context
+        //   에서만 source 찾아 ctx_ 안 source 못 찾음 → fix: g_source_destroy(source) 사용.
+        GSource* bus_source = gst_bus_create_watch( bus );
+        g_source_set_callback( bus_source,
+            reinterpret_cast<GSourceFunc>( &GstRtspReceiver::OnBusMessage ), this, nullptr );
+        g_source_attach( bus_source, ctx_ );
+        bus_watch_source_ = bus_source;   // ref 유지 (Teardown 시 destroy + unref)
         gst_object_unref( bus );
 
         // 측정 (2026-05-21): depay src pad 에 buffer probe 추가 — RTP/pre-decode flow per cam.
@@ -240,7 +253,12 @@ namespace MGEN
 
         // 검증 (2026-05-21): jitterbuffer stats timer 를 BuildPipeline 에서 추가 (매 EOS rebuild 마다 재등록).
         //   이전 버그: MainLoopThreadFunc 에서 1회만 추가 → 첫 reset 의 Teardown 이 제거 후 재등록 안 됨 → gauge frozen.
-        jitter_timer_id_ = g_timeout_add( 2000, &GstRtspReceiver::OnJitterStatsTimer, this );
+        // 2026-05-27: timer 도 ctx_ 에 명시 attach (default global context 회피).
+        // 2026-05-28 UAF fix: GSource* 보관. id-based g_source_remove 가 ctx_ 안 source 못 찾던 결함 fix.
+        GSource* timer_source = g_timeout_source_new( 2000 );
+        g_source_set_callback( timer_source, &GstRtspReceiver::OnJitterStatsTimer, this, nullptr );
+        g_source_attach( timer_source, ctx_ );
+        jitter_timer_source_ = timer_source;   // ref 유지 (Teardown 시 destroy + unref)
 
         return true;
     }
@@ -319,14 +337,19 @@ namespace MGEN
     void GstRtspReceiver::TeardownPipeline()
     {
         if( pipeline_ ) {
-            if( jitter_timer_id_ ) {
-                g_source_remove( jitter_timer_id_ );
-                jitter_timer_id_ = 0;
+            // 2026-05-28 UAF fix: g_source_destroy(GSource*) — context 무관, source 자체 작용.
+            //   이전 g_source_remove(id) 는 default context 에서만 찾아 ctx_ 안 source 못 찾음
+            //   → timer 가 pipeline destroy 후에도 active → freed jitterbuffer_ access → SEGV.
+            if( jitter_timer_source_ ) {
+                g_source_destroy( jitter_timer_source_ );
+                g_source_unref( jitter_timer_source_ );
+                jitter_timer_source_ = nullptr;
             }
             jitterbuffer_ = nullptr;  // weak ref — pipeline 이 곧 destroy
-            if( bus_watch_id_ ) {
-                g_source_remove( bus_watch_id_ );
-                bus_watch_id_ = 0;
+            if( bus_watch_source_ ) {
+                g_source_destroy( bus_watch_source_ );
+                g_source_unref( bus_watch_source_ );
+                bus_watch_source_ = nullptr;
             }
             gst_element_set_state( pipeline_, GST_STATE_NULL );
             GstState st;
@@ -366,7 +389,8 @@ namespace MGEN
 
     void GstRtspReceiver::MainLoopThreadFunc()
     {
-        loop_ = g_main_loop_new( nullptr, FALSE );
+        // dedicated ctx_ 위에서 loop 동작 (default global context 공유 회피).
+        loop_ = g_main_loop_new( ctx_, FALSE );
         g_main_loop_run( loop_ );
         g_main_loop_unref( loop_ );
         loop_ = nullptr;

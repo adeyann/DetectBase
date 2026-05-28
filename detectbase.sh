@@ -182,9 +182,14 @@ cmd_all() {
 #   ./detectbase.sh audit --only ubsan       # 동적 (asan 과 동일 빌드, alias)
 #   ./detectbase.sh audit --only tsan        # 동적 (TSan, 운영 정지)
 #  묶음 모드:
-#   ./detectbase.sh audit                    # 전체 (1+2+3+5)
+#   ./detectbase.sh audit                    # 전체 (1+2+3+5), light (ASan 60m + TSan 60m)
+#   ./detectbase.sh audit --strict           # 전체, strict (ASan 240m + TSan 60m, master merge gate 용)
 #   ./detectbase.sh audit --no-tsan          # cppcheck + clang-tidy + asan/ubsan
 #   ./detectbase.sh audit --with-tsan        # = 전체 (backward compat)
+#  강도 모드 (light = default | strict):
+#   light  — ASan 60분 + TSan 60분 (develop/내부 검증용, ~1h 30min)
+#   strict — ASan 240분 + TSan 60분 (master merge gate 용, ~5h)
+#   ASAN_DURATION_MIN / TSAN_DURATION_SEC env var override 항상 우선
 #  결과: logs/audit_<timestamp>/ (실행한 stage 의 *.log + summary.txt)
 #  ASan/TSan 실행 시 운영 detectbase_service 가 자동 graceful 정지/재시작됨
 # -----------------------------------------------------------------------------
@@ -279,9 +284,17 @@ _audit_run_asan_ubsan() {
         ' > "${OUT_DIR}/asan_build.log" 2>&1
 
     if [[ -x "${OUT_DIR}/asan_pkg/DetectBase" ]]; then
-        # ASan run duration. ASAN_DURATION_MIN env var override (default 240 min = 4h, min 60 min = 1h).
+        # ASan run duration.
+        #   - AUDIT_STRICT=1 (--strict 플래그) → default 240 min (master merge gate)
+        #   - 그 외 (light, default)          → default 60 min (develop/내부 검증)
+        #   - ASAN_DURATION_MIN env var       → 항상 override (사용자 지정)
+        # 최소 60 min 강제 (init 비중 분리 위함).
         # SIGUSR1 시점: T+5min, T+15min, T+30min, T+60min, T+120min, T+240min (interval mid-run leak check)
-        local ASAN_DURATION_MIN="${ASAN_DURATION_MIN:-240}"
+        local _ASAN_DEFAULT=60
+        if [[ "${AUDIT_STRICT:-0}" == "1" ]]; then
+            _ASAN_DEFAULT=240
+        fi
+        local ASAN_DURATION_MIN="${ASAN_DURATION_MIN:-$_ASAN_DEFAULT}"
         if [[ $ASAN_DURATION_MIN -lt 60 ]]; then
             log_warn "  ASAN_DURATION_MIN=${ASAN_DURATION_MIN}분 → 최소 60분으로 강제 (init 비중 분리 위함)"
             ASAN_DURATION_MIN=60
@@ -411,11 +424,17 @@ _audit_write_summary() {
 cmd_audit() {
     local mode="all"   # all | no-tsan | only
     local only_tool=""
+    # 강도 모드 — _audit_run_asan_ubsan 가 환경변수로 참조.
+    #   AUDIT_STRICT=0 (light, default) → ASan 60분
+    #   AUDIT_STRICT=1 (--strict)       → ASan 240분
+    export AUDIT_STRICT="${AUDIT_STRICT:-0}"
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --with-tsan) mode="all" ;;          # backward compat
             --no-tsan)   mode="no-tsan" ;;
+            --light)     AUDIT_STRICT=0 ;;      # ASan 60분 (default)
+            --strict)    AUDIT_STRICT=1 ;;      # ASan 240분 (master merge gate)
             --only)
                 mode="only"
                 only_tool="$2"
@@ -423,7 +442,7 @@ cmd_audit() {
                 ;;
             *)
                 log_error "Unknown audit option: $1"
-                log_info  "Usage: ./detectbase.sh audit [--with-tsan|--no-tsan|--only <cppcheck|clang-tidy|asan|ubsan|tsan>]"
+                log_info  "Usage: ./detectbase.sh audit [--light|--strict] [--with-tsan|--no-tsan|--only <cppcheck|clang-tidy|asan|ubsan|tsan>]"
                 return 1
                 ;;
         esac
@@ -437,7 +456,9 @@ cmd_audit() {
     _audit_set_paths
     _audit_ensure_analysis_image
 
-    log_info "DetectBase audit 시작 — mode=${mode}${only_tool:+ tool=${only_tool}}"
+    local _strength="light"
+    [[ "${AUDIT_STRICT}" == "1" ]] && _strength="strict"
+    log_info "DetectBase audit 시작 — mode=${mode}${only_tool:+ tool=${only_tool}} strength=${_strength}"
     log_info "  결과: ${OUT_DIR}"
 
     local STAGES_DONE=""
@@ -497,13 +518,16 @@ DetectBase 서비스 통합 관리 스크립트
   prune     사용 안 하는 도커 리소스 정리 (docker system prune -a, 확인 프롬프트)
   all       build + init + compile + start (전체 파이프라인)
   audit     정적/동적 분석 도구 (cppcheck + clang-tidy + ASan/UBSan + TSan).
-            기본 = 전체 실행. 옵션으로 부분 실행 가능:
+            기본 = 전체 실행 (light: ASan 60m + TSan 60m). 옵션으로 부분 실행 가능:
+              --light                  ASan 60분 + TSan 60분 (default, develop/내부 검증)
+              --strict                 ASan 240분 + TSan 60분 (master merge gate)
               --no-tsan                cppcheck + clang-tidy + ASan/UBSan (TSan 제외)
               --with-tsan              = 전체 (backward compat)
               --only cppcheck          cppcheck 만 (정적)
               --only clang-tidy        clang-tidy 만 (정적)
               --only asan|ubsan        ASan+UBSan 만 (동적, 운영 정지)
               --only tsan              TSan 만 (동적, 운영 정지)
+            env override: ASAN_DURATION_MIN, TSAN_DURATION_SEC (강도 모드보다 우선)
             결과: logs/audit_<timestamp>/
   help      이 도움말 출력
 

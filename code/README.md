@@ -108,7 +108,7 @@ GRPC 활성화 / 운영 정책은 [상위 README §"GRPC 통신"](../README.md) 
 - const 정확성 필수
 - 공개 API 에 Doxygen 주석
 
-## 검증 상태 (2026-05-27 — `master_logs/v0.1.18/audit_20260527_091456/` baseline, last master tag = v0.1.18. develop cmake = 0.1.23 작업 진입. ASan 4h + TSan 1h default run)
+## 검증 상태 (2026-05-28 — develop cmake = 0.1.26 작업 진입. `master_logs/v0.1.18/audit_20260527_091456/` baseline 유지, last master tag = v0.1.18. baseline 은 strict mode = ASan 4h + TSan 1h. 2026-05-28 audit 강도 모드 도입 — develop/내부 검증은 light default ASan 1h + TSan 1h. **0.1.26 light audit (ASan 1h + TSan 1h) 검증 통과**: ASan leak 분포 baseline 동등 (1.22 MB / 10,639 alloc — baseline 1.24 MB / 11,515 alloc, 시간 1/4 임에도 거의 동일 = startup+cycle dominated), TSan SEGV 0 (직전 audit 의 OnJitterStatsTimer UAF 결정적 fix 확인) + WARNING 158 (baseline 172, 우리 코드 race 0건 유지).)
 
 | 항목 | 결과 |
 |---|---|

@@ -130,12 +130,19 @@ namespace MGEN
         GstAppSink*     appsink_      = nullptr;
         GstAppSink*     raw_appsink_  = nullptr;
         GMainLoop*      loop_         = nullptr;
+        // GMainContext (2026-05-27): per-instance dedicated context — multi-cam coupling 해소.
+        // 모든 source (bus watch, jitter timer) 가 이 context 에 attach. 기본 global context 회피.
+        GMainContext*   ctx_          = nullptr;
         std::thread     loop_thread_;
-        guint           bus_watch_id_ = 0;
+        // 2026-05-28: id 대신 GSource* 보관 (UAF fix).
+        //   g_source_remove(id) 는 default global context 에서만 source 찾음. ctx_ 안 source 를
+        //   못 찾아 remove 실패 → timer 가 pipeline destroy 후에도 active → freed jitterbuffer_
+        //   access → SEGV. fix: g_source_destroy(GSource*) 는 context 무관, source 자체 작용.
+        GSource*        bus_watch_source_ = nullptr;
 
         // 검증 (2026-05-21): rtpjitterbuffer stats 추적용
         GstElement*     jitterbuffer_   = nullptr;  // weak ref, owner: pipeline (rtpbin 내부)
-        guint           jitter_timer_id_ = 0;
+        GSource*        jitter_timer_source_ = nullptr;  // 2026-05-28: GSource* 보관 (UAF fix, ctx_ 격리용)
 
         std::atomic<bool>     running_         { false };
         std::atomic<uint64_t> frame_count_     { 0 };
