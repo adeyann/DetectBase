@@ -31,6 +31,56 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_done()  { echo -e "${GREEN}[DONE]${NC}  $1"; }
 
 # -----------------------------------------------------------------------------
+# NPU 환경 사전 점검 — Odroid M2 (RK3588S) NPU 의존 명령 (compile/start/restart) 진입 직전 호출.
+# 부재 시 친절한 복구 안내 후 exit 1. cmd_init 의 informational 경고 (line ~81-94) 와는
+# 별개 — 본 함수는 차단형. 배경: docker 가 host /usr/lib/librknnrt.so 또는
+# /dev/dri/renderD129 부재 시 mount 시점에 빈 디렉토리/path 를 자동 생성하여 host file
+# 을 망가뜨리는 사고를 차단한다 (한 번 디렉토리가 되면 다음 mount 도 디렉토리 유지).
+# -----------------------------------------------------------------------------
+_check_npu_env() {
+    local librknn_src="${LIBRKNN_SRC:-/home/claudedev/tmp/rknpu2_v152/runtime/RK3588/Linux/librknn_api/aarch64/librknnrt.so}"
+    local missing=()
+
+    [[ -e /dev/dri/renderD129 ]] || missing+=("/dev/dri/renderD129 (rknpu kernel module 미적재)")
+    if [[ ! -f /usr/lib/librknnrt.so ]]; then
+        missing+=("/usr/lib/librknnrt.so (file 부재 또는 디렉토리로 잘못 생성됨)")
+    elif ! file /usr/lib/librknnrt.so 2>/dev/null | grep -q 'GNU/Linux'; then
+        # ABI 차이 차단: Android arm64-v8a build 등 잘못된 build 가 mount 되면 service 시작 직후
+        # 'correlation_id mismatch' warn 폭주 (~30-58/sec) — engine response 구조 미세 차이.
+        # 2026-05-30 사고: 사용자가 RK3588 Android arm64-v8a build 를 잘못 복원하여 3h 검증 회귀.
+        # 정확한 build = RK3588/Linux/aarch64 (GNU/Linux ELF), audit backup 와 md5 일치.
+        missing+=("/usr/lib/librknnrt.so 가 GNU/Linux build 아님 (Android build 등). 'file /usr/lib/librknnrt.so' 출력 확인")
+    fi
+
+    [[ ${#missing[@]} -eq 0 ]] && return 0
+
+    log_error "NPU 환경 부재 — docker 진입 차단. 누락 항목:"
+    for m in "${missing[@]}"; do
+        log_error "  • ${m}"
+    done
+    log_warn ""
+    log_warn "복구 명령 (sudo 필요):"
+    log_warn "  1) NPU module load:"
+    log_warn "       sudo modprobe rknpu"
+    log_warn "     boot 시 자동 load 등록 (한 번만):"
+    log_warn "       echo rknpu | sudo tee /etc/modules-load.d/rknpu.conf"
+    log_warn ""
+    log_warn "  2) librknnrt.so 복원 (디렉토리로 망가졌다면 제거 후 재복원):"
+    log_warn "       sudo rm -rf /usr/lib/librknnrt.so"
+    log_warn "       sudo cp ${librknn_src} /usr/lib/librknnrt.so"
+    log_warn ""
+    log_warn "  3) 확인 (build 가 GNU/Linux 인지 반드시 확인 — Android build 면 correlation_id storm 유발):"
+    log_warn "       ls /dev/dri/renderD129 && file /usr/lib/librknnrt.so | grep -q 'GNU/Linux' && echo OK"
+    log_warn ""
+    log_warn "배경: 본 명령은 docker 에 /dev/dri/renderD129 device 와 /usr/lib/librknnrt.so file"
+    log_warn "  mount 를 요구합니다. host 에 없을 시 docker 가 자동으로 빈 디렉토리를 생성해"
+    log_warn "  librknnrt.so 가 망가집니다. 한 번 디렉토리가 되면 다음 mount 도 디렉토리로 유지됨."
+    log_warn ""
+    log_warn "복구 후 다시 시도하십시오. (LIBRKNN_SRC env var 로 source path override 가능)"
+    exit 1
+}
+
+# -----------------------------------------------------------------------------
 # 서브커맨드
 # -----------------------------------------------------------------------------
 
@@ -46,6 +96,7 @@ cmd_build() {
 }
 
 cmd_compile() {
+    _check_npu_env
     log_info "컨테이너 내 C++ 컴파일 시작 (BuildScript.sh)..."
     docker run --rm \
         -v "${SCRIPT_PATH}":/DetectBase \
@@ -101,6 +152,7 @@ cmd_init() {
 }
 
 cmd_start() {
+    _check_npu_env
     # 이미 실행 중이면 정지 후 재시작
     if docker ps -q -f name="^/${CONTAINER_NAME}$" | grep -q .; then
         log_warn "서비스 '${CONTAINER_NAME}' 가 이미 실행 중. 재시작합니다."
@@ -144,6 +196,7 @@ cmd_stop() {
 }
 
 cmd_restart() {
+    _check_npu_env
     cmd_stop
     sleep 3
     cmd_start
