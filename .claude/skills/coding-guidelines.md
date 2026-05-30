@@ -10,6 +10,12 @@ Project-level rules (canonical) are in CLAUDE.md Part B §Coding Standard / §Na
 ## First Principle — KISS (Keep It Simple, Stupid)
 Avoid unnecessary or excessive code. This is the absolute standard for all code work.
 
+## Build Type Policy (2026-05-28)
+- **AI builds only Debug.** `./detectbase.sh compile` defaults to Debug. Use `--debug` if explicit.
+- **Release build is user-only.** AI must NOT use `--release` or `CMAKE_BUILD_TYPE=Release`.
+- Rationale: diagnostic capability — Debug enables DEBUG_MODE (all log/metric emit, DBG_PROF dumps, jemalloc mallctl, GstRtsp debug/jitter trace). Release is the user's deliberate production deploy decision.
+- audit (ASan/UBSan/TSan) forces Debug regardless (existing policy, unchanged).
+
 ## Pre-work Checklist
 - Re-read the instructions
 - Working from actual code, not assumptions

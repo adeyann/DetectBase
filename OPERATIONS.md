@@ -9,7 +9,8 @@
 
 ```bash
 ./detectbase.sh build      # Docker 이미지 빌드 + init (proto 재생성)
-./detectbase.sh compile    # C++ 소스 컴파일 (~2분)
+./detectbase.sh compile    # C++ 소스 컴파일 (~2~3분, default Debug 2026-05-28~)
+./detectbase.sh compile --release   # Release 빌드 (사용자 deploy 시점만 — AI 는 Release 사용 금지)
 ./detectbase.sh start      # 서비스 시작 + 로그 follow
 ./detectbase.sh stop       # graceful shutdown (~10초, PROGRAM QUIT SUCCESS 까지)
 ./detectbase.sh restart    # 정지 후 시작

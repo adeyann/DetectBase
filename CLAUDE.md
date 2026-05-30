@@ -99,6 +99,12 @@ Pipeline: RTSP input → YOLOv5 NPU inference → SORT tracking → boundary int
   3. **별도 chore branch + PR → develop merge** — AI 는 develop 에 직접 commit 안 함. master_logs 이동은 dedicated branch 의 단일 commit 으로 만들고 PR 으로 develop 에 merge. 이 commit 은 **cmake VERSION bump 절대 금지** — master_logs commit 의 코드 상태가 곧 머지될 v0.1.X 의 상태여야 develop ↔ master ↔ tag 매핑이 맞음.
   4. **그 다음 develop → master --no-ff merge** 수행 (사용자 명시 허가 후). master 가 가져가는 tree 에 master_logs/v<버전>/ 가 포함됨.
 
+### Build Type Policy (2026-05-28 신규)
+- **AI 는 오직 Debug 빌드만**. `./detectbase.sh compile` (no flag, default Debug) 또는 `--debug` 만 사용.
+- **Release 빌드는 사용자 전용**. AI 는 `--release` 또는 `CMAKE_BUILD_TYPE=Release` 사용 금지.
+- 이유: AI 진단 capability 우선 — Debug 빌드는 DEBUG_MODE 활성 + 모든 log/metric emit. Release 운영은 사용자가 의도적으로 빌드 + 배포.
+- audit (ASan/UBSan/TSan) 는 Debug 강제 (기존 정책 유지).
+
 ### Coding Standard
 - C++17, enforce RAII, guarantee exception safety.
 - Explicit ownership via smart pointers (unique_ptr default / shared_ptr only when truly shared / weak_ptr to break cycles).
