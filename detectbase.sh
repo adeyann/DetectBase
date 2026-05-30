@@ -38,11 +38,19 @@ log_done()  { echo -e "${GREEN}[DONE]${NC}  $1"; }
 # 을 망가뜨리는 사고를 차단한다 (한 번 디렉토리가 되면 다음 mount 도 디렉토리 유지).
 # -----------------------------------------------------------------------------
 _check_npu_env() {
-    local librknn_src="${LIBRKNN_SRC:-/home/claudedev/tmp/rknpu2_v152/runtime/RK3588/Android/librknn_api/arm64-v8a/librknnrt.so}"
+    local librknn_src="${LIBRKNN_SRC:-/home/claudedev/tmp/rknpu2_v152/runtime/RK3588/Linux/librknn_api/aarch64/librknnrt.so}"
     local missing=()
 
-    [[ -e /dev/dri/renderD129 ]]   || missing+=("/dev/dri/renderD129 (rknpu kernel module 미적재)")
-    [[ -f /usr/lib/librknnrt.so ]] || missing+=("/usr/lib/librknnrt.so (file 부재 또는 디렉토리로 잘못 생성됨)")
+    [[ -e /dev/dri/renderD129 ]] || missing+=("/dev/dri/renderD129 (rknpu kernel module 미적재)")
+    if [[ ! -f /usr/lib/librknnrt.so ]]; then
+        missing+=("/usr/lib/librknnrt.so (file 부재 또는 디렉토리로 잘못 생성됨)")
+    elif ! file /usr/lib/librknnrt.so 2>/dev/null | grep -q 'GNU/Linux'; then
+        # ABI 차이 차단: Android arm64-v8a build 등 잘못된 build 가 mount 되면 service 시작 직후
+        # 'correlation_id mismatch' warn 폭주 (~30-58/sec) — engine response 구조 미세 차이.
+        # 2026-05-30 사고: 사용자가 RK3588 Android arm64-v8a build 를 잘못 복원하여 3h 검증 회귀.
+        # 정확한 build = RK3588/Linux/aarch64 (GNU/Linux ELF), audit backup 와 md5 일치.
+        missing+=("/usr/lib/librknnrt.so 가 GNU/Linux build 아님 (Android build 등). 'file /usr/lib/librknnrt.so' 출력 확인")
+    fi
 
     [[ ${#missing[@]} -eq 0 ]] && return 0
 
@@ -61,8 +69,8 @@ _check_npu_env() {
     log_warn "       sudo rm -rf /usr/lib/librknnrt.so"
     log_warn "       sudo cp ${librknn_src} /usr/lib/librknnrt.so"
     log_warn ""
-    log_warn "  3) 확인:"
-    log_warn "       ls /dev/dri/renderD129 && file /usr/lib/librknnrt.so | grep -q 'shared object' && echo OK"
+    log_warn "  3) 확인 (build 가 GNU/Linux 인지 반드시 확인 — Android build 면 correlation_id storm 유발):"
+    log_warn "       ls /dev/dri/renderD129 && file /usr/lib/librknnrt.so | grep -q 'GNU/Linux' && echo OK"
     log_warn ""
     log_warn "배경: 본 명령은 docker 에 /dev/dri/renderD129 device 와 /usr/lib/librknnrt.so file"
     log_warn "  mount 를 요구합니다. host 에 없을 시 docker 가 자동으로 빈 디렉토리를 생성해"
