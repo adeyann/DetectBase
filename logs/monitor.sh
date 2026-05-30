@@ -63,6 +63,15 @@ PREV_WD=0
 PREV_FTC=0
 DFPS_LOW_STREAK=0
 
+# event accumulators — per-cycle slice + 자체 누적 counter (이전: cumulative slice → 21h 1.15GB → bash xrealloc 폭주 + cycle drift).
+LAST_LOG_CUT="$START_LOG_CUT"
+RESET=0
+EOS=0
+WD=0
+FTC=0
+ERR=0
+WRN=0
+
 echo "[monitor armed $(date +%H:%M:%S)] label=$LABEL container=$CONTAINER commit=$(cd $ROOT && git log -1 --format=%h) cut=$START_LOG_CUT interval=${INTERVAL_SEC}s out=$OUT"
 echo "[monitor armed] alert thresholds: warn_delta≥${ALERT_WARN_DELTA_PER_CYCLE}/cycle, dfps<${ALERT_DFPS_LOW_THRESHOLD} for ${ALERT_DFPS_LOW_STREAK} cycles, rss≥${ALERT_RSS_MB_THRESHOLD}MB, err>0, wd>0, ftc>0, cam_loss | warmup=${ALERT_WARMUP_CYCLES} cycles (dfps/storm skip during boot ramp)"
 
@@ -198,18 +207,22 @@ while true; do
     JEM_KB=$(echo "$LOG_TAIL" | grep -oE 'jem_alloc=[0-9]+KB' | tail -1 | grep -oE '[0-9]+')
     JEM_MB=$(( ${JEM_KB:-0} / 1024 ))
 
-    # § SAMPLE — log: 이벤트 누적 (start_cut 이후)
-    LOG_SLICE=$(awk -F'"ts":"' -v cut="$START_LOG_CUT" '$2 >= cut' "$LOG_PATH")
+    # § SAMPLE — log: 이벤트 누적 (per-cycle slice [LAST_LOG_CUT, NOW_LOG_CUT) + 자체 counter)
+    # 이전 LOG_SLICE 가 $START_LOG_CUT ~ 현재 의 cumulative slice 였음. 21h 시점 1.15GB → bash xrealloc 폭주
+    # + cycle interval drift (16-20h 평균 466.6s). NOTES §5b / §5c 참조.
+    # fix: 매 cycle [LAST_LOG_CUT, NOW_LOG_CUT) 의 분 단위 half-open slice (~1분치 KB-MB), 누적은 자체 변수.
+    NOW_LOG_CUT=$(date -u +%Y-%m-%dT%H:%M)
+    LOG_SLICE=$(awk -F'"ts":"' -v lo="$LAST_LOG_CUT" -v hi="$NOW_LOG_CUT" '$2 >= lo && $2 < hi' "$LOG_PATH")
     # ResetSourceOnly OK — log 메시지 패턴 변천:
     #   Option A (~v0.1.13): "ResetSourceOnly[X] OK — PARTIAL reset duration=..."
     #   Full reset (v0.1.14+): "ResetSourceOnly[X] OK — duration=..."
-    # 둘 다 잡으려면 "ResetSourceOnly.*OK" 패턴 사용.
-    RESET=$(echo "$LOG_SLICE" | grep -cE "ResetSourceOnly\[[0-9]+\] OK")
-    EOS=$(echo "$LOG_SLICE" | grep -c "on_eos trigger")
-    WD=$(echo "$LOG_SLICE" | grep -c "frame-age watchdog")
-    FTC=$(echo "$LOG_SLICE" | grep -c "Failed to connect")
-    ERR=$(echo "$LOG_SLICE" | grep -c '"lvl":"ERROR"')
-    WRN=$(echo "$LOG_SLICE" | grep -c '"lvl":"WARN"')
+    RESET=$(( RESET + $(echo "$LOG_SLICE" | grep -cE "ResetSourceOnly\[[0-9]+\] OK") ))
+    EOS=$(( EOS + $(echo "$LOG_SLICE" | grep -c "on_eos trigger") ))
+    WD=$(( WD + $(echo "$LOG_SLICE" | grep -c "frame-age watchdog") ))
+    FTC=$(( FTC + $(echo "$LOG_SLICE" | grep -c "Failed to connect") ))
+    ERR=$(( ERR + $(echo "$LOG_SLICE" | grep -c '"lvl":"ERROR"') ))
+    WRN=$(( WRN + $(echo "$LOG_SLICE" | grep -c '"lvl":"WARN"') ))
+    LAST_LOG_CUT="$NOW_LOG_CUT"
 
     # § SAMPLE — container /proc/1/status
     VM_RSS_KB=$(proc_status_field VmRSS)
