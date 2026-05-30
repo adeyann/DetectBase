@@ -1,166 +1,96 @@
 # NEXT_SESSION
 
-**최종 갱신**: 2026-05-28 16:15 KST
-**현 develop HEAD**: cmake VERSION = `0.1.26` (`df5ff9c`, v0.1.18 master tag 후 +8 patch). last master tag = `v0.1.18` (2026-05-27). **0.1.27 develop 머지 직전** — `fix/npu-batch-size` (HEAD `7591105`) 가 사용자 명시 허가 받아 곧 머지 예정.
-**작업 중 branch**: `fix/npu-batch-size` (NPU batch 확장성 fix, cmake 0.1.27). 5/28 새 branch naming rule 적용 (version-free 명).
+**최종 갱신**: 2026-05-31 KST
+**현 develop HEAD**: `0e4200d` Merge PR #35 (monitor.sh DFPS metric curl). cmake VERSION = `0.1.28`. last master tag = `v0.1.18`.
 
-## 🚨 현 상태 — v0.1.26 develop 머지 + 새 binary 운영 + NPU 확장성 fix 진행
+## 🏁 직전 cycle 종료 — v0.1.27 41.7h Debug monitor 후속 정리
 
-**[5/28] v0.1.27 — NPU batch_size 확장성 fix (input 측만)**:
+### 회귀 미발생 확정 (5/30 11:09 KST)
+- 41.7h monitor (5/28 17:28 ~ 5/30 11:09) 결과: DFPS mean 115.62 / DFPS≥110 98.6% / wd 0.048/h / cam_loss 0 / RSS max 1328MB.
+- v0.1.26 의 "회귀" = (F1) file logger 결함 + (F2) monitor.sh metric 결함 의 측정 artifact 였음 입증.
+- 최종 보고서: [.DOCS/MONITOR_FINAL_REPORT_v0.1.27_42h_20260530.md](../.DOCS/MONITOR_FINAL_REPORT_v0.1.27_42h_20260530.md)
 
-`YoloV5_Torch_Onnx_RKNN_NPU.cpp` 의 batch>1 진입 시 깨지는 input 측 막힘 패턴 3건 정정:
-- (a) batch dim check 의미 정정 — `input_attrs[0].dims[0]` (모델의 batch dim) 와 `batch_size_` 비교. 이전 `io_num.n_input` 비교는 의미 부정확 (n_input = input tensor 개수, batch 와 무관).
-- (b) input buffer size — `w * h * c * batch_size_` (batch 전체).
-- (c) Preprocess memcpy — `curr_batch_input_idx * frame_size` offset 적용 + 매 frame memset 제거 (이전 frame 보존).
+### PR 머지 chain (5/30 ~ 5/31)
+| PR | merge commit | scope |
+|---|---|---|
+| #33 | `a9b44ff` | monitor.sh LOG_SLICE per-cycle [LAST, NOW) half-open + 자체 counter (1.15GB 폭주 + cycle drift fix) |
+| #34 | `faf55a5` | `MakeDirectoryWhenNotExist` race-safe + detectbase.sh NPU precheck (Linux vs Android build check) + cmake `0.1.27` → `0.1.28` + 분석 메모 2건 |
+| #35 | `0e4200d` | monitor.sh DFPS log-grep → metric endpoint curl (DEBUG_MODE compile-out 후 dfps=0 결함 정정) |
 
-batch=1 운영 영향 = 0 (memcpy offset 0, size 동일, check 통과 동일). 운영 default `engines/engine.profile.json` 의 `InferenceBatchSize: 1` 그대로.
+### 5/31 사용자 NPU 환경 복구 시 사고 (정리 후 재발 방지)
+- 시스템 reboot (5/30 13:31) 후 NPU module + librknnrt.so 부재 상태에서 docker compile/service 시도 → host `/usr/lib/librknnrt.so` 가 빈 디렉토리로 자동 생성됨
+- 사용자 librknnrt 복원 시 RK3588/Android arm64-v8a build (md5 `1bc4f1d5...`) 로 잘못 install — 정확한 운영본 = RK3588/Linux/aarch64 (md5 `efe7de33...`, audit backup 와 일치)
+- 결과: service 시작 직후 'correlation_id mismatch' warn 폭주 (~30-58/sec, 3h 누적 135295건). NPU DFPS 자체 정상 (116.8) 이라 metric 만 보면 detect 안 됨
+- Linux build 정정 후 즉시 정상화 (90s warn=32 = 21/min, baseline 동등)
+- PR #34 의 detectbase.sh `_check_npu_env()` 가 `file ... | grep GNU/Linux` 검사로 같은 사고 차단
 
-**batch>1 진입 시 추가 검증 필요** (본 fix 미실시):
-- .rknn 모델 batch=N 재변환 (rknn-toolkit2, 외부 PC 작업)
-- post-processing (output 측 batch 처리) 검증
-- NPU throughput 실측 / latency 영향 / 메모리 사용량
-- multi-input 모델 호환성 (현 fix 는 input tensor 0 만 batch 처리)
-- 자세히는 [OPERATIONS.md §10](../OPERATIONS.md)
+### 5/31 부수 사고 — `pam_tally2` 잠금
+- claudedev `su odroid` 14-50 회 실패 → `pam_tally2` (deny=5, unlock_time=900) 잠금
+- shadow `/etc/shadow` mtime 02:37 = 잠긴 후 PAM lock field write (cause 아님, effect)
+- 해결: claudedev 가 docker group + privileged container 띄우기 가능 → `docker run --privileged --pid=host` + `chroot /host pam_tally2 --reset` 으로 host root 없이 잠금 해제
+- AI 가 시스템 PAM/auth 건드린 것 0% (sudo deny + 모든 bash 명령 review). 외부 침입 indicator 0건.
 
-**[5/28] v0.1.26 cycle 종료 + runtime 검증 단계** (이전 컨텍스트):
+## 📋 다음 작업 후보 (우선순위 순)
 
-핵심 사건 요약:
-- **5/27 audit 에서 TSan SEGV 발견** — `OnJitterStatsTimer` (GstRtspReceiver.cpp) 의 freed `jitterbuffer_` UAF. Root cause: `g_source_remove(guint)` 가 default global context 만 검색 → per-instance `ctx_` 안 source 못 찾아 timer 가 pipeline destroy 후에도 active.
-- **Fix (4172ac8)**: `guint id` → `GSource* source` 멤버 변환 + `g_source_destroy(GSource*) + g_source_unref()`. context 무관, source 자체 작용. GMainContext per-instance 격리 의도 그대로 유지.
-- **5/28 light audit 검증 통과**:
-  - ASan/UBSan 1h: leak 1.22 MB / 10,639 alloc (baseline 4h strict 1.24 MB / 11,515 alloc 동등 — startup+cycle dominated). 자체 leak 0.
-  - TSan 1h: WARNING 158 (baseline 172, -8%), **SEGV 0 ✅** UAF fix 결정적 검증.
-- **branch rename**: `docs/develop-merge-policy-update` → `chore/v0.1.26-cycle` (작업 mix 가 fix+refactor+perf+chore 라 docs/ prefix 부적합 + 정책 자동 발동 misleading 방지).
-- **PR #30 → develop merge (66a9784, --merge --delete-branch, 5/28 14:54 KST)** — 사용자 명시 허가 후 진행. 19 commit 흡수, no-ff merge commit.
-- **rebuild + restart (5/28 15:00~15:01)** — `./detectbase.sh compile` (2m 38s) → 새 binary 빌드 (UAF fix commit 4172ac8 포함 확정) → `./detectbase.sh restart` (detectbase_service Started 15:01:26).
-- **runtime monitor 가동** — `logs/monitor.sh v0.1.26_uaf_fix_runtime` (PID 1656787, 15:04 KST 시작). 최소 3시간 관찰 (~18:04 KST). 새 binary 의 운영 안정성 확인.
+### Step 1 — v0.1.28 binary build + service restart (Phase X3)
+- 현 service binary = 22:11 (5/30) build, race fix 포함, VERSION string `0.1.27` (cmake bump 적용 안 됨)
+- 동작 동일, 단지 metric/log 의 VERSION 표기만 다름
+- 사용자 결정 시 `./detectbase.sh compile` (~2-3분) + `docker restart detectbase_service`
+- 본 NEXT_SESSION 머지 후 자연스러운 첫 작업
 
----
+### Step 2 — monitor.sh log rotation 처리 (NOTES §5)
+- 자정 시점 `DetectBase.log` → `DetectBase.log.1` rotate 시 monitor 가 `.log.1` 안 읽음
+- PR #33 의 per-cycle counter 가 monotonic 이라 음수 spurious alert 자체는 사라짐
+- 다만 자정 시점 1분 events 일부 누락 가능 — 정확성 위해 `.log.1` 합산 또는 byte offset 추적 (NOTES §5b 대안 3)
 
-## 📋 남은 작업
+### Step 3 — EventThreadRunner race fix 자정 통과 통계 검증
+- PR #34 의 `MakeDirectoryWhenNotExist` race-safe fix 가 실 자정에 ERROR 0건인지 1-2일 통계
+- 5/29 자정 = ERROR 2건 (cam 659/660), 5/30 자정 = 0건 (deterministic 아닌 race 확정)
+- v0.1.28 binary 적용 후 다음 자정 통과 모니터로 확인
 
-### 🟢 검증 완료 (이번 사이클)
-- [x] audit 5종 회귀 검증 (light): cppcheck 60 / clang-tidy 1W / ASan-UBSan baseline 동일 / **TSan SEGV 0** + WARN 158
-- [x] UAF fix (4172ac8) 결정적 동작 확인 (TSan SEGV 0)
-- [x] GMainContext per-instance dedicated context 적용 (multi-cam coupling 해소)
-- [x] SafeQueue MO-1 (notify_one + notify_all out-of-lock) 적용
-- [x] CameraCluster_DETECTOR → SettingManager 인라인화 (1-use 폐기)
-- [x] CLOSE-WAIT defensive close 정책 정착
-- [x] detectbase.sh audit light/strict 강도 모드 도입
-- [x] git workflow rule 강화 (branch cleanup hint + remote state verification)
-- [x] skill/memory 역할 분담 정리 (procedural SSOT = skill, personal context = memory)
-- [x] branch rename + 파생 branch 잔재 6개 정리
+### Step 4 — v1.0.0 master merge (조건부, 사용자 명시 허가 필수)
+- CLAUDE.md gate 충족 필요:
+  - patch/minor: audit strict (ASan 240m + TSan 60m, ~5h) + 3h+ monitor + master_logs/v1.0.0/ archival
+  - master_logs 절차: dedicated chore branch → develop merge (cmake bump 금지) → develop → master --no-ff
+- 본 v0.1.28 의 fix 들 (race + precheck + analysis) 이 v1.0.0 진입 가치 검토
 
-### 🟡 운영 데이터 누적 대기
+## 📚 참고 문서
 
-#### 1. monitor.sh threshold tuning
-- 현 기본값: `ALERT_DFPS_LOW_THRESHOLD=100`, `ALERT_DFPS_LOW_STREAK=2`, `ALERT_RSS_MB_THRESHOLD=1100`, `ALERT_WARN_DELTA_PER_CYCLE=500`, `ALERT_WARMUP_CYCLES=4`
-- 운영 1-2주 데이터 누적 후 false-positive 분포 확인 → 재검토
-- 5/28 현재 monitor `v0.1.26_uaf_fix_runtime` label 가동 중 (PID 1656787, 15:04~). 이전 `_postaudit` 은 rebuild 전 binary 추적이라 stop, runtime label 이 새 binary (UAF fix 적용) 기준 추적
+| 문서 | 내용 |
+|---|---|
+| [.DOCS/MONITOR_FINAL_REPORT_v0.1.27_42h_20260530.md](../.DOCS/MONITOR_FINAL_REPORT_v0.1.27_42h_20260530.md) | 41.7h 최종 보고서 — 회귀 미발생 확정 |
+| [.DOCS/Q_DROP_INF_ANALYSIS_v018_v127_20260530.md](../.DOCS/Q_DROP_INF_ANALYSIS_v018_v127_20260530.md) | Step 3 — q_drop_inf counter reset 발견, NOTES §6 정정 |
+| [.DOCS/EOS_STORM_ANALYSIS_v018_v127_20260530.md](../.DOCS/EOS_STORM_ANALYSIS_v018_v127_20260530.md) | Step 4 — EOS storm size cap 차이 (v0.1.18 max 10 / v0.1.27 max 24) |
+| [logs/MONITOR_v0.1.27_24h_NOTES.md](MONITOR_v0.1.27_24h_NOTES.md) | 41h monitor 누적 관찰 (§1-§6) |
+| [.DOCS/THIRDPARTY_VERSION_AUDIT_20260528.md](../.DOCS/THIRDPARTY_VERSION_AUDIT_20260528.md) | 서드파티 7개 버전 감사 + 엔진팀 요청 |
+| [.DOCS/RUNTIME_REGRESSION_DIAGNOSIS_20260528.md](../.DOCS/RUNTIME_REGRESSION_DIAGNOSIS_20260528.md) | 5/28 runtime regression 진단 plan (결론 = 회귀 미발생) |
+| [README.md](../README.md) | 프로젝트 (Version 0.1.28, trim 형식) |
+| [CLAUDE.md](../CLAUDE.md) | 코딩 표준 + git workflow + Build Type Policy |
+| [OPERATIONS.md](../OPERATIONS.md) | 운영 트러블슈팅 |
+| [master_logs/v0.1.18/](../master_logs/v0.1.18/) | v0.1.18 baseline (audit strict + 11.3h monitor) |
 
-#### 2. cam_loss fix path 실효성 검증
-- v0.1.18 TeardownPipeline unref-skip 패치 ([GstRtspReceiver.cpp](../code/Protocol/RTSP_GST/src/GstRtspReceiver.cpp)) 가 사후조치 (defensive workaround)
-- 11.3h 모니터 동안 fix path 자체가 발화 X — 다음 자연 stuck 시 검증
+## 🔧 운영 정보
 
-**Escalation 순서 (stuck 재발 시)**:
-1. Step 1 (현재): 자연 stuck 대기 + monitor + fix path 발화 검증
-2. Step 2: `GST_DEBUG=2,rtspsrc:5,udpsrc:5,rtpsession:5` env var 추가 후 재실행
-3. Step 3: tcpdump packet capture (RTP/RTCP/RTSP)
-4. Step 4 (최후): `37dae37` parent commit (happytimesoft 시점) 빌드 + 동일 환경 A/B test
+### Build Type Policy
+- AI = Debug only (`./detectbase.sh compile` default)
+- Release = 사용자 전용 (`--release` 또는 `CMAKE_BUILD_TYPE=Release`)
+- audit (ASan/UBSan/TSan) 는 Debug 강제
 
-자세한 배경: [.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md](../.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md)
+### NPU 환경 (reboot 후 자동 setup)
+- `/etc/modules-load.d/rknpu.conf` = `rknpu` (boot 시 자동 module load)
+- `/usr/lib/librknnrt.so` = RK3588 Linux aarch64 build (GNU/Linux ELF, md5 `efe7de33...`). source = `/home/claudedev/tmp/rknpu2_v152/runtime/RK3588/Linux/librknn_api/aarch64/librknnrt.so`
+- detectbase.sh `_check_npu_env()` 가 compile/start/restart 진입 시 검사
 
-#### 3. 24일 storm — accept as baseline
-- 정밀 mechanism: INF push mutex contention (40x) + inflight_q drop-oldest → correlation_id mismatch
-- 24h 중 3회 (~10분), self-healing, fix 비용 > 효익
-- 처리 방침: **accept**. 6+ cam scale-up 시 batch>1 도입 검토 (별도)
+### monitor 가동
+- `./logs/monitor.sh <label>` — JSONL: `logs/monitor_<label>.jsonl`
+- threshold: warn≥500/cycle, dfps<100 (2 streak), rss≥1500MB (default 1100), err/wd/ftc/cam_loss
+- DFPS = metric endpoint curl (PR #35), interval = 60s (PR #33)
 
----
-
-### 🟠 scale-up 의사결정 후
-
-#### 4. NPU batch_size 수정 (6+ cam scale-up 시)
-- [YoloV5_Torch_Onnx_RKNN_NPU.cpp:412](../code/Engine/NPU/YoloV5_Torch_Onnx_RKNN_NPU/YoloV5_Torch_Onnx_RKNN_NPU.cpp#L412) 잘못된 batch_size 검증
-- [L512](../code/Engine/NPU/YoloV5_Torch_Onnx_RKNN_NPU/YoloV5_Torch_Onnx_RKNN_NPU.cpp#L512) `input.size = rknn_model_w * rknn_model_h * rknn_model_c` 단일 frame 만 할당
-- 6+ cam scale-up 시 NPU 천장 도달 시 batch>1 검토 + RKNN 모델 batch>1 재변환 필요 (3가지 동시 fix)
-
-#### 5. SafeThread → ThreadPool 전환
-- 현 SafeThread 29건 사용, cam 별 인스턴스 분리 (no pool)
-- 카메라 8~16대 확장 계획 있을 시 검토
-
----
-
-### 🔵 v2.0.0 Multi-engine (~3-4주)
-
-[.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](../.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md) 참고. MAIA event-driven 패턴, NPU 부담 미미 (~2.4 inference/sec).
-
-- Phase 1 — EngineProfile 확장
-- Phase 2 — Search engine ResNet50 RKNN 변환
-- Phase 3 — EngineLoadBalancer 다중 engine type routing
-- Phase 4 — DETECTOR event-driven Search 경로
-- Phase 5 — 운영 메트릭 수집
-
----
-
-### 🟣 v1.0.0 안정화 후
-
-#### 6. GStreamer 1.20.3 → 1.24+ upgrade
-- rtpmanager long-running leak (외부 lib, ~340 MB/year, accepted) 의 fix 가능성 검증
-- 비용: 1.5~2시간 + Ubuntu 22.04 → 24.04 base 변경 + librknnrt ABI 호환 위험 + protobuf/grpc source rebuild
-- 1.24 changelog 에 명확한 본 케이스 fix 단서 없음 → 효과 불확실
-
----
-
-## 운영 metric / monitor
+### audit
+- `./detectbase.sh audit` = light default (ASan 60m + TSan 60m, ~1h 30min, develop/내부 검증)
+- `./detectbase.sh audit --strict` = ASan 240m + TSan 60m (~5h, master merge gate)
+- `ASAN_DURATION_MIN` / `TSAN_DURATION_SEC` env override 우선
 
 ### Prometheus endpoint
 - `http://localhost:9090/metrics`
-- DFPS metric: `detectbase_dfps_total` (gauge), 계산: `total_inferences_in_interval / interval`
-
-### canonical monitor
-- `logs/monitor.sh <label>` — JSONL, 70+ per-cam fields, 1분 단위 + threshold alerts 7종 (`★storm` / `★err` / `★dfps_low` / `★memory` / `★watchdog` / `★ftc` / `★cam_loss`) + warmup grace 4 cycle
-- env override: `ALERT_WARN_DELTA_PER_CYCLE` / `ALERT_DFPS_LOW_THRESHOLD` / `ALERT_DFPS_LOW_STREAK` / `ALERT_RSS_MB_THRESHOLD` / `ALERT_WARMUP_CYCLES`
-
-### audit 강도 모드 (0.1.26 신규)
-- `./detectbase.sh audit` (no flag) = **light** default: ASan 60m + TSan 60m (~1h 30min) — develop/내부/branch 검증
-- `./detectbase.sh audit --strict` = ASan 240m + TSan 60m (~5h) — **master merge gate 의 audit 5종 = strict 강도 필수**
-- `ASAN_DURATION_MIN` / `TSAN_DURATION_SEC` env var override 가능, 강도 모드 default 보다 우선
-- `master_logs/v<version>/` baseline 산출물 = strict 강도 결과
-
-### single-instance lock
-- `/DetectBase/logs/.detectbase.lock` — `flock(2)` advisory lock, Main.cpp 부팅 시 획득
-- 두 번째 instance 시도 시 `[FATAL] another DetectBase instance is running` exit 3
-
-### DEBUG_MODE compile-out (v0.1.20+ PR #28)
-Debug 빌드 (`-DCMAKE_BUILD_TYPE=Debug` 또는 audit 5종) 에서만 활성. Release 빌드에선 preprocessor 제거 → 0 runtime cost.
-
-| 영역 | 위치 |
-|---|---|
-| `DBG_PROF(...)` 매크로 + InfProf/RspProf/EvtProf 100-cycle dump | [RtspDetectorUnit.cpp](../code/Main/DETECTOR/src/RtspDetectorUnit.cpp) |
-| jemalloc mallctl 5회 + `/proc/self/maps` 파싱 | RspProf 안 |
-| event_detected MLOG_INFO | per event |
-| [DFPS] 10초 line | [InferenceCounter.cpp:136](../code/Management/worker/src/InferenceCounter.cpp#L136) |
-| GstRtspReceiver debug/stuck trace metric 6개 | BUS_MSG / RESET_ATTEMPT / LAST_FRAME_AGE_SEC / DEPAY_BUFFER / DECODED / RTP_IN |
-| GstRtspReceiver jitterbuffer 3개 gauge | JB_PUSHED / JB_LOST / JB_RTX_COUNT |
-| DETECTOR [GRPC RECV] + GrpcEventClient [GRPC OK] MLOG_INFO | per call |
-| SioHandler ack response MLOG_INFO | per ack |
-
-### DEBUG VIRTUAL LINES (v0.1.19+ PR #28)
-- `ServerSetting.debug_virtual_lines_enabled` (default false) toggle
-- enable 시 모든 카메라에 schedule 99999 (LineIntrusion) + 99998 (VehicleIntrusion) 강제 주입
-- 사용법: [README.md §14](../README.md)
-
----
-
-## 참고 문서
-
-| 문서 | 내용 |
-|------|------|
-| [README.md](../README.md) | 프로젝트 전체 (Version 0.1.27) |
-| [CLAUDE.md](../CLAUDE.md) | 코딩 표준 + git workflow 정책 (source of truth) |
-| [OPERATIONS.md](../OPERATIONS.md) | 운영 트러블슈팅 |
-| [.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md](../.DOCS/MULTI_ENGINE_DESIGN_v2_0_0.md) | v2.0.0 Search engine 도입 가이드 |
-| [.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md](../.DOCS/UNSTABLE_NETWORK_BEHAVIOR_20260526.md) | cam_loss / GStreamer stuck 분석 (escalation playbook 포함) |
-| [.DOCS/SAFEQUEUE_RACE_REVIEW_20260527.md](../.DOCS/SAFEQUEUE_RACE_REVIEW_20260527.md) | SafeQueue race deep review (v1.0.0 진입 전 점검, 자체 race 0건 확정) |
-| [.backup/mpp_purged_20260526/MPP_PURGE_NOTES.md](../.backup/mpp_purged_20260526/MPP_PURGE_NOTES.md) | MPP + Option A 폐기 결정 + 복원 방법 |
-| [master_logs/v0.1.18/](../master_logs/v0.1.18/) | v0.1.18 archival (audit + monitor JSONL + README) |
+- DFPS: `detectbase_dfps_total` (gauge, 10s 갱신, Release/Debug always-on)
