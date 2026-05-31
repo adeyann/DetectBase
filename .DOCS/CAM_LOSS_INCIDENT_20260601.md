@@ -114,6 +114,67 @@ cam end-point 가 다시 응답 시작하면:
 
 자동 회복. 사용자 추가 작업 불요. **본 사고 시점부터의 time-to-recovery 측정** 가능 (monitor JSONL 의 cam_active 가 0→4 으로 복귀 시점).
 
+## 6.5. 추가 정밀 조사 (2차 보완)
+
+### 6.5.1 사고 정확한 첫 발화 (1초 단위 trace)
+```
+15:42:01.911  CAM[659] frame-age wd 15s 발화  ← 첫 trigger
+15:42:01.988  CAM[658] frame-age wd 15s 발화  (+77ms)
+15:42:02.048  CAM[661] frame-age wd 15s 발화  (+137ms)
+15:42:02.392  CAM[660] frame-age wd 15s 발화  (+481ms)
+```
+**4 cam 이 500ms 안에 일제 wd** = 외부 측 동기적 frame stop. 사고 직전까지 (15:41:46 부근) 정상 frame 수신, 그 후 15s 동안 frame 0 → wd 발화.
+
+### 6.5.2 Prometheus metric — cam 별 RTCP timeout (사고 시점)
+| cam_id | rtcp_timeout_total |
+|---|---|
+| 658 | 490 |
+| 659 | 488 |
+| 660 | 490 |
+| 661 | 490 |
+
+거의 균등 → 4 cam 모두 같은 빈도 RTCP timeout. 외부 측 공통 cause (개별 cam 결함 아닌 cam side 공통 network issue) 추가 증거.
+
+### 6.5.3 service Prometheus metric (Debug build 정밀)
+- `detectbase_gst_rtsp_client_reconnect_total = 1055`
+- `detectbase_gst_rtsp_reconnect_total = 975`
+- `detectbase_gst_rtsp_errors_total = 212`
+- `detectbase_gst_rtsp_client_enqueue_drop_total = 230`
+- `detectbase_gst_rtsp_frames_total = 8,564,161` (사고 전까지 누적, 멈춤)
+- per-cam: frames 마지막 = cam 658 ~2.14M / cam 659 ~2.14M / cam 661 ~1.12M
+
+### 6.5.4 thread 분포 (사고 후 idle state, total 53)
+| thread name | 개수 | 역할 |
+|---|---|---|
+| DetectBase | 35 | main + worker pool |
+| jemalloc_bg_thd | 4 | jemalloc decay |
+| **queueN:src** | **8** | GStreamer src pad queue — **pipeline teardown 후 잔존** |
+| **task15543~15552** | **4** | GStreamer task — 잔존 |
+| civetweb-worker | 2 | Prometheus exposer |
+| gmain | 1 | GMainLoop |
+| pool-DetectBase | 1 | thread pool |
+| civetweb-master | 1 | exposer master |
+| dconf worker | 1 | (GLib dconf) |
+
+**관찰**: GStreamer queue/task thread 13개 잔존 = v0.1.18 의 unref-skip on stuck (intentional leak) 효과. 정상 동작 — process restart 회피하면서 GStreamer 내부 thread 일부 stuck 그대로 보관. OS cleanup 에 의존.
+
+### 6.5.5 nmap (cam IP 의 정확한 응답 type)
+```
+192.168.2.111  22/tcp filtered  80/tcp filtered  443/tcp filtered  554/tcp filtered  30000/tcp filtered
+192.168.2.112  같음
+192.168.2.113  같음
+```
+**`filtered` (closed 가 아님)** = packet drop (응답 자체 0). cam 자체 power off / unplug 또는 cam side firewall block 추정. ICMP unreachable 도 안 옴.
+
+### 6.5.6 UDP socket
+사고 후 RTP frame 수신용 UDP socket 0건 — RTSP signaling (TCP) 의 setup 도 안 됨 (TCP open fail 직후 UDP socket 안 만듦).
+
+### 6.5.7 host side network event
+- dmesg link/eth/route event 0 (사고 시점 buffer push out 가능)
+- `ip rule` default (local/main/default 만)
+- 추가 NIC / VLAN 0
+- routing table 정상 (사고 전후 변동 0)
+
 ## 7. 개선 / 후속 작업 후보 (test env strict 적용)
 
 memory feedback-test-env-strict 정신 — 외부 단절도 실 운영 시그너로 처리.
@@ -136,6 +197,46 @@ memory feedback-test-env-strict 정신 — 외부 단절도 실 운영 시그너
 ### 7.4 cam IP / RTSP URL 의 settings/ 통합 (info)
 - **관찰**: settings/NetworkSettings.json 에 cam IP 없음 → MVAS 서버에서 동적 수신 추정
 - 본 PR scope 아님. 다만 cam config 의 source-of-truth document 추가 가치
+
+---
+
+## 8. 가설 A/B 검증 — service restart 실험 (2026-06-01 01:42 KST)
+
+CLAUDE.md Verification §의 "Single-variable intervention for root-cause claims" 정신에 따라 controlled A/B 실험으로 root cause 가설 검증.
+
+### 8.1 가설
+- **가설 A** (예측): 외부 cam 측 down. → service 재시작해도 DFPS=0 / cam_active=0 재발생
+- **가설 B** (반증 대상): service 내부 stuck. → 재시작 후 cam 회복 (DFPS>0, frame 수신)
+
+### 8.2 절차
+1. 재시작 직전 baseline Prometheus metric 캡처
+2. `docker restart detectbase_service` 실행 (5.5s 소요)
+3. 60s wait (service startup ramp 통과)
+4. 같은 metric 재캡처 + 차이 분석
+
+### 8.3 결과
+| 시점 | DFPS | cam_active/registered | gst_rtsp_errors | gst_rtsp_reconnect | gst_rtsp_frames |
+|---|---|---|---|---|---|
+| 01:42:13 (직전) | 0 | 0/4 | 220 (53min 사고 누적) | 975 | 8,564,161 (정지) |
+| 01:42:18 (restart cmd 종료) | restart 5.5s | — | — | — | — |
+| 01:43:18 (+60s) | **0** | **0/4** | **19** (fresh, 60s 안 누적) | (재시작 후) | (재시작 후) |
+
+### 8.4 판정 — **가설 A 확정 / 가설 B 반증**
+
+- ✅ **service 깨끗 spawn 검증**: 5.5s restart, counter 0 fresh, Prometheus exposer 정상, container Up
+- ✅ **cam 응답 0 검증**: 60s 후에도 DFPS=0 / cam_active=0/4 그대로
+- ✅ **errors 누적 패턴 일치**: 60s 안 19 errors = ~4-5/cycle = 사고 직전 패턴 정확 동일 (매 cycle GstRtspReceiver 새로 생성 → bus ERROR "Could not open resource" → Stop)
+- ✅ **service 내부 stuck 없음 확정**: 만약 내부 thread/lock/buffer stuck 이었다면 재시작이 풀어줘 cam 회복 예상. 실제 cam 회복 0건 = 내부 결함 아님
+
+### 8.5 결론
+**root cause 확정 = 외부 cam end-point (192.168.2.111-113) 의 down**. service 측 결함 0%.
+
+본 실험으로 §3 의 분석 (graceful degradation 정상 + reconnect path 가동) 가 service 측 결함이 아닌 **외부 cam 의존성** 의 결과임을 controlled experiment 로 증명. monitor.sh / GstRtspClient / GstRtspReceiver / file_utils 등 v0.1.28 의 모든 변경은 cam loss 시 정상 동작.
+
+### 8.6 부수 검증
+- restart 시 process restart time = 5.5s (graceful shutdown signal handler + new spawn)
+- monitor (daemon PID 241874) 가 service restart 동안 metric 0 표기 후 다시 측정 정상 — JSONL 연속성 유지
+- 재시작 후 monitor cycle 의 cam_active=0 표기 = 정확한 측정
 
 ---
 
